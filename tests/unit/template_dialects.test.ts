@@ -553,8 +553,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       const res = runCli(["context", cardPath, "--no-callers"]);
 
       expect(res.status).toBe(0);
-      expect(res.stdout).toContain("// ===");
-      expect(res.stdout).toContain("card.twig");
+      expect(res.stdout).not.toContain("1│ ");
       expect(res.stdout).toContain('{% extends "base.twig" %}');
 
       const outlineRes = runCli(["context", cardPath, "--outline-target", "--no-callers"]);
@@ -565,8 +564,7 @@ describe("Step 25: Multi-Language Dialects for Templates (.twig, .html)", () => 
       const profileRes = runCli(["context", profilePath, "--no-callers"]);
 
       expect(profileRes.status).toBe(0);
-      expect(profileRes.stdout).toContain("// ===");
-      expect(profileRes.stdout).toContain("profile.html");
+      expect(profileRes.stdout).not.toContain("1│ ");
       expect(profileRes.stdout).toContain("Alex Johnson");
       const profileOutlineRes = runCli([
         "context",

@@ -145,9 +145,11 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
         arguments: { path: "big_module.ts" },
       })) as any;
       expect(bigInlineRes.isError).toBeFalsy();
+      expect(bigInlineRes.isError).toBeFalsy();
       expect(bigInlineRes.content[0].text).not.toContain("Auto-outlined");
+      expect(bigInlineRes.content[0].text).not.toContain("120│ ");
       expect(bigInlineRes.content[0].text).toContain(
-        "120│ export function fn_119(): number { return 119; }",
+        "export function fn_119(): number { return 119; }",
       );
 
       const hugeLines = Array.from(
@@ -171,9 +173,8 @@ describe("MCP Server (`AiceMcpServer`) & AST Cache Eviction", () => {
       })) as any;
       expect(hugeFullRes.isError).toBeFalsy();
       expect(hugeFullRes.content[0].text).not.toContain("Auto-outlined");
-      expect(hugeFullRes.content[0].text).toContain("1│ export function hugeFn_0");
-      expect(hugeFullRes.content[0].text).toContain("9 KB MCP stdout budget reached");
-
+      expect(hugeFullRes.content[0].text).toContain("export function hugeFn_0");
+      expect(hugeFullRes.content[0].text).toContain("9 KB MCP");
       // 6. MCP aice_splice 'batch' array greenfield create + surgical splice
       const batchRes = (await server.handleRequest(16, "tools/call", {
         name: "aice_splice",

@@ -52,7 +52,11 @@ import {
 import { estimateTokens } from "../tokenomics/index.js";
 import {
   collectNativeSyntaxDiagnostics,
+  EXTENDED_READ_EXTENSIONS,
+  EXTENDED_READ_FILENAMES,
+  extractPassthroughStructuralSymbols,
   generateOutline,
+  isSupportedReadDiskFile,
   type OutlineResult,
   type OutlineSymbol,
 } from "./outline.js";
@@ -171,6 +175,11 @@ export interface ContextOptions {
    * Human interactive terminal mode where stdout is not constrained to budget ceiling.
    */
   unboundedCli?: boolean;
+
+  /**
+   * Internal flag indicating multi-target batch context composition.
+   */
+  _isMultiTarget?: boolean;
 }
 
 export interface DependencyContract {
@@ -275,10 +284,36 @@ export function computeLineRangeBaselineText(
   return merged.map((iv) => rawLines.slice(iv.start - 1, iv.end).join("\n")).join("\n");
 }
 
+export function normalizeGrepBreAlternation(patternBody: string): string {
+  if (!patternBody.includes("\\|")) return patternBody;
+  let hasUnescapedPipe = false;
+  let inCharClass = false;
+  for (let i = 0; i < patternBody.length; i++) {
+    const ch = patternBody[i]!;
+    if (ch === "\\") {
+      i++;
+      continue;
+    }
+    if (ch === "[" && !inCharClass) {
+      inCharClass = true;
+      continue;
+    }
+    if (ch === "]" && inCharClass) {
+      inCharClass = false;
+      continue;
+    }
+    if (ch === "|" && !inCharClass) {
+      hasUnescapedPipe = true;
+      break;
+    }
+  }
+  return hasUnescapedPipe ? patternBody : patternBody.replace(/\\\|/g, "|");
+}
+
 function compileRegexSelectorPredicate(rawSel: string): ((lineText: string) => boolean) | null {
   const m = rawSel.trim().match(/^\/(.+)\/([gimsuy]*)$/);
   if (!m) return null;
-  const patternBody = m[1]!;
+  const patternBody = normalizeGrepBreAlternation(m[1]!);
   const cleanFlags = (m[2] ?? "").replace(/[gy]/g, "");
   try {
     const re = new RegExp(patternBody, cleanFlags);
@@ -291,12 +326,18 @@ function compileRegexSelectorPredicate(rawSel: string): ((lineText: string) => b
   }
 }
 
-/**
- * Computes the honest `rg -n`-equivalent baseline for `:/pattern/` regex reads:
- * `<relPath>:<lineNo>:<lineText>` across matching lines only.
- */
+export interface HonestBaselineFileEntry {
+  relPath: string;
+  rawSource: string;
+}
+
+interface LineSpanWindow {
+  s: number;
+  e: number;
+}
+
 export function computeRegexBaselineText(
-  files: ReadonlyArray<{ relPath: string; rawSource: string }>,
+  files: readonly HonestBaselineFileEntry[],
   symbolSelector: string,
 ): string {
   const predicates: Array<(lineText: string) => boolean> = [];
@@ -323,32 +364,259 @@ export function computeRegexBaselineText(
   return matchedLines.join("\n");
 }
 
-/**
- * Unified honest native baseline calculator for single-file and directory reads.
- */
-export function computeHonestReadBaselineText(params: {
+export function computeRegexContextBaselineText(
+  files: readonly HonestBaselineFileEntry[],
+  symbolSelector: string,
+  contextRadius = 2,
+): string {
+  const predicates: Array<(lineText: string) => boolean> = [];
+  for (const sel of splitSymbolSelectors(symbolSelector)) {
+    const pred = compileRegexSelectorPredicate(sel);
+    if (pred) predicates.push(pred);
+  }
+  if (predicates.length === 0) return "";
+
+  const blocks: string[] = [];
+  const r = Math.max(0, Math.floor(contextRadius));
+  for (const fileEntry of files) {
+    if (!fileEntry.rawSource) continue;
+    const lines = fileEntry.rawSource.split(/\r?\n/);
+    const hits = new Set<number>();
+    for (let i = 0; i < lines.length; i++) {
+      if (predicates.some((checkLine) => checkLine(lines[i]!))) {
+        hits.add(i + 1);
+      }
+    }
+    if (hits.size === 0) continue;
+    const sortedHits = Array.from(hits).sort((a, b) => a - b);
+    const windows: LineSpanWindow[] = [];
+    for (const h of sortedHits) {
+      const s = Math.max(1, h - r);
+      const e = Math.min(lines.length, h + r);
+      const prev = windows[windows.length - 1];
+      if (prev && s <= prev.e + 1) {
+        prev.e = Math.max(prev.e, e);
+      } else {
+        windows.push({ s, e });
+      }
+    }
+    const prefix = fileEntry.relPath ? fileEntry.relPath : "file";
+    const fileOut: string[] = [];
+    for (let wIdx = 0; wIdx < windows.length; wIdx++) {
+      if (wIdx > 0) fileOut.push("--");
+      const w = windows[wIdx]!;
+      for (let lnNo = w.s; lnNo <= w.e; lnNo++) {
+        const sep = hits.has(lnNo) ? ":" : "-";
+        fileOut.push(`${prefix}${sep}${lnNo}${sep}${lines[lnNo - 1] ?? ""}`);
+      }
+    }
+    blocks.push(fileOut.join("\n"));
+  }
+  return blocks.join("\n--\n");
+}
+
+interface SurgicalWindowResult {
+  sliceText: string;
+  startLine: number;
+  endLine: number;
+}
+
+function computeSymbolSurgicalWindowText(
+  rawSource: string,
+  symbolSelector: string,
+  windowLines = 120,
+): SurgicalWindowResult {
+  const rawLines = rawSource.split(/\r?\n/);
+  const totalLines = Math.max(1, rawLines.length);
+  if (totalLines <= windowLines) {
+    return { sliceText: rawSource, startLine: 1, endLine: totalLines };
+  }
+  const firstSym = splitSymbolSelectors(symbolSelector)[0]?.trim() ?? symbolSelector.trim();
+  const shortSym = firstSym.split(/\.|::|@/)[0]?.trim() || firstSym;
+  const memberSym = firstSym.includes(".")
+    ? (firstSym.split(".").pop()?.split("@")[0]?.trim() ?? shortSym)
+    : shortSym;
+  const esc = memberSym.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  let hitIdx = -1;
+  if (esc) {
+    const declRe = new RegExp(
+      `(?:function|def|func|fun|class|interface|type|const|let|var|public|private|protected)\\s+.*\\b${esc}\\b`,
+    );
+    hitIdx = rawLines.findIndex((l) => declRe.test(l));
+    if (hitIdx < 0) {
+      const wordRe = new RegExp(`\\b${esc}\\b`);
+      hitIdx = rawLines.findIndex((l) => wordRe.test(l));
+    }
+  }
+  const anchorLine = hitIdx >= 0 ? hitIdx + 1 : 1;
+  const startLine = Math.max(1, Math.min(totalLines - windowLines + 1, anchorLine - 10));
+  const endLine = Math.min(totalLines, startLine + windowLines - 1);
+  return {
+    sliceText: rawLines.slice(startLine - 1, endLine).join("\n"),
+    startLine,
+    endLine,
+  };
+}
+
+export interface HonestReadBaselineParams {
   rawSource?: string;
   relPath?: string;
-  workspaceFiles?: ReadonlyArray<{ relPath: string; rawSource: string }>;
+  projectRoot?: string;
+  workspaceFiles?: readonly HonestBaselineFileEntry[];
   symbolSelector?: string;
-}): string {
+  mode?: "file" | "slice" | "search" | "files" | "outline-file" | "outline-dir" | "workspace";
+  filePaths?: readonly string[];
+  matchedPaths?: readonly string[];
+  filesWithMatches?: boolean;
+  maxDepth?: number;
+  filePattern?: string;
+  includeToolWrapper?: boolean;
+}
+
+function numberReadFileLines(rawText: string, startLine = 1): string {
+  const lines = rawText.split(/\r?\n/);
+  return lines.map((ln, idx) => `${startLine + idx}: ${ln}`).join("\n");
+}
+
+function collectRealisticFdEntries(
+  rootDir: string,
+  maxDepth?: number,
+  filePattern?: string,
+): string[] {
+  const results: string[] = [];
+  const patLower = filePattern?.toLowerCase().replace(/^\*+/, "");
+  const walk = (dirAbs: string, depth: number): void => {
+    if (maxDepth !== undefined && depth > maxDepth) return;
+    let ents: fs.Dirent[];
+    try {
+      ents = fs.readdirSync(dirAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of ents) {
+      if (ent.name === ".git" || ent.name === "node_modules") continue;
+      const childAbs = path.join(dirAbs, ent.name);
+      const rel = path.relative(rootDir, childAbs).replace(/\\/g, "/");
+      if (ent.isDirectory()) {
+        if (!patLower || rel.toLowerCase().includes(patLower)) {
+          results.push(`${rel}/`);
+        }
+        walk(childAbs, depth + 1);
+      } else if (ent.isFile()) {
+        if (!patLower || rel.toLowerCase().includes(patLower)) {
+          results.push(rel);
+        }
+      }
+    }
+  };
+  walk(rootDir, 1);
+  return results.sort();
+}
+
+export function computeHonestReadBaselineText(params: HonestReadBaselineParams): string {
   const sym = params.symbolSelector?.trim();
-  if (sym && isPureLineRangeSymbolString(sym)) {
-    return computeLineRangeBaselineText(params.rawSource ?? "", sym, 10);
+  const wrap = Boolean(params.includeToolWrapper);
+  const safePath = params.relPath?.trim() || "file";
+
+  if (params.mode === "files") {
+    const list = params.filePaths ?? [];
+    let fdEntries: string[];
+    if (params.projectRoot && fs.existsSync(params.projectRoot)) {
+      fdEntries = collectRealisticFdEntries(
+        params.projectRoot,
+        params.maxDepth,
+        params.filePattern,
+      );
+    } else {
+      const dirs = new Set<string>();
+      for (const p of list) {
+        const parts = p.split("/");
+        for (let i = 1; i < parts.length; i++) {
+          dirs.add(`${parts.slice(0, i).join("/")}/`);
+        }
+      }
+      fdEntries = [...Array.from(dirs).sort(), ...list];
+    }
+    const fdBody = fdEntries.join("\n");
+    if (!wrap) return fdBody;
+    const depthArg = params.maxDepth !== undefined ? ` -d ${params.maxDepth}` : "";
+    const patArg = params.filePattern ? ` "${params.filePattern}"` : "";
+    return `${JSON.stringify({ CommandLine: `fd${depthArg}${patArg} ${safePath}`, WaitMsBeforeAsync: 5000, toolSummary: "Find workspace files" })}\nCommand exited with code 0.\n\nCommand output:\n${fdBody}`;
   }
-  if (sym && isPureRegexSymbolString(sym)) {
+
+  if (params.filesWithMatches) {
+    const body = (params.matchedPaths ?? []).join("\n");
+    if (!wrap) return body;
+    return `${JSON.stringify({ CommandLine: `rg -l "${sym ?? ""}" ${safePath}`, WaitMsBeforeAsync: 5000, toolSummary: "Search matching files" })}\nCommand exited with code 0.\n\nCommand output:\n${body}`;
+  }
+
+  if ((sym && isPureRegexSymbolString(sym)) || params.mode === "search") {
     const fileList = params.workspaceFiles ?? [
       { relPath: params.relPath ?? "", rawSource: params.rawSource ?? "" },
     ];
-    return computeRegexBaselineText(fileList, sym);
+    const rgBody = computeRegexContextBaselineText(fileList, sym ?? "//", 2);
+    if (!wrap) {
+      return rgBody;
+    }
+    return `${JSON.stringify({ CommandLine: `rg -n -C 2 "${sym ?? ""}" ${safePath}`, WaitMsBeforeAsync: 5000, toolSummary: "Search pattern in codebase" })}\nCommand exited with code 0.\n\nCommand output:\n${rgBody || "(no matches)"}`;
   }
-  if (params.workspaceFiles) {
-    return params.workspaceFiles
-      .map((entry) => entry.rawSource)
-      .filter(Boolean)
-      .join("\n\n");
+
+  if (sym && isPureLineRangeSymbolString(sym)) {
+    const raw = params.rawSource ?? "";
+    const sliceBody = computeLineRangeBaselineText(raw, sym, 10);
+    const rawLinesCount = Math.max(1, countContextLines(raw));
+    const m = sym.match(/L?(\d+)(?:-L?(\d+))?/i);
+    const sL = m?.[1] ? Math.max(1, Number.parseInt(m[1], 10) - 10) : 1;
+    const eL = m?.[2]
+      ? Math.min(rawLinesCount, Number.parseInt(m[2], 10) + 10)
+      : Math.min(rawLinesCount, sL + 20);
+    const pureSliceStdout = `Showing lines ${sL}-${eL} of ${rawLinesCount}\n${numberReadFileLines(sliceBody, sL)}`;
+    if (!wrap) {
+      return estimateTokens(pureSliceStdout, "cl100k_base") <= estimateTokens(raw, "cl100k_base")
+        ? pureSliceStdout
+        : raw;
+    }
+    const fullWrapped = `${JSON.stringify({ Path: safePath })}\nShowing lines 1-${rawLinesCount} of ${rawLinesCount}\n${numberReadFileLines(raw, 1)}`;
+    const sliceWrapped = `${JSON.stringify({ Path: safePath, StartLine: sL, EndLine: eL })}\n${pureSliceStdout}`;
+    return sliceWrapped.length <= fullWrapped.length ? sliceWrapped : fullWrapped;
   }
-  return params.rawSource ?? "";
+
+  if (sym && sym !== "*" && sym.toLowerCase() !== "outline" && params.rawSource !== undefined) {
+    const raw = params.rawSource;
+    const rawLinesCount = Math.max(1, countContextLines(raw));
+    const win = computeSymbolSurgicalWindowText(raw, sym, 120);
+    const pureSymStdout = `Showing lines ${win.startLine}-${win.endLine} of ${rawLinesCount}\n${numberReadFileLines(win.sliceText, win.startLine)}`;
+    if (!wrap) {
+      return estimateTokens(pureSymStdout, "cl100k_base") <= estimateTokens(raw, "cl100k_base")
+        ? pureSymStdout
+        : raw;
+    }
+    const fullWrapped = `${JSON.stringify({ Path: safePath })}\nShowing lines 1-${rawLinesCount} of ${rawLinesCount}\n${numberReadFileLines(raw, 1)}`;
+    const rgLocate = `${JSON.stringify({ CommandLine: `rg -n "${sym}" ${safePath}`, WaitMsBeforeAsync: 5000 })}\n`;
+    const sliceWrapped = `${rgLocate}${JSON.stringify({ Path: safePath, StartLine: win.startLine, EndLine: win.endLine })}\n${pureSymStdout}`;
+    return sliceWrapped.length <= fullWrapped.length ? sliceWrapped : fullWrapped;
+  }
+
+  if (
+    params.mode === "outline-dir" ||
+    params.mode === "workspace" ||
+    params.workspaceFiles !== undefined
+  ) {
+    const entries = params.workspaceFiles ?? [];
+    const fdPaths = entries.map((e) => e.relPath).filter(Boolean);
+    const sampled = entries.slice(0, 12).map((e) => {
+      const head = e.rawSource.split(/\r?\n/).slice(0, 25).join("\n");
+      return `// ${e.relPath}\n${numberReadFileLines(head, 1)}`;
+    });
+    const combined = [...fdPaths, ...sampled].join("\n");
+    if (!wrap) return combined;
+    return `${JSON.stringify({ CommandLine: `fd && rg -n "^(export|pub|class|def|interface|function)" ${safePath}`, WaitMsBeforeAsync: 5000 })}\n${combined}`;
+  }
+
+  const raw = params.rawSource ?? "";
+  if (!wrap) return raw;
+  const totalL = Math.max(1, countContextLines(raw));
+  return `${JSON.stringify({ Path: safePath })}\nShowing lines 1-${totalL} of ${totalL}\n${numberReadFileLines(raw, 1)}`;
 }
 
 function isExternalSpecifier(specifier: string): boolean {
@@ -361,22 +629,25 @@ function isExternalSpecifier(specifier: string): boolean {
   ) {
     return false;
   }
-  if (path.isAbsolute(specifier)) {
-    return false;
-  }
   return true;
 }
 
 function formatDisplayPath(filePath: string, projectRoot: string): string {
   const rel = path.relative(projectRoot, filePath);
+  if (rel === "") {
+    return ".";
+  }
   if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
-    return rel;
+    return rel.replace(/\\/g, "/");
   }
   const relCwd = path.relative(process.cwd(), filePath);
-  if (!relCwd.startsWith("..") && !path.isAbsolute(relCwd)) {
-    return relCwd;
+  if (relCwd === "") {
+    return ".";
   }
-  return filePath;
+  if (!relCwd.startsWith("..") && !path.isAbsolute(relCwd)) {
+    return relCwd.replace(/\\/g, "/");
+  }
+  return filePath.replace(/\\/g, "/");
 }
 
 function probeCandidatePath(candidateBase: string, includeAiplMod = false): string | undefined {
@@ -1579,6 +1850,78 @@ function scanWorkspaceCallers(
   return callers;
 }
 
+export function formatCompactBareFileSource(
+  rawSource: string,
+  displayTargetPath: string,
+  opts?: { isMultiTarget?: boolean; full?: boolean },
+): string {
+  if (rawSource.length === 0) {
+    return opts?.isMultiTarget ? `// ${displayTargetPath}:1-0` : "";
+  }
+  const hasTrailingNewline = rawSource.endsWith("\n");
+  const clean = rawSource.replace(/\r?\n$/, "");
+  const rawLines = clean.split(/\r?\n/);
+  const totalLines = rawLines.length;
+
+  let startIdx = 0;
+  const firstTrim = rawLines[0]?.trim() ?? "";
+  if (firstTrim.startsWith("/**") || firstTrim.startsWith("/*")) {
+    let closeIdx = -1;
+    for (let i = 0; i < Math.min(rawLines.length, 18); i++) {
+      if (rawLines[i]!.includes("*/")) {
+        closeIdx = i;
+        break;
+      }
+    }
+    if (
+      closeIdx >= 0 &&
+      rawLines
+        .slice(0, closeIdx + 1)
+        .some((l) => /@license|SPDX-License-Identifier|Copyright \(c\)/i.test(l))
+    ) {
+      startIdx = closeIdx + 1;
+      while (startIdx < rawLines.length && rawLines[startIdx]!.trim() === "") {
+        startIdx++;
+      }
+    }
+  }
+
+  const keptLines: string[] = [];
+  let needsResumeLineNum = false;
+  let skippedInterior = false;
+  for (let i = startIdx; i < rawLines.length; i++) {
+    const ln = rawLines[i]!;
+    if (isDecorativeDividerComment(ln.trim())) {
+      needsResumeLineNum = true;
+      skippedInterior = true;
+      continue;
+    }
+    if (needsResumeLineNum) {
+      keptLines.push(`${i + 1}: ${ln}`);
+      needsResumeLineNum = false;
+    } else {
+      keptLines.push(ln);
+    }
+  }
+  const keptStartLine = Math.min(totalLines, startIdx + 1);
+  const body = keptLines.join("\n");
+  const header = `// ${displayTargetPath}:${keptStartLine}-${totalLines}`;
+  const withHeader = body ? `${header}\n${body}` : header;
+
+  if (opts?.isMultiTarget || opts?.full || totalLines > 120) {
+    return `// @preformatted\n${withHeader}`;
+  }
+
+  const rawBaseline = hasTrailingNewline ? rawSource : `${rawSource}\n`;
+  if (estimateTokens(withHeader, "cl100k_base") <= estimateTokens(rawBaseline, "cl100k_base")) {
+    return `// @preformatted\n${withHeader}`;
+  }
+  if (keptStartLine > 1 || skippedInterior) {
+    return `// @preformatted\n${rawLines.join("\n")}`;
+  }
+  return `// @preformatted\n${body}`;
+}
+
 function formatBundle(
   displayTargetPath: string,
   targetBody: string,
@@ -1586,7 +1929,7 @@ function formatBundle(
   callers: CallerSummary[],
   idioms?: Record<string, ProjectIdiomDefinition>,
   nativeDiagnostics?: string,
-  options?: { minimalEnvelope?: boolean; symbolSelector?: string },
+  options?: { minimalEnvelope?: boolean; symbolSelector?: string; compactMode?: boolean },
 ): string {
   const isNonAstTarget = /\.(?:ya?ml|cff|jsonc?|md|markdown|sh|bash|zsh|ps1|cmd|bat)$/i.test(
     displayTargetPath,
@@ -1601,6 +1944,20 @@ function formatBundle(
     idioms && Object.keys(idioms).length > 0 && (!isNonAstTarget || bundleUsesIdioms),
   );
 
+  let effectiveBody = targetBody;
+  let preformattedBody = false;
+  let resolvedSpanSuffix: string | undefined;
+  if (effectiveBody.startsWith("// @preformatted\n")) {
+    effectiveBody = effectiveBody.slice("// @preformatted\n".length);
+    preformattedBody = true;
+  } else if (effectiveBody.startsWith("// @span:")) {
+    const nlIdx = effectiveBody.indexOf("\n");
+    if (nlIdx > 0) {
+      resolvedSpanSuffix = effectiveBody.slice("// @span:".length, nlIdx).trim();
+      effectiveBody = effectiveBody.slice(nlIdx + 1);
+    }
+  }
+
   if (options?.minimalEnvelope && dependencies.length === 0 && callers.length === 0) {
     const rawSym = options.symbolSelector?.trim();
     const includeSymSuffix = Boolean(
@@ -1609,13 +1966,34 @@ function formatBundle(
         !isPureLineRangeSymbolString(rawSym) &&
         !isPureRegexSymbolString(rawSym),
     );
-    const headerTarget = includeSymSuffix ? `${displayTargetPath}:${rawSym}` : displayTargetPath;
-    const requestedSymbols = rawSym ? splitSymbolSelectors(rawSym) : [];
-    const minLines: string[] =
-      targetBody.startsWith("// === ") && requestedSymbols.length <= 1
-        ? []
-        : [`// === ${headerTarget} ===`];
-    if (shouldEmitIdioms && idioms && !targetBody.includes("# @idioms available:")) {
+    const useCompact = Boolean(options.compactMode);
+    const minLines: string[] = [];
+    if (!preformattedBody) {
+      if (useCompact) {
+        if (
+          !effectiveBody.startsWith("// ") ||
+          (!effectiveBody.startsWith(`// ${displayTargetPath}`) &&
+            !effectiveBody.startsWith("// Hint:") &&
+            !effectiveBody.startsWith("// 0 matches"))
+        ) {
+          const suffix = resolvedSpanSuffix
+            ? `:${resolvedSpanSuffix}`
+            : includeSymSuffix
+              ? `:${rawSym}`
+              : "";
+          minLines.push(`// ${displayTargetPath}${suffix}`);
+        }
+      } else {
+        const headerTarget = includeSymSuffix
+          ? `${displayTargetPath}:${rawSym}`
+          : displayTargetPath;
+        const requestedSymbols = rawSym ? splitSymbolSelectors(rawSym) : [];
+        if (!(effectiveBody.startsWith("// === ") && requestedSymbols.length <= 1)) {
+          minLines.push(`// === ${headerTarget} ===`);
+        }
+      }
+    }
+    if (shouldEmitIdioms && idioms && !effectiveBody.includes("# @idioms available:")) {
       const idiomNames = Object.entries(idioms)
         .map(([name, def]) => {
           const normName = name.startsWith("$") ? name : `$${name}`;
@@ -1627,7 +2005,7 @@ function formatBundle(
         minLines.push(`# @idioms available: ${idiomNames}`);
       }
     }
-    minLines.push(targetBody);
+    minLines.push(effectiveBody);
     if (shouldEmitIdioms && idioms) {
       minLines.push("");
       minLines.push(formatIdiomsMarkdownSection(idioms));
@@ -1638,6 +2016,7 @@ function formatBundle(
     }
     return minLines.join("\n");
   }
+  targetBody = effectiveBody;
 
   const lines: string[] = [];
 
@@ -1926,6 +2305,7 @@ function compactPureAiceSlice(src: string): string {
 export function scanDirectoryForTargets(dir: string, maxDepth = 5): string[] {
   const discovered: string[] = [];
   const absRoot = path.resolve(dir);
+  const rootInNodeModules = absRoot.split(path.sep).includes("node_modules");
   const visitedDirs = new Set<string>();
   const ignoredDirs = new Set([
     "node_modules",
@@ -1933,26 +2313,15 @@ export function scanDirectoryForTargets(dir: string, maxDepth = 5): string[] {
     "dist",
     "build",
     ".aice-build",
+    ".aice-cache",
     ".agents",
     ".next",
     ".turbo",
     "coverage",
     "target",
     "vendor",
+    "__pycache__",
   ]);
-  const ignoredFiles = new Set([
-    "aice.config.json",
-    "package.json",
-    "tsconfig.json",
-    "jsconfig.json",
-    "biome.json",
-    "rome.json",
-    "AGENTS.md",
-    "CLAUDE.md",
-    "GEMINI.md",
-    ".GEMINI.md",
-  ]);
-  const allTargetExts = Array.from(KNOWN_TARGET_EXTENSIONS);
 
   const walk = (currentDir: string, depth: number): void => {
     if (depth > maxDepth) return;
@@ -1973,9 +2342,7 @@ export function scanDirectoryForTargets(dir: string, maxDepth = 5): string[] {
     }
 
     for (const entry of entries) {
-      if (entry.name.startsWith(".") && entry.name !== "." && entry.name !== "..") {
-        continue;
-      }
+      if (entry.name === "." || entry.name === "..") continue;
       const fullPath = path.join(currentDir, entry.name);
       let isDir = entry.isDirectory();
       let isFile = entry.isFile();
@@ -1989,19 +2356,20 @@ export function scanDirectoryForTargets(dir: string, maxDepth = 5): string[] {
         }
       }
       if (isDir) {
-        if (ignoredDirs.has(entry.name)) continue;
-        walk(fullPath, depth + 1);
-      } else if (isFile) {
-        if (entry.name.endsWith(".trivia.json") || ignoredFiles.has(entry.name)) {
+        if (entry.name === ".git") continue;
+        if (entry.name.startsWith(".") && entry.name !== ".github") continue;
+        if (
+          ignoredDirs.has(entry.name) &&
+          !(
+            rootInNodeModules &&
+            (entry.name === "dist" || entry.name === "build" || entry.name === "out")
+          )
+        ) {
           continue;
         }
-        const lowerName = entry.name.toLowerCase();
-        const ext = path.extname(lowerName);
-        if (
-          lowerName.endsWith(".aice") ||
-          (ext && KNOWN_TARGET_EXTENSIONS.has(ext)) ||
-          allTargetExts.some((knownExt) => lowerName.endsWith(knownExt))
-        ) {
+        walk(fullPath, depth + 1);
+      } else if (isFile) {
+        if (isSupportedReadDiskFile(fullPath)) {
           discovered.push(fullPath);
         }
       }
@@ -2218,10 +2586,11 @@ export async function generateWorkspaceContext(
               isExplicitTestSearch,
               full: options.full,
               dsl: options.dsl,
+              compactGrouped: effectiveWsRawNative,
             },
           );
           if (detailed) {
-            matchedSlices.push(detailed.formattedText.trim());
+            matchedSlices.push(detailed.formattedText.trimEnd());
             if (detailed.maxScore > fileMaxScore) {
               fileMaxScore = detailed.maxScore;
             }
@@ -2232,18 +2601,36 @@ export async function generateWorkspaceContext(
             const cleanLines = (
               rawFileContent.length > 0 ? rawFileContent.replace(/\r?\n$/, "") : ""
             ).split(/\r?\n/);
-            const previewCount = Math.min(5, cleanLines.length);
-            const previewLines = cleanLines
-              .slice(0, previewCount)
-              .map((l, idx) => `${idx + 1}│ ${l}`)
-              .join("\n");
+            const previewCount = Math.min(effectiveWsRawNative ? 3 : 5, cleanLines.length);
+            const previewLines = effectiveWsRawNative
+              ? cleanLines
+                  .slice(0, previewCount)
+                  .map((l, idx) => `  L${idx + 1}: ${l}`)
+                  .join("\n")
+              : cleanLines
+                  .slice(0, previewCount)
+                  .map((l, idx) => `${idx + 1}│ ${l}`)
+                  .join("\n");
             matchedSlices.push(
-              `// file name match: ${path.basename(f)} # [L1-L${Math.max(1, previewCount)}]\n${previewLines}`,
+              effectiveWsRawNative
+                ? previewLines
+                : `// file name match: ${path.basename(f)} # [L1-L${Math.max(1, previewCount)}]\n${previewLines}`,
             );
             fileMaxScore = isMockOrTest ? 25 : 1000;
           } else {
             continue;
           }
+        }
+        if (effectiveWsRawNative) {
+          scoredFileSlices.push({
+            relFile,
+            absFile: f,
+            rawFileContent,
+            headerTag: "",
+            sliceBody: matchedSlices.filter(Boolean).join("\n"),
+            score: fileMaxScore,
+          });
+          continue;
         }
         const annotateMatchHeader = (sl: string): string =>
           sl.replace(/^\/\/ match at \[([^\]]+)\]/gm, (_full, bracketBody: string) => {
@@ -2558,19 +2945,22 @@ export async function generateWorkspaceContext(
     const softNarrowThreshold =
       searchByteBudget !== undefined ? Math.floor(searchByteBudget * 0.65) : undefined;
     const hardSliceCap =
-      searchByteBudget !== undefined ? Math.max(1024, searchByteBudget - 512) : undefined;
+      searchByteBudget !== undefined ? Math.max(1024, searchByteBudget - 220) : undefined;
     let runningSearchBytes = 0;
     const omittedSearchFiles: string[] = [];
 
     const buildFormattedEntry = (relFile: string, headerTag: string, body: string): string =>
       !hasExplicitWsEnvelopeOptIn
-        ? `// === ${relFile} ===\n${body}`
+        ? effectiveWsRawNative
+          ? `${relFile}:\n${body}`
+          : `// === ${relFile} ===\n${body}`
         : `### ${relFile}${headerTag}\n\`\`\`aice\n${body}\n\`\`\``;
 
     for (let idx = 0; idx < scoredFileSlices.length; idx++) {
       const item = scoredFileSlices[idx]!;
       let chosenBody = item.sliceBody;
       if (
+        !effectiveWsRawNative &&
         softNarrowThreshold !== undefined &&
         options.contextLines === undefined &&
         idx > 0 &&
@@ -2605,8 +2995,8 @@ export async function generateWorkspaceContext(
       }
 
       const formattedEntry = buildFormattedEntry(item.relFile, item.headerTag, chosenBody);
-      const entryBytes =
-        Buffer.byteLength(formattedEntry, "utf-8") + (symbolSlices.length > 0 ? 2 : 0);
+      const sepLen = symbolSlices.length > 0 ? (effectiveWsRawNative ? 1 : 2) : 0;
+      const entryBytes = Buffer.byteLength(formattedEntry, "utf-8") + sepLen;
       if (
         hardSliceCap !== undefined &&
         symbolSlices.length > 0 &&
@@ -2621,15 +3011,9 @@ export async function generateWorkspaceContext(
 
     if (omittedSearchFiles.length > 0) {
       const primarySel = requestedSelectors[0]?.trim() ?? "/pattern/";
-      const nextHints = omittedSearchFiles
-        .slice(0, 3)
-        .map((rf) => `aice read ${rf}:${primarySel}`)
-        .join(" | ");
-      const isCliSearchBudget = searchByteBudget !== undefined && searchByteBudget <= 10_240;
-      const searchBudgetLabel = isCliSearchBudget ? "9 KB CLI" : "28 KB";
-      const fullHint = isCliSearchBudget ? "" : " (or pass --full)";
+      const nextTarget = omittedSearchFiles[0] ?? ".";
       symbolSlices.push(
-        `// ... (+${omittedSearchFiles.length} more matching files omitted to fit ${searchBudgetLabel} stdout budget)\n// Next slices: ${nextHints}${fullHint}`,
+        `// +${omittedSearchFiles.length} more files — next: aice read '${nextTarget}:${primarySel}'`,
       );
     }
   }
@@ -2713,10 +3097,13 @@ export async function generateWorkspaceContext(
   const parts: string[] = [];
   if (isPureRegexSearch && !hasExplicitWsEnvelopeOptIn) {
     if (symbolSlices.length > 0) {
-      parts.push(symbolSlices.join("\n\n"));
+      parts.push(symbolSlices.join(effectiveWsRawNative ? "\n" : "\n\n"));
     } else {
+      const safeDisp = displayTargetPath || ".";
       parts.push(
-        `// === ${displayTargetPath} ===\n// Pattern '${options.symbol ?? ""}' had 0 matches in ${displayTargetPath}`,
+        effectiveWsRawNative
+          ? `// 0 matches for '${options.symbol ?? ""}' in ${safeDisp}`
+          : `// === ${safeDisp} ===\n// Pattern '${options.symbol ?? ""}' had 0 matches in ${safeDisp}`,
       );
     }
   } else if (isPureRegexSearch && hasExplicitWsEnvelopeOptIn) {
@@ -2874,17 +3261,27 @@ export async function generateWorkspaceContext(
 
   if (rawWorkspaceTexts.length > 0 || isPureRegexSearch) {
     const wsBaselineText = computeHonestReadBaselineText({
+      relPath: displayTargetPath || ".",
       workspaceFiles: workspaceBaselineEntries,
       symbolSelector: isPureRegexSearch ? options.symbol : undefined,
+      mode: isPureRegexSearch ? "search" : "workspace",
+      includeToolWrapper: false,
     });
+    const rawWsText = workspaceBaselineEntries.map((e) => e.rawSource).join("\n");
+    const wsRealCl100k = estimateTokens(wsBaselineText, "cl100k_base");
+    const wsRawCl100k = Math.max(wsRealCl100k, estimateTokens(rawWsText, "cl100k_base"));
     recordTelemetryEvent({
       targetPath: resolved.resolvedPath,
       projectRoot,
       operation: "context",
-      surface: "cli",
+      surface: options.surface ?? "cli",
       idiomsUsed: Boolean(activeIdioms && Object.keys(activeIdioms).length > 0),
-      nativeText: wsBaselineText,
+      isSearchMode: isPureRegexSearch,
+      nativeText: rawWsText,
+      nativeChars: Math.max(wsBaselineText.length, rawWsText.length),
+      nativeCl100k: wsRawCl100k,
       realisticNativeText: wsBaselineText,
+      realisticNativeCl100k: Math.min(wsRawCl100k, wsRealCl100k),
       aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,
     });
   }
@@ -3000,6 +3397,7 @@ export interface PatternMatchRankingOptions {
   isExplicitTestSearch?: boolean;
   full?: boolean;
   dsl?: boolean;
+  compactGrouped?: boolean;
 }
 
 const QUERY_KEYWORD_STOPWORDS = new Set([
@@ -3452,7 +3850,7 @@ export function extractPatternMatchesDetailed(
   let queryKeyword: string | undefined;
 
   if (regexMatch) {
-    const rawBody = regexMatch[1]!;
+    const rawBody = normalizeGrepBreAlternation(regexMatch[1]!);
     if (hasCatastrophicNestedQuantifiers(rawBody)) {
       throw new Error(`Unsafe or overly complex regex selector '${trimmed}'`);
     }
@@ -3631,6 +4029,36 @@ export function extractPatternMatchesDetailed(
     .slice(0, 25)
     .sort((a, b) => a.start - b.start);
 
+  if (rankingOpts?.compactGrouped) {
+    const radius = contextRadius !== undefined ? Math.max(0, Math.floor(contextRadius)) : 0;
+    const mergedCompact: LineSpanWindow[] = [];
+    for (const h of hitLines) {
+      const s = Math.max(1, h - radius);
+      const e = Math.min(lines.length, h + radius);
+      const last = mergedCompact[mergedCompact.length - 1];
+      if (last && s <= last.e + 1) {
+        last.e = Math.max(last.e, e);
+      } else {
+        mergedCompact.push({ s, e });
+      }
+    }
+    const outLines: string[] = [];
+    const cappedCompact = mergedCompact.slice(0, 40);
+    for (let idx = 0; idx < cappedCompact.length; idx++) {
+      if (idx > 0 && radius > 0) {
+        outLines.push("  ..");
+      }
+      const cw = cappedCompact[idx]!;
+      for (let ln = cw.s; ln <= cw.e; ln++) {
+        outLines.push(`  L${ln}: ${lines[ln - 1] ?? ""}`);
+      }
+    }
+    if (mergedCompact.length > cappedCompact.length) {
+      outLines.push(`  .. (+${mergedCompact.length - cappedCompact.length} more hits)`);
+    }
+    return { formattedText: outLines.join("\n"), maxScore };
+  }
+
   const formattedText = topWindows
     .map((w) => {
       const hitDesc = w.hits.map((h) => `L${h}`).join(", ");
@@ -3647,7 +4075,7 @@ export function extractPatternMatchesDetailed(
             );
           }
           for (let l = sub.start; l <= sub.end; l++) {
-            bodyParts.push(`${l}│ ${lines[l - 1]}`);
+            bodyParts.push(`${l}: ${lines[l - 1]}`);
           }
         }
         const lastEnd = w.focusSubWindows[w.focusSubWindows.length - 1]!.end;
@@ -3663,7 +4091,7 @@ export function extractPatternMatchesDetailed(
       }
       const body = lines
         .slice(w.start - 1, w.end)
-        .map((text, idx) => `${w.start + idx}│ ${text}`)
+        .map((text, idx) => `${w.start + idx}: ${text}`)
         .join("\n");
       return `// match at [${hitDesc}] # [L${w.start}-L${w.end}]\n${body}`;
     })
@@ -3686,7 +4114,7 @@ function formatDiskSourceWithLineNumbers(rawText: string, startLine = 1): string
   if (rawText.length === 0) return "";
   const clean = rawText.replace(/\r?\n$/, "");
   const lines = clean.split(/\r?\n/);
-  return lines.map((ln, idx) => `${startLine + idx}│ ${ln}`).join("\n");
+  return lines.map((ln, idx) => `${startLine + idx}: ${ln}`).join("\n");
 }
 
 function formatWithLineNumbers(text: string, startLine = 1): string {
@@ -3694,7 +4122,7 @@ function formatWithLineNumbers(text: string, startLine = 1): string {
   return lines
     .map((line, idx) => {
       if (
-        /^\s*\d+│\s/.test(line) ||
+        /^\s*\d+[│:]\s/.test(line) ||
         /^L\d+:\s/.test(line) ||
         /^\/\/ match at \[/.test(line) ||
         /^\[Clamped /.test(line)
@@ -3712,9 +4140,8 @@ function resolveParentMemberFallback(
   className: string,
   memberName: string,
   filePath: string,
-  mod?: Module,
+  _mod?: Module,
 ): { text: string; startLine: number } | undefined {
-  const normClass = normalizeIdentForMatch(className);
   const normMember = normalizeIdentForMatch(memberName);
 
   if (!filePath.endsWith(".aice")) {
@@ -3743,10 +4170,6 @@ function resolveParentMemberFallback(
       const parentSlice = rawFileSource.slice(parentStartOff, parentSpan.declEnd);
       const parentLines = parentSlice.split(/\r?\n/);
 
-      if (parentLines.length <= 35) {
-        return { text: parentSlice, startLine: parentStartLine };
-      }
-
       const escMember = memberName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       const memberWordRe = new RegExp(`\\b${escMember}\\b`, "i");
       const hitIndices: number[] = [];
@@ -3758,6 +4181,9 @@ function resolveParentMemberFallback(
       }
 
       if (hitIndices.length > 0) {
+        if (parentLines.length <= 35) {
+          return { text: parentSlice, startLine: parentStartLine };
+        }
         const firstIdx = hitIndices[0]!;
         let endIdx = firstIdx;
         let braceDepth = 0;
@@ -3796,29 +4222,6 @@ function resolveParentMemberFallback(
           startLine: parentStartLine + sliceStartIdx,
         };
       }
-
-      return { text: parentSlice, startLine: parentStartLine };
-    }
-  }
-
-  if (mod) {
-    const parentItem = mod.items.find(
-      (it) =>
-        "name" in it &&
-        typeof it.name === "string" &&
-        (it.name === className || normalizeIdentForMatch(it.name) === normClass),
-    );
-    if (parentItem) {
-      const startLine = parentItem.span?.start?.line ?? 1;
-      return {
-        text: AiceGenerator.generate({
-          kind: "Module",
-          path: mod.path,
-          items: [parentItem],
-          span: mod.span,
-        }),
-        startLine,
-      };
     }
   }
 
@@ -3957,6 +4360,7 @@ export function formatLargeLineRangeWithElision(
   const outLines: string[] = [];
 
   let l = startLine;
+  let lastEmittedLine = startLine - 1;
   while (l <= clampedEnd) {
     if (importBlock && l >= importBlock.impStart && l <= importBlock.impEnd) {
       const foldedCount = importBlock.impEnd - importBlock.impStart + 1;
@@ -3970,24 +4374,26 @@ export function formatLargeLineRangeWithElision(
     const rawLine = rawLines[l - 1] ?? "";
     const trimmed = rawLine.trim();
 
-    // Skip pure blank / whitespace-only lines
     if (trimmed.length === 0) {
       l++;
       continue;
     }
 
-    // Skip pure decorative divider comment lines that contain no alphanumeric words
     if (isDecorativeDividerComment(trimmed)) {
       l++;
       continue;
     }
 
-    // Keep real prose comments & code with true 1-based disk line number
-    outLines.push(`${l}│ ${rawLine}`);
+    if (l !== lastEmittedLine + 1 || outLines.length === 0) {
+      outLines.push(`${l}: ${rawLine}`);
+    } else {
+      outLines.push(rawLine);
+    }
+    lastEmittedLine = l;
     l++;
   }
 
-  return outLines.join("\n");
+  return `// @span:${startLine}-${clampedEnd}\n${outLines.join("\n")}`;
 }
 
 function computeHeaderSetupRange(
@@ -4251,12 +4657,12 @@ export function extractSymbolFocusSlice(
     }
   }
 
-  const header = `// === ${relPath}:${symbolName}@${rawPattern} ===`;
+  const header = `// ${relPath}:${symbolName}@${rawPattern}`;
 
   if (matchCount === 0) {
     const out: string[] = [header];
     for (let l = setupStart; l <= setupEnd; l++) {
-      out.push(`${l}│ ${diskLines[l - 1]}`);
+      out.push(`${l}: ${diskLines[l - 1]}`);
     }
     out.push(
       `// [0 lines matched '${rawPattern}' inside ${symbolName} L${symStartLine}-L${symEndLine}]`,
@@ -4265,20 +4671,17 @@ export function extractSymbolFocusSlice(
   }
 
   rawWindows.sort((a, b) => a.start - b.start || a.end - b.end);
-  const merged: Array<{ start: number; end: number }> = [];
-  for (const w of rawWindows) {
-    if (merged.length === 0) {
-      merged.push({ ...w });
+  const merged = rawWindows.reduce<typeof rawWindows>((acc, w) => {
+    const prev = acc[acc.length - 1];
+    if (!prev) {
+      acc.push({ ...w });
+    } else if (w.start - prev.end - 1 <= 2) {
+      prev.end = Math.max(prev.end, w.end);
     } else {
-      const prev = merged[merged.length - 1]!;
-      const gap = w.start - prev.end - 1;
-      if (gap <= 2) {
-        prev.end = Math.max(prev.end, w.end);
-      } else {
-        merged.push({ ...w });
-      }
+      acc.push({ ...w });
     }
-  }
+    return acc;
+  }, []);
 
   const out: string[] = [header];
 
@@ -4291,7 +4694,7 @@ export function extractSymbolFocusSlice(
       out.push(`// ... [L${gapStart}-L${gapEnd} skipped — ${gapCount} unrelated lines] ...`);
     }
     for (let l = cur.start; l <= cur.end; l++) {
-      out.push(`${l}│ ${diskLines[l - 1]}`);
+      out.push(`${l}: ${diskLines[l - 1]}`);
     }
   }
 
@@ -4342,7 +4745,12 @@ export function extractSymbolFromAiceSource(
 
   const finalizeExtracted = (text: string, startLine = 1): string => {
     const lineCount = text.split("\n").length;
-    if (options?.rawNative || lineCount > 25) {
+    if (options?.rawNative) {
+      const clean = text.replace(/\r?\n$/, "");
+      const endLine = startLine + Math.max(0, clean.split(/\r?\n/).length - 1);
+      return `// @span:${startLine}-${endLine}\n${clean}`;
+    }
+    if (lineCount > 25) {
       return formatWithLineNumbers(text, startLine);
     }
     return text;
@@ -4353,6 +4761,24 @@ export function extractSymbolFromAiceSource(
     const diskLines = cleanRaw.length > 0 ? cleanRaw.split(/\r?\n/) : [""];
     const s = Math.max(1, Math.min(diskLines.length, startLine));
     const e = Math.max(s, Math.min(diskLines.length, endLine));
+    if (options?.rawNative) {
+      const sliceLines: string[] = [];
+      let needResumeNum = false;
+      for (let l = s; l <= e; l++) {
+        const ln = diskLines[l - 1] ?? "";
+        if (!options.full && isDecorativeDividerComment(ln.trim())) {
+          needResumeNum = true;
+          continue;
+        }
+        if (needResumeNum) {
+          sliceLines.push(`${l}: ${ln}`);
+          needResumeNum = false;
+        } else {
+          sliceLines.push(ln);
+        }
+      }
+      return `// @span:${s}-${e}\n${sliceLines.join("\n")}`;
+    }
     return diskLines
       .slice(s - 1, e)
       .map((ln, idx) => `${s + idx}│ ${ln}`)
@@ -4375,16 +4801,30 @@ export function extractSymbolFromAiceSource(
           ? { ...options, forceElideLargeLineRange: true }
           : options;
       return rangePieces
-        .map((piece) =>
-          extractSymbolFromAiceSource(aiceSource, piece, filePath, preParsedMod, subOpts),
-        )
+        .map((piece) => {
+          const block = extractSymbolFromAiceSource(
+            aiceSource,
+            piece,
+            filePath,
+            preParsedMod,
+            subOpts,
+          );
+          if (block.startsWith("// @span:")) {
+            const nl = block.indexOf("\n");
+            if (nl > 0) {
+              const sp = block.slice("// @span:".length, nl).trim();
+              return `// L${sp}\n${block.slice(nl + 1)}`;
+            }
+          }
+          return block;
+        })
         .join("\n\n");
     }
   }
 
   const lineRangeMatch = trimmedSel.match(/^\[?L(\d+)(?:-L?(\d+))?\]?$/i);
   if (lineRangeMatch) {
-    const startLine = Number.parseInt(lineRangeMatch[1], 10);
+    const startLine = Number.parseInt(lineRangeMatch[1]!, 10);
     const endLine = lineRangeMatch[2] ? Number.parseInt(lineRangeMatch[2], 10) : startLine;
     const rawLines = rawFileSource.split(/\r?\n/);
     const totalLines = rawLines.length;
@@ -4397,7 +4837,9 @@ export function extractSymbolFromAiceSource(
         const clampedEnd = totalLines;
         const clampedLines = rawLines
           .slice(clampedStart - 1, clampedEnd)
-          .map((ln, idx) => `${clampedStart + idx}│ ${ln}`)
+          .map((ln, idx) =>
+            options?.rawNative ? `${clampedStart + idx}: ${ln}` : `${clampedStart + idx}│ ${ln}`,
+          )
           .join("\n");
         return `[Clamped L${startLine}-L${endLine} -> L${clampedStart}-L${clampedEnd} (EOF)]\n${clampedLines}`;
       }
@@ -4415,6 +4857,33 @@ export function extractSymbolFromAiceSource(
     if ((lineSpan > 110 || options?.forceElideLargeLineRange) && options?.elideLargeLineRange) {
       return formatLargeLineRangeWithElision(rawLines, startLine, clampedEnd);
     }
+    if (options?.rawNative) {
+      const importBlock =
+        !options.full && lineSpan >= 10
+          ? detectContiguousImportBlock(rawLines, startLine, clampedEnd)
+          : undefined;
+      const outSlice: string[] = [];
+      let resumeNumberAfterFold = false;
+      for (let l = startLine; l <= clampedEnd; l++) {
+        if (importBlock && l >= importBlock.impStart && l <= importBlock.impEnd) {
+          const foldedCount = importBlock.impEnd - importBlock.impStart + 1;
+          outSlice.push(
+            `// [L${importBlock.impStart}-L${importBlock.impEnd}: ${foldedCount} imports — :imports]`,
+          );
+          l = importBlock.impEnd;
+          resumeNumberAfterFold = true;
+          continue;
+        }
+        const ln = rawLines[l - 1] ?? "";
+        if (resumeNumberAfterFold) {
+          outSlice.push(`${l}: ${ln}`);
+          resumeNumberAfterFold = false;
+        } else {
+          outSlice.push(ln);
+        }
+      }
+      return `// @span:${startLine}-${clampedEnd}\n${outSlice.join("\n")}`;
+    }
     const sliceLines = rawLines.slice(startLine - 1, clampedEnd);
     if (options?.numberLines || sliceLines.length > 25) {
       return sliceLines.map((ln, idx) => `${startLine + idx}│ ${ln}`).join("\n");
@@ -4422,14 +4891,46 @@ export function extractSymbolFromAiceSource(
     return sliceLines.join("\n");
   }
 
+  // R5: Unquoted `file:/foo|bar/` in shell splits on `|`, leaving `/foo` without closing `/`
+  if (trimmedSel.startsWith("/") && trimmedSel.length > 1 && trimmedSel.indexOf("/", 1) === -1) {
+    const rawPrefix = trimmedSel.slice(1).trim();
+    const hint = `// Hint: quote regex selectors in shell: '${filePath}:/${rawPrefix}|.../'`;
+    if (rawPrefix) {
+      const escapedPrefix = rawPrefix.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+      const hit = extractPatternMatchesFromSource(
+        rawFileSource,
+        `/${escapedPrefix}/`,
+        options?.contextLines,
+        {
+          filePath,
+          projectRoot: options?.projectRoot,
+          isExplicitTestSearch: true,
+          full: options?.full,
+          dsl: options?.dsl,
+          compactGrouped: Boolean(options?.rawNative),
+        },
+      );
+      if (hit) {
+        return options?.rawNative
+          ? `// @preformatted\n${hint}\n${filePath}:\n${hit}`
+          : `${hint}\n${hit}`;
+      }
+    }
+    throw new Error(
+      `Unclosed regex selector '${trimmedSel}'. Quote regex selectors containing '|' in shell: '${filePath}:/${rawPrefix || "pattern"}|.../'`,
+    );
+  }
+
   if (/^\/.+\/[gimsuy]*(?:\s*,\s*\/[^\n]+\/[gimsuy]*)*$/.test(trimmedSel)) {
     const pieces = splitSymbolSelectors(trimmedSel);
+    const useCompactSearch = Boolean(options?.rawNative);
     const rankOpts: PatternMatchRankingOptions = {
       filePath,
       projectRoot: options?.projectRoot,
       isExplicitTestSearch: true,
       full: options?.full,
       dsl: options?.dsl,
+      compactGrouped: useCompactSearch,
     };
     const matchOneRegex = (piece: string): string | undefined => {
       const nativeHit = extractPatternMatchesFromSource(
@@ -4443,22 +4944,35 @@ export function extractSymbolFromAiceSource(
           ? extractPatternMatchesFromSource(aiceSource, piece, options?.contextLines, rankOpts)
           : undefined;
       if (nativeHit && aiceHit) {
-        return `${nativeHit.trim()}\n\n${aiceHit.trim()}`;
+        return `${nativeHit.trimEnd()}\n${aiceHit.trimEnd()}`;
       }
       return nativeHit ?? aiceHit;
     };
+    const relDisp = options?.projectRoot
+      ? formatDisplayPath(filePath, options.projectRoot)
+      : filePath;
     if (pieces.length > 1) {
       const results: string[] = [];
       for (const piece of pieces) {
         const m = matchOneRegex(piece);
-        if (m) results.push(m.trim());
+        if (m) results.push(m.trimEnd());
       }
-      if (results.length > 0) return results.join("\n\n");
-      return `// Patterns '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
+      if (results.length > 0) {
+        return useCompactSearch
+          ? `// @preformatted\n${relDisp}:\n${results.join("\n")}`
+          : results.join("\n\n");
+      }
+      return useCompactSearch
+        ? `// @preformatted\n// 0 matches for '${symbolSelector}' in ${relDisp}`
+        : `// Patterns '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
     }
     const matched = matchOneRegex(trimmedSel);
-    if (matched) return matched;
-    return `// Pattern '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
+    if (matched) {
+      return useCompactSearch ? `// @preformatted\n${relDisp}:\n${matched.trimEnd()}` : matched;
+    }
+    return useCompactSearch
+      ? `// @preformatted\n// 0 matches for '${symbolSelector}' in ${relDisp}`
+      : `// Pattern '${symbolSelector}' had 0 matches in ${filePath}${didYouMeanSymbol(rawFileSource, symbolSelector)}\n`;
   }
   if (trimmedSel === "@first" || trimmedSel === "@1") {
     const first =
@@ -4469,16 +4983,36 @@ export function extractSymbolFromAiceSource(
 
   const isLeadingDotOrHash = trimmedSel.startsWith(".") || trimmedSel.startsWith("#");
   const parts = isLeadingDotOrHash ? [trimmedSel] : trimmedSel.split(/\.|::/);
-  const className = parts.length >= 2 ? parts[0].trim() : undefined;
+  const className = parts.length >= 2 ? parts[0]!.trim() : undefined;
   const memberName = parts.length >= 2 ? parts.slice(1).join(".").trim() : trimmedSel;
   const normMember = normalizeIdentForMatch(memberName);
 
-  if (options?.rawNative && !filePath.endsWith(".aice")) {
+  if (!filePath.endsWith(".aice")) {
     const detected = detectTargetFromPathOrContent(filePath, rawFileSource);
-    if (detected !== "passthrough") {
-      const natSpan =
-        locateNativeDeclarationSpan(rawFileSource, trimmedSel, detected, className) ??
-        (className ? locateNativeDeclarationSpan(rawFileSource, trimmedSel, detected) : undefined);
+    if (detected === "passthrough") {
+      if (trimmedSel.toLowerCase() === "imports" || trimmedSel.toLowerCase() === "import") {
+        const passthroughSyms = extractPassthroughStructuralSymbols(rawFileSource, filePath, 1);
+        const impSym = passthroughSyms.find((s) => s.kind === "import");
+        if (impSym && impSym.endLine) {
+          return sliceExactDiskLines(impSym.line, impSym.endLine);
+        }
+      }
+      const passthroughSyms = extractPassthroughStructuralSymbols(rawFileSource, filePath, 2);
+      const foundSym = findMatchingOutlineSymbol(
+        passthroughSyms,
+        trimmedSel,
+        className,
+        memberName,
+      );
+      if (foundSym) {
+        const eLine =
+          foundSym.endLine && foundSym.endLine >= foundSym.line ? foundSym.endLine : foundSym.line;
+        return sliceExactDiskLines(foundSym.line, eLine);
+      }
+    } else if (options?.rawNative) {
+      const natSpan = className
+        ? locateNativeDeclarationSpan(rawFileSource, trimmedSel, detected, className)
+        : locateNativeDeclarationSpan(rawFileSource, trimmedSel, detected);
       if (natSpan && natSpan.declEnd > (natSpan.fullDeclStart ?? natSpan.declStart)) {
         const fullStartOff = natSpan.fullDeclStart ?? natSpan.declStart;
         const sLine = rawFileSource.slice(0, fullStartOff).split(/\r?\n/).length;
@@ -4490,7 +5024,6 @@ export function extractSymbolFromAiceSource(
       }
     }
   }
-
   if (!filePath.endsWith(".aice")) {
     const targetLang = detectTargetFromPath(filePath);
     if (
@@ -4922,7 +5455,13 @@ export function parseTargetWithInlineSymbol(
         ? candidateFile
         : path.resolve(baseDir, candidateFile);
       const ext = path.extname(candidateFile).toLowerCase();
-      if (fs.existsSync(absCand) || KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice") {
+      const baseName = path.basename(candidateFile);
+      if (
+        fs.existsSync(absCand) ||
+        EXTENDED_READ_EXTENSIONS.has(ext) ||
+        EXTENDED_READ_FILENAMES.has(baseName) ||
+        ext === ".aice"
+      ) {
         return { targetPath: candidateFile, inlineSymbol: candidateSym };
       }
     }
@@ -5034,7 +5573,8 @@ export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd(
             return false;
           }
         })()) ||
-      KNOWN_TARGET_EXTENSIONS.has(tokExt) ||
+      EXTENDED_READ_EXTENSIONS.has(tokExt) ||
+      EXTENDED_READ_FILENAMES.has(path.basename(tokParsed.targetPath)) ||
       tokExt === ".aice";
     if (!tokIsFile && idx + 1 < rawTokens.length) {
       let combined = tok;
@@ -5294,7 +5834,10 @@ export async function generateContext(
         decompileFailed = true;
         targetContent = buildFallbackNativeSlice(options.symbol);
       } else {
-        targetContent = formatDiskSourceWithLineNumbers(rawFileContent, 1);
+        targetContent = formatCompactBareFileSource(rawFileContent, displayTargetPath, {
+          isMultiTarget: options._isMultiTarget,
+          full: options.full,
+        });
       }
     } else {
       targetContent = rawFileContent;
@@ -5487,15 +6030,30 @@ export async function generateContext(
             }
           }
         }
+        const stripSlicePrefix = (blk: string): string => {
+          if (blk.startsWith("// @preformatted\n")) {
+            return blk.slice("// @preformatted\n".length);
+          }
+          if (blk.startsWith("// @span:")) {
+            const nl = blk.indexOf("\n");
+            if (nl > 0) {
+              const sp = blk.slice("// @span:".length, nl).trim();
+              return `// ${displayTargetPath}:${sp}\n${blk.slice(nl + 1)}`;
+            }
+          }
+          return blk;
+        };
         const joinDeduplicatedBlocks = (blocks: string[]): string => {
           if (blocks.length <= 1) return blocks[0] ?? "";
-          const firstHasModule = /^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+/m.test(blocks[0]!);
-          return blocks
+          const cleaned = blocks.map((b) => stripSlicePrefix(b));
+          const firstHasModule = /^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+/m.test(cleaned[0]!);
+          const joinedBody = cleaned
             .map((blk, idx) => {
               if (idx === 0 || !firstHasModule) return blk;
               return blk.replace(/^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+\n+/, "");
             })
             .join("\n\n");
+          return effectiveRawNative ? `// @preformatted\n${joinedBody}` : joinedBody;
         };
         if (firstMissingErr !== undefined) {
           if (requestedSymbols.some((s) => /\s/.test(s))) {
@@ -5514,11 +6072,17 @@ export async function generateContext(
             }
           }
           if (firstMissingErr !== undefined) {
-            if (options.allowPartialSymbolMatch === true && slicedBlocks.length > 0) {
+            const allowPartialForCommaBatch =
+              options.allowPartialSymbolMatch !== undefined
+                ? options.allowPartialSymbolMatch
+                : Boolean(effectiveRawNative && requestedSymbols.length > 1);
+            if (allowPartialForCommaBatch && slicedBlocks.length > 0) {
               const joined = joinDeduplicatedBlocks(slicedBlocks);
+              const missLabel =
+                !effectiveRawNative || options._isMultiTarget ? "// missing:" : "// not found:";
               targetContent =
                 missingSymbols.length > 0
-                  ? `${joined}\n\n// missing: ${missingSymbols.join(", ")}`
+                  ? `${joined}\n\n${missLabel} ${missingSymbols.join(", ")}`
                   : joined;
             } else if (!nativeDiagnostics) {
               throw firstMissingErr;
@@ -5580,6 +6144,7 @@ export async function generateContext(
     !decompileFailed &&
     !isFastPathSelector &&
     !targetContent.startsWith("// match at [") &&
+    !targetContent.startsWith("// @preformatted\n// 0 matches") &&
     !targetContent.startsWith("[Clamped ")
   ) {
     const sel = splitSymbolSelectors(options.symbol).filter((s) => {
@@ -5599,7 +6164,7 @@ export async function generateContext(
         const sibRes = withSuppressedTelemetry(() =>
           preParsedMod
             ? generateOutline(preParsedMod, fullTargetPath, {
-                includeTypes: true,
+                includeTypes: !effectiveRawNative,
                 idioms: options.idioms,
                 projectRoot,
                 preReadSource: rawFileContent,
@@ -5607,7 +6172,7 @@ export async function generateContext(
                 lineRanges: false,
               })
             : generateOutline(fullTargetPath, {
-                includeTypes: true,
+                includeTypes: !effectiveRawNative,
                 idioms: options.idioms,
                 projectRoot,
                 preReadSource: rawFileContent,
@@ -5615,8 +6180,46 @@ export async function generateContext(
                 lineRanges: false,
               }),
         );
-        const sib = buildSiblingOutline(sibRes.symbols, sel);
-        if (sib) targetContent = `${targetContent}\n\n${sib}`;
+        if (effectiveRawNative) {
+          const fullSib = buildSiblingOutline(sibRes.symbols, sel);
+          if (fullSib) {
+            const compactGroups: string[] = [];
+            let curHeader = "// siblings:";
+            let curNames: string[] = [];
+            const flushGroup = (): void => {
+              if (curNames.length > 0) {
+                const shown = curNames.slice(0, 8).join(", ");
+                const extra = curNames.length > 8 ? ` (+${curNames.length - 8})` : "";
+                compactGroups.push(`${curHeader} ${shown}${extra}`);
+                curNames = [];
+              }
+            };
+            for (const rawLine of fullSib.split("\n")) {
+              const trimmedLine = rawLine.trim();
+              if (!trimmedLine) continue;
+              if (trimmedLine.startsWith("// siblings in ")) {
+                flushGroup();
+                curHeader = trimmedLine;
+                continue;
+              }
+              if (trimmedLine.startsWith("//   (+")) continue;
+              const body = trimmedLine.replace(/^\/\/\s*/, "").trim();
+              const ident = body
+                .split(/[(:]/)[0]
+                ?.replace(/^(?:pub|priv|prot|ro|async|static|fn|val|mut|var|const|let)\s+/g, "")
+                .replace(/^(?:pub|priv|prot|ro|async|static|fn|val|mut|var|const|let)\s+/g, "")
+                .trim();
+              if (ident) curNames.push(ident);
+            }
+            flushGroup();
+            if (compactGroups.length > 0) {
+              targetContent = `${targetContent}\n${compactGroups.join("\n")}`;
+            }
+          }
+        } else {
+          const sib = buildSiblingOutline(sibRes.symbols, sel);
+          if (sib) targetContent = `${targetContent}\n\n${sib}`;
+        }
       } catch {
         // sibling outline is best-effort
       }
@@ -5900,8 +6503,8 @@ export async function generateContext(
   const bundleFormatOpts = {
     minimalEnvelope: useMinimalEnvelope,
     symbolSelector: options.symbol,
+    compactMode: effectiveRawNative || isCliOrMcp,
   };
-
   // Build formatted bundle
   let formattedBundle = formatBundle(
     displayTargetPath,
@@ -5989,23 +6592,33 @@ export async function generateContext(
     ...(zeroIdiomsReason ? { zeroIdiomsReason } : {}),
   };
 
-  const honestBaselineText = computeHonestReadBaselineText({
+  const realisticBaselineText = computeHonestReadBaselineText({
     rawSource: rawFileContent,
     relPath: displayTargetPath,
     symbolSelector: options.symbol,
+    mode: isPureRegexSymbol ? "search" : options.symbol ? "slice" : "file",
+    includeToolWrapper: false,
   });
+  const cleanResTargetContent = targetContent
+    .replace(/^\/\/ @preformatted\n/, "")
+    .replace(/^\/\/ @span:[^\n]+\n/, "");
+  resObj.targetContent = cleanResTargetContent;
+
+  const fullNatTok = estimateTokens(rawFileContent, "cl100k_base");
+  const realNatTok = Math.min(fullNatTok, estimateTokens(realisticBaselineText, "cl100k_base"));
   recordTelemetryEvent({
     targetPath: fullTargetPath,
     projectRoot,
     operation: "context",
-    surface: "cli",
+    surface: options.surface ?? "cli",
     idiomsUsed: Boolean(bundleIdioms && Object.keys(bundleIdioms).length > 0),
     isSearchMode: isPureRegexSymbol,
-    nativeText: honestBaselineText,
-    realisticNativeText: honestBaselineText,
+    nativeText: rawFileContent,
+    nativeCl100k: fullNatTok,
+    realisticNativeText: realisticBaselineText,
+    realisticNativeCl100k: realNatTok,
     aiceText: options.json ? JSON.stringify(resObj, null, 2) : formattedBundle,
   });
-
   return resObj;
 }
 
@@ -6148,24 +6761,39 @@ export function mergeMultiContextResults(
     options.includeDeps === true ||
     options.includeCallers === true ||
     (options.depth !== undefined && options.depth > 0);
+  const isMinimalFormattedResult = (fb: string): boolean =>
+    fb.startsWith("// ") || (!fb.startsWith("# AICE ") && !fb.includes("\n## Imported Dependency"));
   const allMinimalTargets =
     !hasExplicitMultiOptIn &&
     mergedDeps.length === 0 &&
     mergedCallers.length === 0 &&
-    activeResults.every((r) => r.formattedBundle.startsWith("// === "));
+    activeResults.every((r) => isMinimalFormattedResult(r.formattedBundle));
 
   if (allMinimalTargets) {
+    const useCompactMulti = Boolean(
+      options.rawNative || options.surface === "cli" || options.surface === "mcp",
+    );
     const minimalCombinedTargetContents: string[] = [];
     const minimalBlocks: string[] = [];
     for (const r of activeResults) {
-      const body = options.outlineTarget && r.targetOutline ? r.targetOutline : r.targetContent;
-      const firstHeaderLine =
-        !options.outlineTarget && r.formattedBundle.startsWith("// === ")
-          ? (r.formattedBundle.split("\n")[0] ?? `// === ${r.targetPath} ===`)
-          : `// === ${r.targetPath} ===`;
-      const blockText = `${firstHeaderLine}\n${body}`;
-      minimalCombinedTargetContents.push(blockText);
-      minimalBlocks.push(blockText);
+      if (!options.outlineTarget && useCompactMulti) {
+        const fb = r.formattedBundle;
+        const blockText = fb.startsWith("// ") ? fb : `// ${r.targetPath}\n${fb}`;
+        minimalCombinedTargetContents.push(blockText);
+        minimalBlocks.push(blockText);
+      } else {
+        const body = options.outlineTarget && r.targetOutline ? r.targetOutline : r.targetContent;
+        const firstHeaderLine =
+          !options.outlineTarget && r.formattedBundle.startsWith("// ")
+            ? (r.formattedBundle.split("\n")[0] ??
+              (useCompactMulti ? `// ${r.targetPath}` : `// === ${r.targetPath} ===`))
+            : useCompactMulti
+              ? `// ${r.targetPath}`
+              : `// === ${r.targetPath} ===`;
+        const blockText = `${firstHeaderLine}\n${body}`;
+        minimalCombinedTargetContents.push(blockText);
+        minimalBlocks.push(blockText);
+      }
     }
     if (zeroMatchPaths.length > 0) {
       const zeroSummary = `// 0 matches in: ${zeroMatchPaths.join(", ")}`;
@@ -6400,6 +7028,7 @@ export async function generateMultiContext(
       allowPartialSymbolMatch: options.allowPartialSymbolMatch ?? targets.length > 1,
       projectRoot: resolved.projectRoot,
       workspaceScanCache: sharedScanCache,
+      _isMultiTarget: targets.length > 1,
     };
     try {
       const res = suppressIndividualTelemetry
@@ -6431,6 +7060,7 @@ export async function generateMultiContext(
             rawSource: rawText,
             relPath: relDisplay,
             symbolSelector: itemOpts.symbol,
+            includeToolWrapper: false,
           });
           totalNativeChars += itemBaseline.length + (idx > 0 && itemBaseline.length > 0 ? 2 : 0);
           totalNativeCl100k += estimateTokens(itemBaseline, "cl100k_base");
@@ -6505,14 +7135,16 @@ export async function generateMultiContext(
           .filter(Boolean),
       ),
     );
+    const isMultiRegexSearch = Boolean(options.symbol && isPureRegexSymbolString(options.symbol));
     recordTelemetryEvent({
       targetPath: firstResolvedPath,
       projectRoot: firstProjectRoot,
       filePath: "<multi-context>",
       multiFiles: multiFiles.length > 0 ? multiFiles : undefined,
       operation: "context",
-      surface: "cli",
+      surface: options.surface ?? "cli",
       idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
+      isSearchMode: isMultiRegexSearch,
       nativeText: "",
       nativeChars: totalNativeChars,
       nativeCl100k: totalNativeCl100k,

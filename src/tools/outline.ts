@@ -956,10 +956,10 @@ export function generateOutline(
         : false;
     if (isPassthroughOutline) {
       const rawLines = originalSource.split(/\r?\n/);
-      const previewCount = Math.min(rawLines.length, 25);
-      const previewLines = rawLines.slice(0, previewCount).map((l, idx) => `${idx + 1}│ ${l}`);
+      const previewCount = Math.min(rawLines.length, 20);
+      const previewLines = rawLines.slice(0, previewCount);
       if (rawLines.length > previewCount) {
-        previewLines.push(`// ... (+${rawLines.length - previewCount} more lines)`);
+        previewLines.push(`// ... (+${rawLines.length - previewCount}L)`);
       }
       const previewText = previewLines.join("\n");
       baseOutlineLines.push(previewText);
@@ -1341,7 +1341,6 @@ function extractInternalLandmarks(
         span: 1,
         priority: 1,
       });
-      continue;
     }
   }
 
@@ -1741,41 +1740,9 @@ function enrichAndResolveSymbolLineRanges(
       cssRoot,
     );
   } else if (isPassthrough && originalSource !== "") {
-    const lines = originalSource.split(/\r?\n/);
-    const existingSectionNames = new Set<string>();
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const tomlMatch = line.match(/^\s*\[([A-Za-z0-9_.-]+)\]\s*$/);
-      const mdMatch = line.match(/^\s*(#{1,6})\s+(.+)$/);
-      if (tomlMatch) {
-        const secName = tomlMatch[1];
-        if (!existingSectionNames.has(secName)) {
-          symbols.push({
-            name: secName,
-            kind: "section",
-            line: i + 1,
-            endLine: i + 1,
-            lineRange: `[L${i + 1}-L${i + 1}]`,
-            signature: `[${secName}]`,
-            children: [],
-          });
-          existingSectionNames.add(secName);
-        }
-      } else if (mdMatch) {
-        const title = mdMatch[2].trim();
-        if (!existingSectionNames.has(title)) {
-          symbols.push({
-            name: title,
-            kind: "section",
-            line: i + 1,
-            endLine: i + 1,
-            lineRange: `[L${i + 1}-L${i + 1}]`,
-            signature: `${mdMatch[1]} ${title}`,
-            children: [],
-          });
-          existingSectionNames.add(title);
-        }
-      }
+    const extracted = extractPassthroughStructuralSymbols(originalSource, filePath, maxDepth);
+    for (const sym of extracted) {
+      symbols.push(sym);
     }
   } else if (
     !isNativeFile &&
@@ -2641,6 +2608,530 @@ export function collectNativeSyntaxDiagnostics(
   return formatNativeSyntaxDiagnosticsMarkdown(filePath, source);
 }
 
+export const EXTENDED_READ_EXTENSIONS: ReadonlySet<string> = new Set([
+  ...KNOWN_TARGET_EXTENSIONS,
+  ".java",
+  ".pro",
+  ".kts",
+  ".gradle",
+  ".xml",
+  ".properties",
+  ".webmanifest",
+  ".example",
+  ".cjs",
+  ".mjs",
+  ".cts",
+  ".mts",
+  ".ini",
+  ".toml",
+  ".cfg",
+  ".conf",
+  ".sql",
+  ".graphql",
+  ".gql",
+  ".proto",
+  ".vue",
+  ".svelte",
+  ".astro",
+  ".scss",
+  ".sass",
+  ".less",
+  ".txt",
+]);
+
+export const EXTENDED_READ_FILENAMES: ReadonlySet<string> = new Set([
+  "Makefile",
+  "GNUmakefile",
+  "makefile",
+  "Dockerfile",
+  "Containerfile",
+  "CMakeLists.txt",
+  "Jenkinsfile",
+  "Vagrantfile",
+  "Procfile",
+  "Rakefile",
+  "Justfile",
+  "justfile",
+  "Podfile",
+  "Fastfile",
+  "Appfile",
+  "Gemfile",
+  "Brewfile",
+  "verify",
+  "new-project",
+  "gradlew",
+  "mvnw",
+  ".gitignore",
+  ".gitattributes",
+  ".dockerignore",
+  ".npmignore",
+  ".eslintignore",
+  ".prettierignore",
+  ".editorconfig",
+  ".env",
+  ".env.example",
+  ".env.local",
+  ".npmrc",
+  ".nvmrc",
+  "LICENSE",
+  "NOTICE",
+]);
+
+export const BINARY_SKIP_EXTENSIONS: ReadonlySet<string> = new Set([
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".gif",
+  ".webp",
+  ".avif",
+  ".ico",
+  ".bmp",
+  ".tiff",
+  ".woff",
+  ".woff2",
+  ".ttf",
+  ".eot",
+  ".otf",
+  ".pdf",
+  ".zip",
+  ".tar",
+  ".gz",
+  ".tgz",
+  ".bz2",
+  ".xz",
+  ".7z",
+  ".wasm",
+  ".pyc",
+  ".class",
+  ".jar",
+  ".apk",
+  ".aab",
+  ".dex",
+  ".exe",
+  ".dll",
+  ".so",
+  ".dylib",
+  ".o",
+  ".a",
+  ".mp3",
+  ".mp4",
+  ".wav",
+  ".ogg",
+  ".webm",
+  ".sqlite",
+  ".db",
+  ".lockb",
+]);
+
+export const LOCKFILE_SKIP_NAMES: ReadonlySet<string> = new Set([
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+  "bun.lock",
+  "bun.lockb",
+  "Cargo.lock",
+  "composer.lock",
+  "Gemfile.lock",
+  "poetry.lock",
+]);
+
+export function isNonBinaryExtensionlessDiskFile(absPath: string): boolean {
+  let fd: number | undefined;
+  try {
+    const st = fs.statSync(absPath);
+    if (!st.isFile() || st.size > 2 * 1024 * 1024) return false;
+    if (st.size === 0) return true;
+    const probeLen = Math.min(st.size, 512);
+    const buf = Buffer.allocUnsafe(probeLen);
+    fd = fs.openSync(absPath, "r");
+    const readBytes = fs.readSync(fd, buf, 0, probeLen, 0);
+    for (let i = 0; i < readBytes; i++) {
+      if (buf[i] === 0) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined) {
+      try {
+        fs.closeSync(fd);
+      } catch {}
+    }
+  }
+}
+
+export function isSupportedReadDiskFile(
+  absPath: string,
+  opts?: { allowDotfiles?: boolean; allowLockfiles?: boolean; allowRootAgentDocs?: boolean },
+): boolean {
+  const baseName = path.basename(absPath);
+  if (
+    baseName === ".git" ||
+    baseName.endsWith(".trivia.json") ||
+    baseName === "aice.config.json" ||
+    baseName === ".aice-idioms.json"
+  ) {
+    return false;
+  }
+  if (!opts?.allowLockfiles && LOCKFILE_SKIP_NAMES.has(baseName)) {
+    return false;
+  }
+  if (
+    !opts?.allowRootAgentDocs &&
+    (baseName === "AGENTS.md" ||
+      baseName === "CLAUDE.md" ||
+      baseName === "GEMINI.md" ||
+      baseName === ".GEMINI.md")
+  ) {
+    return false;
+  }
+  if (baseName.endsWith(".aice")) return true;
+  if (EXTENDED_READ_FILENAMES.has(baseName) || baseName.startsWith(".env.")) return true;
+
+  const lowerName = baseName.toLowerCase();
+  const ext = path.extname(lowerName);
+  if (ext) {
+    if (BINARY_SKIP_EXTENSIONS.has(ext)) return false;
+    if (EXTENDED_READ_EXTENSIONS.has(ext)) return true;
+    for (const knownExt of EXTENDED_READ_EXTENSIONS) {
+      if (lowerName.endsWith(knownExt)) return true;
+    }
+    return false;
+  }
+
+  if (baseName.startsWith(".") && !opts?.allowDotfiles) {
+    return false;
+  }
+  return isNonBinaryExtensionlessDiskFile(absPath);
+}
+
+function findMatchingBraceEndLine(lines: string[], startIdx: number): number {
+  let depth = 0;
+  let sawOpen = false;
+  let inBlockComment = false;
+  for (let i = startIdx; i < lines.length; i++) {
+    const ln = lines[i] ?? "";
+    let inStr: string | null = null;
+    for (let c = 0; c < ln.length; c++) {
+      const ch = ln[c]!;
+      const next = ln[c + 1];
+      if (inBlockComment) {
+        if (ch === "*" && next === "/") {
+          inBlockComment = false;
+          c++;
+        }
+        continue;
+      }
+      if (inStr) {
+        if (ch === "\\") {
+          c++;
+          continue;
+        }
+        if (ch === inStr) inStr = null;
+        continue;
+      }
+      if (ch === "/" && next === "/") break;
+      if (ch === "/" && next === "*") {
+        inBlockComment = true;
+        c++;
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        inStr = ch;
+        continue;
+      }
+      if (ch === "{") {
+        depth++;
+        sawOpen = true;
+      } else if (ch === "}") {
+        depth--;
+        if (sawOpen && depth <= 0) {
+          return i + 1;
+        }
+      }
+    }
+    if (!sawOpen && ln.includes(";")) {
+      return i + 1;
+    }
+  }
+  return startIdx + 1;
+}
+
+export function extractPassthroughStructuralSymbols(
+  originalSource: string,
+  filePath: string,
+  maxDepth = 2,
+): OutlineSymbol[] {
+  const out: OutlineSymbol[] = [];
+  const lines = originalSource.split(/\r?\n/);
+  const lowerPath = filePath.toLowerCase();
+  const ext = path.extname(lowerPath);
+
+  if (ext === ".java") {
+    let firstImp = 0;
+    let lastImp = 0;
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i]!.trim();
+      if (t.startsWith("import ")) {
+        if (firstImp === 0) firstImp = i + 1;
+        lastImp = i + 1;
+      } else if (firstImp > 0 && t !== "" && !t.startsWith("//")) {
+        break;
+      }
+    }
+    if (firstImp > 0 && lastImp >= firstImp) {
+      const count = lastImp - firstImp + 1;
+      out.push({
+        name: "imports",
+        kind: "import",
+        line: firstImp,
+        endLine: lastImp,
+        lineRange: `[L${firstImp}-L${lastImp}]`,
+        signature: `imports (${count} lines)`,
+        children: [],
+      });
+    }
+
+    const typeRe =
+      /^\s*(?:@[A-Za-z0-9_$.]+(?:\([^)]*\))?\s+)*(?:(?:public|protected|private|abstract|final|static|sealed|non-sealed)\s+)*(class|interface|enum|record)\s+([A-Za-z_$][A-Za-z0-9_$]*)/;
+    const methodRe =
+      /^\s*(?:@[A-Za-z0-9_$.]+(?:\([^)]*\))?\s+)*(?:(?:public|protected|private|static|final|synchronized|abstract|default|native)\s+)+(?:<[^>]+>\s+)?(?:[A-Za-z_$][A-Za-z0-9_$.<>[\],?\s]*\s+)?([A-Za-z_$][A-Za-z0-9_$]*)\s*\(([^)]*)\)/;
+    const javaControlKeywords = new Set([
+      "if",
+      "for",
+      "while",
+      "switch",
+      "catch",
+      "synchronized",
+      "return",
+      "new",
+      "super",
+      "this",
+    ]);
+
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i]!;
+      const tm = ln.match(typeRe);
+      if (!tm?.[1] || !tm[2]) continue;
+      const kw = tm[1];
+      const typeName = tm[2];
+      const sLine = i + 1;
+      const eLine = findMatchingBraceEndLine(lines, i);
+      const children: OutlineSymbol[] = [];
+
+      if (maxDepth >= 2 && eLine > sLine) {
+        for (let j = i + 1; j < eLine - 1; j++) {
+          const mln = lines[j]!;
+          const mm = mln.match(methodRe);
+          if (!mm?.[1]) continue;
+          const mName = mm[1];
+          if (javaControlKeywords.has(mName)) continue;
+          const mStart = j + 1;
+          const mEnd = findMatchingBraceEndLine(lines, j);
+          children.push({
+            name: mName,
+            kind: mName === typeName ? "constructor" : "method",
+            line: mStart,
+            endLine: mEnd,
+            lineRange: `[L${mStart}-L${mEnd}]`,
+            signature: `${mName}(${(mm[2] ?? "").trim()}): ...`,
+            children: [],
+          });
+          if (mEnd > j + 1) {
+            j = mEnd - 1;
+          }
+        }
+      }
+
+      out.push({
+        name: typeName,
+        kind: kw === "interface" ? "interface" : kw === "enum" ? "enum" : "class",
+        line: sLine,
+        endLine: eLine,
+        lineRange: `[L${sLine}-L${eLine}]`,
+        signature: `${kw} ${typeName}: ...`,
+        children,
+      });
+      if (eLine > i + 1) {
+        i = eLine - 1;
+      }
+    }
+    return out;
+  }
+
+  if (ext === ".gradle" || lowerPath.endsWith(".gradle.kts")) {
+    const blockRe = /^([A-Za-z_][A-Za-z0-9_.-]*)\s*\{/;
+    for (let i = 0; i < lines.length; i++) {
+      const m = lines[i]!.match(blockRe);
+      if (!m?.[1]) continue;
+      const name = m[1];
+      const sLine = i + 1;
+      const eLine = findMatchingBraceEndLine(lines, i);
+      out.push({
+        name,
+        kind: "section",
+        line: sLine,
+        endLine: eLine,
+        lineRange: `[L${sLine}-L${eLine}]`,
+        signature: `${name} { ... }`,
+        children: [],
+      });
+      if (eLine > i + 1) i = eLine - 1;
+    }
+    return out;
+  }
+
+  if (ext === ".xml") {
+    const tagRe = /^\s*<([A-Za-z_][A-Za-z0-9_:.-]*)([^>]*?)(\/?)>/;
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i]!;
+      if (
+        ln.trim().startsWith("<?") ||
+        ln.trim().startsWith("<!--") ||
+        ln.trim().startsWith("</")
+      ) {
+        continue;
+      }
+      const m = ln.match(tagRe);
+      if (!m?.[1]) continue;
+      const tag = m[1];
+      const attrs = m[2] ?? "";
+      const selfClosed = m[3] === "/" || ln.includes(`</${tag}>`);
+      const nameAttr = attrs.match(/(?:android:name|name|id)=["']([^"']+)["']/)?.[1];
+      const label = nameAttr ? `${tag}(${nameAttr})` : tag;
+      let eLine = i + 1;
+      if (!selfClosed) {
+        const closeRe = new RegExp(`</${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}>`);
+        for (let j = i + 1; j < lines.length; j++) {
+          if (closeRe.test(lines[j]!)) {
+            eLine = j + 1;
+            break;
+          }
+        }
+      }
+      out.push({
+        name: nameAttr ?? tag,
+        kind: "section",
+        line: i + 1,
+        endLine: eLine,
+        lineRange: `[L${i + 1}-L${eLine}]`,
+        signature: `<${label}>`,
+        children: [],
+      });
+      if (out.length >= 25) break;
+    }
+    return out;
+  }
+
+  if (ext === ".pro") {
+    for (let i = 0; i < lines.length; i++) {
+      const t = lines[i]!.trim();
+      if (t.startsWith("-keep") || t.startsWith("-dontwarn")) {
+        let eLine = i + 1;
+        if (t.includes("{") && !t.includes("}")) {
+          eLine = findMatchingBraceEndLine(lines, i);
+        }
+        const shortSig = t.length > 72 ? `${t.slice(0, 69)}...` : t;
+        out.push({
+          name: shortSig.split(/\s+/).slice(0, 3).join(" "),
+          kind: "section",
+          line: i + 1,
+          endLine: eLine,
+          lineRange: `[L${i + 1}-L${eLine}]`,
+          signature: shortSig,
+          children: [],
+        });
+        if (eLine > i + 1) i = eLine - 1;
+      }
+    }
+    return out;
+  }
+
+  const existingSectionNames = new Set<string>();
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const tomlMatch = line.match(/^\s*\[([A-Za-z0-9_.-]+)\]\s*$/);
+    const mdMatch = line.match(/^\s*(#{1,6})\s+(.+)$/);
+    const shFnMatch = line.match(/^\s*(?:function\s+)?([A-Za-z_][A-Za-z0-9_-]*)\s*\(\)\s*\{/);
+    const pyDefMatch = line.match(/^(\s*)(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)\b/);
+    if (tomlMatch?.[1]) {
+      const secName = tomlMatch[1];
+      if (!existingSectionNames.has(secName)) {
+        let eLine = lines.length;
+        for (let j = i + 1; j < lines.length; j++) {
+          if (/^\s*\[[A-Za-z0-9_.-]+\]\s*$/.test(lines[j]!)) {
+            eLine = j;
+            break;
+          }
+        }
+        out.push({
+          name: secName,
+          kind: "section",
+          line: i + 1,
+          endLine: eLine,
+          lineRange: `[L${i + 1}-L${eLine}]`,
+          signature: `[${secName}]`,
+          children: [],
+        });
+        existingSectionNames.add(secName);
+      }
+    } else if (mdMatch?.[1] && mdMatch[2]) {
+      const title = mdMatch[2].trim();
+      if (!existingSectionNames.has(title)) {
+        out.push({
+          name: title,
+          kind: "section",
+          line: i + 1,
+          endLine: i + 1,
+          lineRange: `[L${i + 1}-L${i + 1}]`,
+          signature: `${mdMatch[1]} ${title}`,
+          children: [],
+        });
+        existingSectionNames.add(title);
+      }
+    } else if (shFnMatch?.[1]) {
+      const fnName = shFnMatch[1];
+      if (!existingSectionNames.has(fnName)) {
+        const eLine = findMatchingBraceEndLine(lines, i);
+        out.push({
+          name: fnName,
+          kind: "function",
+          line: i + 1,
+          endLine: eLine,
+          lineRange: `[L${i + 1}-L${eLine}]`,
+          signature: `fn ${fnName}(): ...`,
+          children: [],
+        });
+        existingSectionNames.add(fnName);
+      }
+    } else if (pyDefMatch?.[2]) {
+      const symName = pyDefMatch[2];
+      const baseIndent = (pyDefMatch[1] ?? "").length;
+      if (baseIndent === 0 && !existingSectionNames.has(symName)) {
+        let eLine = i + 1;
+        for (let j = i + 1; j < lines.length; j++) {
+          const jln = lines[j]!;
+          if (jln.trim() === "" || jln.trim().startsWith("#")) continue;
+          const ind = jln.length - jln.trimStart().length;
+          if (ind <= baseIndent) break;
+          eLine = j + 1;
+        }
+        out.push({
+          name: symName,
+          kind: line.trimStart().startsWith("class ") ? "class" : "function",
+          line: i + 1,
+          endLine: eLine,
+          lineRange: `[L${i + 1}-L${eLine}]`,
+          signature: line.trim().replace(/:$/, ": ..."),
+          children: [],
+        });
+        existingSectionNames.add(symName);
+      }
+    }
+  }
+  return out;
+}
+
 const OUTLINE_IGNORED_DIRS = new Set([
   "node_modules",
   ".git",
@@ -2711,7 +3202,7 @@ export async function outlinePath(
     if (nativeDiags && !options.json) {
       res.text = res.text ? `${res.text}\n\n${nativeDiags}` : nativeDiags;
     }
-    const nativeCl100k = res.stats?.originalTokens ?? estimateTokens(nativeText, "cl100k_base");
+    const nativeCl100k = estimateTokens(nativeText, "cl100k_base");
     const aiceCl100k = estimateTokens(res.text, "cl100k_base");
     const structuralCompressionPct =
       nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
@@ -2736,7 +3227,11 @@ export async function outlinePath(
   const targetCandidatesSet = new Set<string>();
   const visitedDirs = new Set<string>();
 
-  const walk = (dir: string) => {
+  const walk = (
+    dir: string,
+    explicitRootInNodeModules: boolean,
+    explicitAllowedNames: Set<string>,
+  ) => {
     let realDir: string;
     try {
       realDir = fs.realpathSync(dir);
@@ -2754,31 +3249,27 @@ export async function outlinePath(
     }
     for (const entry of entries) {
       if (entry.isSymbolicLink()) continue;
-      if (entry.name.startsWith(".") || OUTLINE_IGNORED_DIRS.has(entry.name)) {
-        continue;
-      }
       const p = path.join(dir, entry.name);
       if (entry.isDirectory()) {
-        walk(p);
-      } else if (entry.isFile()) {
+        if (entry.name === ".git") continue;
+        if (entry.name === "node_modules" && !explicitAllowedNames.has("node_modules")) continue;
+        if (entry.name.startsWith(".") && !explicitAllowedNames.has(entry.name)) continue;
         if (
-          entry.name === "aice.config.json" ||
-          entry.name === "package-lock.json" ||
-          entry.name.endsWith(".trivia.json") ||
-          entry.name === "AGENTS.md" ||
-          entry.name === "CLAUDE.md" ||
-          entry.name === "GEMINI.md" ||
-          entry.name === ".GEMINI.md"
+          OUTLINE_IGNORED_DIRS.has(entry.name) &&
+          !explicitAllowedNames.has(entry.name) &&
+          !(
+            explicitRootInNodeModules &&
+            (entry.name === "dist" || entry.name === "build" || entry.name === "out")
+          )
         ) {
           continue;
         }
+        walk(p, explicitRootInNodeModules, explicitAllowedNames);
+      } else if (entry.isFile()) {
         if (entry.name.endsWith(".aice")) {
           targetCandidatesSet.add(p);
-        } else {
-          const ext = path.extname(entry.name).toLowerCase();
-          if (KNOWN_TARGET_EXTENSIONS.has(ext) && !fs.existsSync(`${p}.aice`)) {
-            targetCandidatesSet.add(p);
-          }
+        } else if (!fs.existsSync(`${p}.aice`) && isSupportedReadDiskFile(p)) {
+          targetCandidatesSet.add(p);
         }
       }
     }
@@ -2792,7 +3283,13 @@ export async function outlinePath(
     }
     const st = fs.statSync(entry.fullP);
     if (st.isDirectory()) {
-      walk(entry.fullP);
+      const segs = entry.fullP.split(path.sep).filter(Boolean);
+      const inNodeModules = segs.includes("node_modules");
+      const allowed = new Set<string>();
+      for (const s of entry.rawP.replace(/\\/g, "/").split("/").filter(Boolean)) {
+        if (OUTLINE_IGNORED_DIRS.has(s) || s.startsWith(".")) allowed.add(s);
+      }
+      walk(entry.fullP, inNodeModules, allowed);
     } else if (st.isFile()) {
       targetCandidatesSet.add(entry.fullP);
     }
@@ -2800,26 +3297,23 @@ export async function outlinePath(
 
   const targetCandidates = Array.from(targetCandidatesSet).sort();
   const isCompactMode =
-    options.compact === true || (options.compact !== false && targetCandidates.length >= 60);
+    options.compact === true || (options.compact !== false && targetCandidates.length >= 40);
 
   const aiceParts: string[] = [];
   let anyIdioms = false;
-  let totalNativeChars = 0;
-  const rawTextsForSmallBatch: string[] = [];
-  let sampleNativeBuf = "";
-  let countedFiles = 0;
+  const dirBaselineLines: string[] = [];
 
   let preloadedConfigChecked = false;
   let preloadedIdiomsActive = false;
   let preloadedIdiomsConfig: Record<string, ProjectIdiomDefinition> | undefined;
   if (targetCandidates.length > 10) {
     try {
-      const cfg = loadProjectConfig(projectRoot);
-      if (isProjectAiceEnabled(cfg)) {
+      const loadedCfg = loadProjectConfig(projectRoot);
+      if (isProjectAiceEnabled(loadedCfg)) {
         preloadedConfigChecked = true;
-        preloadedIdiomsActive = isProjectIdiomsEnabled(cfg, options.idioms);
+        preloadedIdiomsActive = isProjectIdiomsEnabled(loadedCfg, options.idioms);
         if (preloadedIdiomsActive) {
-          preloadedIdiomsConfig = cfg.idioms;
+          preloadedIdiomsConfig = loadedCfg.idioms;
         }
       }
     } catch {
@@ -2827,6 +3321,8 @@ export async function outlinePath(
     }
   }
 
+  let totalRawChars = 0;
+  let totalRawTokens = 0;
   for (const targetFile of targetCandidates) {
     let relKey = path.relative(process.cwd(), targetFile).replace(/\\/g, "/");
     if (relKey.startsWith("..") && options.projectRoot) {
@@ -2838,6 +3334,8 @@ export async function outlinePath(
     } catch {
       continue;
     }
+    totalRawChars += rawText.length;
+    totalRawTokens += estimateTokens(rawText, "cl100k_base");
     const r = withSuppressedTelemetry(() =>
       generateOutline(targetFile, {
         ...options,
@@ -2850,17 +3348,10 @@ export async function outlinePath(
         projectRoot,
       }),
     );
-    totalNativeChars += rawText.length + (countedFiles > 0 ? 2 : 0);
-    if (totalNativeChars <= 64_000) {
-      rawTextsForSmallBatch.push(rawText);
-    } else {
-      rawTextsForSmallBatch.length = 0;
+    if (dirBaselineLines.length < 40) {
+      const previewSlice = rawText.split(/\r?\n/).slice(0, 30).join("\n");
+      dirBaselineLines.push(`// ${relKey}\n${previewSlice}`);
     }
-    if (sampleNativeBuf.length < 32_000) {
-      const needed = 32_000 - sampleNativeBuf.length;
-      sampleNativeBuf += rawText.length <= needed ? rawText : rawText.slice(0, needed);
-    }
-    countedFiles++;
 
     if (targetCandidates.length === 1 && !options.json) {
       const nativeDiags = collectNativeSyntaxDiagnostics(targetFile, rawText);
@@ -2881,7 +3372,7 @@ export async function outlinePath(
       }
     }
     resultMap.set(relKey, r);
-    aiceParts.push(`// === ${relKey} ===\n${r.text}`);
+    aiceParts.push(`// ${relKey}\n${r.text}`);
     if ((r.referencedIdioms?.length ?? 0) > 0) {
       anyIdioms = true;
     }
@@ -2896,7 +3387,7 @@ export async function outlinePath(
       text: msg,
       ...(options.json ? { json: { file: cleanMissing, symbols: [] } } : {}),
     });
-    aiceParts.push(`// === ${cleanMissing} ===\n${msg}`);
+    aiceParts.push(`// ${cleanMissing}\n${msg}`);
   }
 
   if (targetCandidates.length > 0) {
@@ -2908,27 +3399,16 @@ export async function outlinePath(
         )
       : aiceParts.join("\n\n");
     const aiceCl100k = estimateTokens(aiceTextPayload, "cl100k_base");
-    let totalNativeCl100k = 0;
-    let totalNativeO200k = 0;
-    if (totalNativeChars <= 64_000 && rawTextsForSmallBatch.length > 0) {
-      const joinedSmall = rawTextsForSmallBatch.join("\n\n");
-      totalNativeCl100k = estimateTokens(joinedSmall, "cl100k_base");
-      totalNativeO200k = estimateTokens(joinedSmall, "o200k_base");
-    } else if (sampleNativeBuf.length > 0) {
-      const sampleTokens = estimateTokens(sampleNativeBuf, "cl100k_base");
-      const tokensPerChar = sampleTokens / sampleNativeBuf.length;
-      totalNativeCl100k = Math.max(1, Math.round(totalNativeChars * tokensPerChar));
-      totalNativeO200k = Math.max(1, Math.round(totalNativeCl100k * 0.98));
-    }
-    const structuralCompressionPct =
-      totalNativeCl100k > 0
-        ? Math.round(((totalNativeCl100k - aiceCl100k) / totalNativeCl100k) * 100)
-        : 0;
-    const outlinedFileCount = targetCandidates.length;
-    const realisticNativeCl100k = Math.min(
-      totalNativeCl100k,
-      Math.max(aiceCl100k, outlinedFileCount * 45),
+    const fdListing = Array.from(resultMap.keys()).join("\n");
+    const honestDirRealisticText = [fdListing, ...dirBaselineLines].filter(Boolean).join("\n");
+    const honestRealisticCl100k = estimateTokens(honestDirRealisticText, "cl100k_base");
+    const rawTotalCl100k = Math.max(honestRealisticCl100k, totalRawTokens);
+    const rawTotalO200k = Math.max(
+      estimateTokens(honestDirRealisticText, "o200k_base"),
+      rawTotalCl100k,
     );
+    const structuralCompressionPct =
+      rawTotalCl100k > 0 ? Math.round(((rawTotalCl100k - aiceCl100k) / rawTotalCl100k) * 100) : 0;
     recordTelemetryEvent({
       targetPath: firstFullPath,
       projectRoot,
@@ -2937,10 +3417,11 @@ export async function outlinePath(
       surface: "cli",
       idiomsUsed: anyIdioms,
       nativeText: "",
-      nativeChars: totalNativeChars,
-      nativeCl100k: totalNativeCl100k,
-      nativeO200k: totalNativeO200k,
-      realisticNativeCl100k,
+      nativeChars: Math.max(honestDirRealisticText.length, totalRawChars),
+      nativeCl100k: rawTotalCl100k,
+      nativeO200k: rawTotalO200k,
+      realisticNativeText: honestDirRealisticText,
+      realisticNativeCl100k: Math.min(rawTotalCl100k, honestRealisticCl100k),
       structuralCompressionPct,
       aiceText: aiceTextPayload,
       aiceCl100k,

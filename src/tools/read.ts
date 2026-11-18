@@ -23,7 +23,6 @@ import {
   findProjectRoot,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
-  KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   PASSTHROUGH_FILENAMES,
   type ProjectIdiomDefinition,
@@ -42,23 +41,33 @@ import {
   type ContextResult,
   computeHonestReadBaselineText,
   type DependencyContract,
+  doesFileStemMatchQuery,
+  extractPatternMatchesDetailed,
+  extractPrimaryQueryKeyword,
   generateContext,
+  type HonestBaselineFileEntry,
   isCommentLine,
   isDecorativeDividerComment,
   isTestOrMockPath,
   mergeMultiContextResults,
+  normalizeGrepBreAlternation,
   parseSymbolPatternSelector,
   type WorkspaceCallerScanCache,
 } from "./context.js";
 import {
+  BINARY_SKIP_EXTENSIONS,
+  EXTENDED_READ_EXTENSIONS,
+  EXTENDED_READ_FILENAMES,
   generateOutline,
+  isSupportedReadDiskFile,
+  LOCKFILE_SKIP_NAMES,
   type OutlineOptions,
   type OutlineResult,
   outlinePath,
 } from "./outline.js";
 import { didYouMeanFile } from "./suggest.js";
 
-export const DEFAULT_AUTO_OUTLINE_LINE_THRESHOLD = 250;
+export const DEFAULT_AUTO_OUTLINE_LINE_THRESHOLD = 120;
 export const DEFAULT_READ_MAX_BYTES = 28 * 1024; // 28,672 bytes (~7,000 BPE tokens)
 export const DEFAULT_READ_MAX_TOKENS = 7_000;
 export const DEFAULT_READ_SOFT_BYTE_CAP = 26_624;
@@ -182,7 +191,7 @@ export interface ReadOptions {
    */
   full?: boolean;
   /**
-   * Line threshold above which bare files without a selector are automatically outlined (default: 250).
+   * Line threshold above which bare files without a selector are automatically outlined (default: 120).
    */
   autoOutlineLineThreshold?: number;
   /**
@@ -194,9 +203,14 @@ export interface ReadOptions {
    */
   autoOutlineDirectories?: boolean;
   /**
-   * Dependency traversal depth (for context) or maximum symbol nesting depth (for outline).
+   * Dependency traversal depth (for context), maximum symbol nesting depth (for outline), or directory depth (for find).
    */
   depth?: number;
+  /**
+  /**
+   * Explicit directory traversal depth cap for `filesOnly` / `aice find` (`-d`, `--depth`, `--max-depth`, `-L`).
+   */
+  maxDepth?: number;
   /**
    * Maximum token budget; truncates rendered output cleanly if exceeded.
    */
@@ -480,17 +494,21 @@ export function parseReadTarget(rawTarget: string, baseDir = process.cwd()): Par
       const ext = path.extname(candidatePath).toLowerCase();
       const baseName = path.basename(candidatePath);
       const isKnownFileShape =
-        KNOWN_TARGET_EXTENSIONS.has(ext) ||
-        ext === ".aice" ||
+        EXTENDED_READ_EXTENSIONS.has(ext) ||
         PASSTHROUGH_FILENAMES.has(baseName) ||
+        EXTENDED_READ_FILENAMES.has(baseName) ||
+        ext === ".aice" ||
         baseName.startsWith(".env.");
       const isSymbolPattern = Boolean(parseSymbolPatternSelector(candidateSym));
+      const isUnclosedSlashSelector =
+        candidateSym.startsWith("/") && candidateSym.length > 1 && !/\s/.test(candidateSym);
       const isUnambiguousSelector =
         !/\s/.test(candidatePath) &&
         (candidateSym.toLowerCase() === "outline" ||
           LINE_RANGE_SELECTOR_RE.test(candidateSym) ||
           SINGLE_REGEX_LITERAL_RE.test(candidateSym) ||
-          isSymbolPattern);
+          isSymbolPattern ||
+          isUnclosedSlashSelector);
       const hasGlobPattern = /[*?[\]{}]/.test(candidatePath);
       if (
         isKnownFileShape ||
@@ -640,7 +658,8 @@ export function splitReadTargetString(rawTargetStr: string, baseDir = process.cw
       tokParsed.explicitOutline ||
       Boolean(tokParsed.inlineSelector) ||
       targetExistsAtBase(tokParsed.targetPath, baseDir) ||
-      KNOWN_TARGET_EXTENSIONS.has(tokExt) ||
+      EXTENDED_READ_EXTENSIONS.has(tokExt) ||
+      EXTENDED_READ_FILENAMES.has(path.basename(tokParsed.targetPath)) ||
       tokExt === ".aice";
 
     if (!tokLooksStandalone && idx + 1 < rawTokens.length) {
@@ -783,6 +802,7 @@ function expandGlobTargetPaths(rawGlobPath: string, baseDir: string): string[] {
   }
 
   const explicitAllowedDirs = new Set(staticSegs.filter(Boolean));
+  const rootInNodeModules = explicitAllowedDirs.has("node_modules");
   const walkBase = isAbsPattern
     ? staticSegs.length > 0
       ? staticSegs.join("/") || "/"
@@ -806,7 +826,16 @@ function expandGlobTargetPaths(rawGlobPath: string, baseDir: string): string[] {
     for (const ent of entries) {
       const childAbs = path.join(dirAbs, ent.name);
       if (ent.isDirectory()) {
-        if (DEFAULT_IGNORED_SCAN_DIRECTORIES.has(ent.name) && !explicitAllowedDirs.has(ent.name)) {
+        if (ent.name === ".git") continue;
+        if (ent.name === "node_modules" && !explicitAllowedDirs.has("node_modules")) continue;
+        if (
+          DEFAULT_IGNORED_SCAN_DIRECTORIES.has(ent.name) &&
+          !explicitAllowedDirs.has(ent.name) &&
+          !(
+            rootInNodeModules &&
+            (ent.name === "dist" || ent.name === "build" || ent.name === "out")
+          )
+        ) {
           continue;
         }
         walkDir(childAbs);
@@ -853,7 +882,27 @@ export function normalizeReadTargets(
   const list = Array.isArray(targets) ? targets : [targets];
   const out: NormalizedReadTarget[] = [];
 
-  const pushOrExpandNormalized = (entry: NormalizedReadTarget): void => {
+  const isStandaloneCommaTargetToken = (piece: string): ParsedReadTarget | undefined => {
+    const colonPos = piece.indexOf(":", /^[a-zA-Z]:[\\/]/.test(piece) ? 2 : 0);
+    if (colonPos <= 0) return undefined;
+    const candFile = piece.slice(0, colonPos).trim();
+    const candSel = piece.slice(colonPos + 1).trim();
+    if (!candFile || !candSel) return undefined;
+    const ext = path.extname(candFile).toLowerCase();
+    const baseName = path.basename(candFile);
+    if (
+      candFile.includes("/") ||
+      candFile.includes("\\") ||
+      EXTENDED_READ_EXTENSIONS.has(ext) ||
+      EXTENDED_READ_FILENAMES.has(baseName) ||
+      targetExistsAtBase(candFile, baseDir)
+    ) {
+      return parseReadTarget(piece, baseDir);
+    }
+    return undefined;
+  };
+
+  const pushSingleOrGlobNormalized = (entry: NormalizedReadTarget): void => {
     if (hasGlobMagicChars(entry.targetPath) && !targetExistsAtBase(entry.targetPath, baseDir)) {
       const expanded = expandGlobTargetPaths(entry.targetPath, baseDir);
       if (expanded.length > 0) {
@@ -877,6 +926,52 @@ export function normalizeReadTargets(
     out.push(entry);
   };
 
+  // R4: Split comma-joined `file1:L1-L10,file2:L20-L30` into distinct NormalizedReadTargets
+  const pushOrExpandNormalized = (entry: NormalizedReadTarget): void => {
+    if (
+      entry.selector &&
+      entry.selector.includes(",") &&
+      !SINGLE_REGEX_LITERAL_RE.test(entry.selector.trim())
+    ) {
+      const commaParts = splitCommaSelectors(entry.selector);
+      if (
+        commaParts.length > 1 &&
+        commaParts.slice(1).some((p) => Boolean(isStandaloneCommaTargetToken(p)))
+      ) {
+        let activeTargetPath = entry.targetPath;
+        let activeOutline = entry.explicitOutline;
+        let pendingSelectors: string[] = [];
+        const flushPending = (): void => {
+          if (pendingSelectors.length === 0 && !activeOutline) return;
+          const joined = pendingSelectors.join(",");
+          pushSingleOrGlobNormalized({
+            raw: activeOutline ? `${activeTargetPath}:outline` : `${activeTargetPath}:${joined}`,
+            targetPath: activeTargetPath,
+            selector: activeOutline ? undefined : joined || undefined,
+            explicitOutline: activeOutline,
+            explicitFull: entry.explicitFull,
+          });
+          pendingSelectors = [];
+        };
+        for (const cp of commaParts) {
+          const nextTarget = isStandaloneCommaTargetToken(cp);
+          if (nextTarget) {
+            flushPending();
+            activeTargetPath = nextTarget.targetPath;
+            activeOutline = nextTarget.explicitOutline;
+            if (nextTarget.inlineSelector) {
+              pendingSelectors.push(nextTarget.inlineSelector);
+            }
+          } else {
+            pendingSelectors.push(cp);
+          }
+        }
+        flushPending();
+        return;
+      }
+    }
+    pushSingleOrGlobNormalized(entry);
+  };
   for (const item of list) {
     if (typeof item === "string") {
       const pieces = splitReadTargetString(item, baseDir);
@@ -1298,7 +1393,11 @@ export function computeDynamicSliceSpan(
     }
   } else {
     const ext = path.extname(diskPath).toLowerCase();
-    if (KNOWN_TARGET_EXTENSIONS.has(ext) || diskPath.endsWith(".aice")) {
+    if (
+      EXTENDED_READ_EXTENSIONS.has(ext) ||
+      EXTENDED_READ_FILENAMES.has(path.basename(diskPath)) ||
+      diskPath.endsWith(".aice")
+    ) {
       try {
         const outRes = withSuppressedTelemetry(() =>
           generateOutline(rawSource, diskPath, {
@@ -1408,17 +1507,12 @@ function buildAutoOutlineHeader(
   lineCount: number,
   opts?: { nextSliceCmd?: string; budgetDowngraded?: boolean; budgetLabel?: string },
 ): string {
-  const base =
-    opts?.budgetLabel?.includes("CLI") || opts?.budgetLabel?.includes("MCP")
-      ? `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol> or ${displayPath}:L<start>-L<end> for native source.`
-      : `// Auto-outlined (${lineCount} lines). Pass ${displayPath}:<symbol>, ${displayPath}:L<start>-L<end>, or --full for full source.`;
-  if (opts?.budgetDowngraded && opts.nextSliceCmd) {
-    return `${base} (auto-downgraded to :outline — ${opts.budgetLabel ?? "28 KB"} budget; next slice: ${opts.nextSliceCmd})`;
-  }
-  if (opts?.nextSliceCmd) {
-    return `${base} Next slice: ${opts.nextSliceCmd}`;
-  }
-  return base;
+  const slicePart = opts?.nextSliceCmd ? ` — next: ${opts.nextSliceCmd}` : "";
+  const budgetNote =
+    (opts?.budgetDowngraded || lineCount >= 250) && opts?.budgetLabel
+      ? `, >${opts.budgetLabel}`
+      : "";
+  return `// Auto-outlined ${displayPath} (${lineCount}L${budgetNote}) — pass ${displayPath}:<sym> or :L<start>-L<end>${slicePart}`;
 }
 
 function formatContextStatsFooter(
@@ -1558,14 +1652,27 @@ function inferNextWindowFromTruncatedSlice(
   let lastLineNum = 0;
 
   for (const ln of lines) {
-    const hdrMatch = ln.match(/^\/\/ === ([^=(]+?)(?:\s+\(| ===)/);
-    if (hdrMatch?.[1]) {
-      const parsedHdr = splitPathAndSelector(hdrMatch[1].trim());
+    const legacyHdr = ln.match(/^\/\/ === ([^=(]+?)(?:\s+\(| ===)/);
+    if (legacyHdr?.[1]) {
+      const parsedHdr = splitPathAndSelector(legacyHdr[1].trim());
       lastFilePath = parsedHdr.filePath || ".";
       activeSelector =
         parsedHdr.selector ??
         (lastFilePath === parsedFallback.filePath ? parsedFallback.selector : undefined);
       lastLineNum = 0;
+      continue;
+    }
+    const compactHdr = ln.match(
+      /^\/\/ (?!\[|\.\.\.|Auto-outlined|Pagination|Hint:|0 matches|not found:|missing:|siblings:)([^\s:]+)(?::L?(\d+)(?:-L?(\d+))?)?$/,
+    );
+    if (compactHdr?.[1]) {
+      lastFilePath = compactHdr[1].trim() || ".";
+      if (compactHdr[2]) {
+        const sNum = Number.parseInt(compactHdr[2], 10);
+        lastLineNum = sNum > 0 ? sNum - 1 : 0;
+      } else {
+        lastLineNum = 0;
+      }
       continue;
     }
     const mdTargetMatch = ln.match(/^### Target:\s+`?([^`\s[]+)`?/);
@@ -1578,12 +1685,16 @@ function inferNextWindowFromTruncatedSlice(
       lastLineNum = 0;
       continue;
     }
-    const numMatch = ln.match(/^\s*(?:L(\d+):|(\d+)│)/);
+    const numMatch = ln.match(/^\s*(?:L(\d+):|(\d+)[│:])/);
     if (numMatch) {
       const parsedNum = Number.parseInt(numMatch[1] ?? numMatch[2] ?? "0", 10);
       if (parsedNum > 0) {
         lastLineNum = parsedNum;
       }
+      continue;
+    }
+    if (lastLineNum >= 0 && !ln.startsWith("// [") && !ln.startsWith("```")) {
+      lastLineNum++;
     }
   }
 
@@ -1700,7 +1811,11 @@ function enforceReadBudgetCeiling(params: {
     const lnBytes = Buffer.byteLength(ln, "utf-8") + (keptLines.length > 0 ? 1 : 0);
     if (runningBytes + lnBytes > targetKeepBytes) {
       for (let j = i; j < lines.length; j++) {
-        const hdr = lines[j]?.match(/^\/\/ === ([^=(]+?)(?:\s+\(| ===)/);
+        const hdr =
+          lines[j]?.match(/^\/\/ === ([^=(]+?)(?:\s+\(| ===)/) ??
+          lines[j]?.match(
+            /^\/\/ (?!\[|\.\.\.|Auto-outlined|Pagination|Hint:|0 matches|not found:|missing:|siblings:)([^\s:]+)(?::[^\s]+)?$/,
+          );
         if (hdr?.[1]) {
           nextOmittedFile = hdr[1].trim();
           break;
@@ -1720,24 +1835,6 @@ function enforceReadBudgetCeiling(params: {
   }
 
   const isCliBudget = budgetLabel.includes("CLI") || budgetLabel.includes("MCP");
-  const parsedFallback = splitPathAndSelector(fallbackTargetPath);
-  const fallbackSafePath = parsedFallback.filePath;
-  const resolvedDiskPath =
-    diskPath && fs.existsSync(diskPath)
-      ? diskPath
-      : projectRoot
-        ? path.resolve(projectRoot, fallbackSafePath)
-        : path.resolve(process.cwd(), fallbackSafePath);
-  let effectiveRawSource = rawSource;
-  if (!effectiveRawSource) {
-    try {
-      if (fs.existsSync(resolvedDiskPath) && fs.statSync(resolvedDiskPath).isFile()) {
-        effectiveRawSource = fs.readFileSync(resolvedDiskPath, "utf-8");
-      }
-    } catch {
-      // ignore unreadable file
-    }
-  }
 
   const buildFooterForKept = (candidateKept: string): string => {
     if (
@@ -1746,11 +1843,11 @@ function enforceReadBudgetCeiling(params: {
       isTargetContentCompleteInContextPack(bundle, candidateKept)
     ) {
       const fullHint = isCliBudget ? "" : " (pass --full for all contracts)";
-      return `\n\n// [${budgetLabel} stdout budget reached — target content complete; trailing dependency/caller contracts trimmed${fullHint}]`;
+      return `\n// [${budgetLabel} stdout budget reached — target complete; contracts trimmed${fullHint}]`;
     }
-    const hint =
+    const primaryHint =
       extraHints && extraHints.length > 0
-        ? extraHints.slice(0, 3).join(" | ")
+        ? extraHints[0]!
         : nextOmittedFile
           ? buildNextSliceHintCommand(nextOmittedFile, 1, undefined, {
               projectRoot,
@@ -1762,60 +1859,8 @@ function enforceReadBudgetCeiling(params: {
               projectRoot,
               sliceByteBudget,
             });
-    let parallelPart = "";
-    const hintMatch = hint.match(/^aice read (.+?):L(\d+)-L(\d+)$/);
-    if (hintMatch) {
-      const safePath = hintMatch[1]!;
-      const hintEndLine = Number.parseInt(hintMatch[3]!, 10);
-      const parsedRange = parseSelectorLineRange(parsedFallback.selector);
-      const reqEnd = parsedRange?.endLine;
-      const effectiveLimit =
-        reqEnd ??
-        totalLines ??
-        (effectiveRawSource ? countSourceLines(effectiveRawSource) : undefined);
-      if (effectiveLimit !== undefined && hintEndLine < effectiveLimit) {
-        const extraRanges: Array<{ startLine: number; endLine: number }> = [];
-        let curStart = hintEndLine + 1;
-        let more = false;
-
-        while (curStart <= effectiveLimit) {
-          if (extraRanges.length >= 5) {
-            more = true;
-            break;
-          }
-          let curEnd: number;
-          if (effectiveRawSource) {
-            const span = computeDynamicSliceSpan(
-              diskPath ?? safePath,
-              effectiveRawSource,
-              curStart,
-              sliceByteBudget,
-            );
-            curEnd = Math.min(span.endLine, effectiveLimit);
-          } else {
-            const fallbackSpan = sliceByteBudget <= DEFAULT_CLI_SLICE_BYTE_BUDGET ? 134 : 159;
-            curEnd = Math.min(curStart + fallbackSpan, effectiveLimit);
-          }
-          if (curEnd < curStart) curEnd = curStart;
-          extraRanges.push({ startLine: curStart, endLine: curEnd });
-          curStart = curEnd + 1;
-        }
-        if (extraRanges.length > 0) {
-          parallelPart = ` | parallel 1-turn slices (separate calls in 1 turn, never sequential): ${extraRanges
-            .map((r) => `${safePath}:L${r.startLine}-L${r.endLine}`)
-            .join(", ")}${more ? ", ..." : ""}`;
-        }
-      }
-    }
-    const fullHint = isCliBudget ? "" : " (or pass --full)";
-    let candidateFooter = `\n\n// [${budgetLabel} stdout budget reached — next slice: ${hint}${parallelPart}${fullHint}]`;
-    if (
-      parallelPart &&
-      Buffer.byteLength(candidateFooter, "utf-8") > Math.max(200, maxBundleBytes - 64)
-    ) {
-      candidateFooter = `\n\n// [${budgetLabel} stdout budget reached — next slice: ${hint}${fullHint}]`;
-    }
-    return candidateFooter;
+    const fullHint = isCliBudget ? "" : " (or --full)";
+    return `\n// [${budgetLabel} stdout budget reached — next: ${primaryHint}${fullHint}]`;
   };
 
   let closedKept = closeUnclosedMarkdownFence(keptText);
@@ -1899,10 +1944,11 @@ function escapeLiteralForRegexSelector(literal: string): string {
 }
 
 function buildSafeSearchRegexSelector(rawSearch: string): { selector: string; regex: RegExp } {
-  const trimmed = rawSearch.trim();
+  const normalizedRaw = normalizeGrepBreAlternation(rawSearch);
+  const trimmed = normalizedRaw.trim();
   const slashedMatch = trimmed.match(/^\/((?:\\.|\[(?:\\.|[^\]\n])*\]|[^/\\\n])+)\/([gimsuy]*)$/);
   if (slashedMatch?.[1]) {
-    const rawBody = slashedMatch[1];
+    const rawBody = normalizeGrepBreAlternation(slashedMatch[1]);
     const cleanFlags = (slashedMatch[2] ?? "").replace(/[gy]/g, "");
     if (!hasUnsafeSearchQuantifiers(rawBody)) {
       try {
@@ -1914,9 +1960,9 @@ function buildSafeSearchRegexSelector(rawSearch: string): { selector: string; re
     }
   }
 
-  if (rawSearch.length > 0 && !hasUnsafeSearchQuantifiers(rawSearch)) {
+  if (normalizedRaw.length > 0 && !hasUnsafeSearchQuantifiers(normalizedRaw)) {
     try {
-      const escapedSlashBody = escapeUnescapedForwardSlashes(rawSearch);
+      const escapedSlashBody = escapeUnescapedForwardSlashes(normalizedRaw);
       const regex = new RegExp(escapedSlashBody);
       const candidateSelector = `/${escapedSlashBody}/`;
       if (SINGLE_REGEX_LITERAL_RE.test(candidateSelector)) {
@@ -2078,20 +2124,20 @@ function executeFilesOnlyRead(
 
   const scanRoots: string[] = [];
   const inferredFilters: string[] = [];
-  const explicitHiddenAllowed = new Set<string>();
+  const explicitAllowedDirs = new Set<string>();
 
   for (const tok of rawTokens) {
     const candidateBase = path.resolve(baseDir, tok);
     const candidateRoot = path.resolve(projectRoot, tok);
     if (fs.existsSync(candidateBase)) {
       scanRoots.push(candidateBase);
-      for (const seg of tok.replace(/\\/g, "/").split("/")) {
-        if (seg.startsWith(".") && seg !== "." && seg !== "..") explicitHiddenAllowed.add(seg);
+      for (const seg of tok.replace(/\\/g, "/").split("/").filter(Boolean)) {
+        if (seg !== "." && seg !== "..") explicitAllowedDirs.add(seg);
       }
     } else if (fs.existsSync(candidateRoot)) {
       scanRoots.push(candidateRoot);
-      for (const seg of tok.replace(/\\/g, "/").split("/")) {
-        if (seg.startsWith(".") && seg !== "." && seg !== "..") explicitHiddenAllowed.add(seg);
+      for (const seg of tok.replace(/\\/g, "/").split("/").filter(Boolean)) {
+        if (seg !== "." && seg !== "..") explicitAllowedDirs.add(seg);
       }
     } else {
       inferredFilters.push(tok);
@@ -2111,8 +2157,21 @@ function executeFilesOnlyRead(
     if (mInf) activeMatchers.push(mInf);
   }
 
+  const rawMaxDepth = options.maxDepth ?? options.depth;
+  const effectiveMaxDepth =
+    rawMaxDepth !== undefined && Number.isFinite(rawMaxDepth)
+      ? Math.max(1, Math.floor(rawMaxDepth))
+      : undefined;
+  const explicitLockfileRequested = Boolean(
+    primaryFilter && Array.from(LOCKFILE_SKIP_NAMES).some((lf) => primaryFilter.includes(lf)),
+  );
+
   const candidateFiles = new Map<string, string>(); // relPosix -> absPath
-  const collectFromDir = (dirAbs: string): void => {
+  const collectFromDir = (
+    dirAbs: string,
+    currentDepth: number,
+    rootInNodeModules: boolean,
+  ): void => {
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dirAbs, { withFileTypes: true });
@@ -2122,25 +2181,49 @@ function executeFilesOnlyRead(
     for (const ent of entries) {
       const childAbs = path.join(dirAbs, ent.name);
       if (ent.isDirectory()) {
+        if (effectiveMaxDepth !== undefined && currentDepth >= effectiveMaxDepth) {
+          continue;
+        }
+        if (ent.name === ".git") continue;
+        if (ent.name === "node_modules" && !explicitAllowedDirs.has("node_modules")) continue;
         if (
           DEFAULT_IGNORED_SCAN_DIRECTORIES.has(ent.name) &&
-          !explicitHiddenAllowed.has(ent.name)
+          !explicitAllowedDirs.has(ent.name) &&
+          !(
+            rootInNodeModules &&
+            (ent.name === "dist" || ent.name === "build" || ent.name === "out")
+          )
         ) {
           continue;
         }
-        if (ent.name.startsWith(".") && !explicitHiddenAllowed.has(ent.name)) {
+        if (
+          ent.name.startsWith(".") &&
+          ent.name !== ".github" &&
+          !explicitAllowedDirs.has(ent.name)
+        ) {
           continue;
         }
-        if (configuredOutDir && path.resolve(childAbs) === configuredOutDir) {
+        if (
+          configuredOutDir &&
+          path.resolve(childAbs) === configuredOutDir &&
+          !explicitAllowedDirs.has(ent.name)
+        ) {
           continue;
         }
-        collectFromDir(childAbs);
+        collectFromDir(childAbs, currentDepth + 1, rootInNodeModules);
       } else if (ent.isFile()) {
-        if (ent.name.endsWith(".trivia.json")) continue;
+        if (
+          ent.name === ".git" ||
+          ent.name.endsWith(".trivia.json") ||
+          ent.name === "aice.config.json"
+        ) {
+          continue;
+        }
+        if (!explicitLockfileRequested && LOCKFILE_SKIP_NAMES.has(ent.name)) continue;
         const ext = path.extname(ent.name).toLowerCase();
-        if (BINARY_DISCOVERY_EXTENSIONS.has(ext)) continue;
+        if (BINARY_DISCOVERY_EXTENSIONS.has(ext) || BINARY_SKIP_EXTENSIONS.has(ext)) continue;
         const relPosix = formatReadDisplayPath(childAbs, projectRoot);
-        if (activeMatchers.length === 0 || activeMatchers.every((fn) => fn(relPosix))) {
+        if (activeMatchers.length === 0 || activeMatchers.every((matchFn) => matchFn(relPosix))) {
           candidateFiles.set(relPosix, childAbs);
         }
       }
@@ -2151,10 +2234,11 @@ function executeFilesOnlyRead(
     try {
       const st = fs.statSync(rootAbs);
       if (st.isDirectory()) {
-        collectFromDir(rootAbs);
+        const inNodeMods = rootAbs.split(path.sep).includes("node_modules");
+        collectFromDir(rootAbs, 1, inNodeMods);
       } else if (st.isFile()) {
         const relPosix = formatReadDisplayPath(rootAbs, projectRoot);
-        if (activeMatchers.length === 0 || activeMatchers.every((fn) => fn(relPosix))) {
+        if (activeMatchers.length === 0 || activeMatchers.every((matchFn) => matchFn(relPosix))) {
           candidateFiles.set(relPosix, rootAbs);
         }
       }
@@ -2167,8 +2251,6 @@ function executeFilesOnlyRead(
     a < b ? -1 : a > b ? 1 : 0,
   );
   const discovered: DiscoveredWorkspaceFile[] = [];
-  const formattedLines: string[] = [];
-  let totalSourceChars = 0;
 
   for (const relPath of sortedRelPaths) {
     const absPath = candidateFiles.get(relPath)!;
@@ -2181,16 +2263,53 @@ function executeFilesOnlyRead(
     if (isLikelyBinaryBuffer(buf)) continue;
     const lines = countBufferLinesFast(buf);
     const bytes = buf.length;
-    totalSourceChars += bytes;
     const sizeKBNum = bytes === 0 ? 0 : Number(Math.max(0.1, bytes / 1024).toFixed(1));
-    const sizeKBText = bytes === 0 ? "0.0" : Math.max(0.1, bytes / 1024).toFixed(1);
     discovered.push({
       path: relPath,
       lines,
       bytes,
       sizeKB: sizeKBNum,
     });
-    formattedLines.push(`${relPath} (${lines}L, ${sizeKBText}KB)`);
+  }
+
+  const formattedLines: string[] = [];
+  if (discovered.length <= 3) {
+    for (const d of discovered) {
+      formattedLines.push(`${d.path} (${d.lines}L)`);
+    }
+  } else {
+    const byDir = new Map<string, DiscoveredWorkspaceFile[]>();
+    for (const d of discovered) {
+      const slashIdx = d.path.lastIndexOf("/");
+      const dirKey = slashIdx >= 0 ? d.path.slice(0, slashIdx) : ".";
+      let bucket = byDir.get(dirKey);
+      if (!bucket) {
+        bucket = [];
+        byDir.set(dirKey, bucket);
+      }
+      bucket.push(d);
+    }
+    for (const [dirKey, items] of byDir) {
+      if (dirKey === ".") {
+        if (items.length >= 2) {
+          formattedLines.push(items.map((it) => `${it.path} (${it.lines}L)`).join(", "));
+        } else {
+          for (const it of items) {
+            formattedLines.push(`${it.path} (${it.lines}L)`);
+          }
+        }
+      } else if (items.length === 1) {
+        formattedLines.push(`${items[0]!.path} (${items[0]!.lines}L)`);
+      } else {
+        const joined = items
+          .map((it) => {
+            const base = it.path.slice(dirKey.length + 1);
+            return `${base} (${it.lines}L)`;
+          })
+          .join(", ");
+        formattedLines.push(`${dirKey}/: ${joined}`);
+      }
+    }
   }
 
   const effectiveBudgets = resolveEffectiveReadBudgets(options);
@@ -2199,17 +2318,13 @@ function executeFilesOnlyRead(
   if (enforceCeiling && Buffer.byteLength(formattedBundle, "utf-8") > effectiveBudgets.maxBytes) {
     const kept: string[] = [];
     let bytesUsed = 0;
-    const maxListBytes = effectiveBudgets.maxBytes - 256;
+    const maxListBytes = effectiveBudgets.maxBytes - 180;
     for (let i = 0; i < formattedLines.length; i++) {
       const ln = formattedLines[i]!;
       const addBytes = Buffer.byteLength(ln, "utf-8") + (kept.length > 0 ? 1 : 0);
       if (kept.length > 0 && bytesUsed + addBytes > maxListBytes) {
         const omittedCount = formattedLines.length - i;
-        const fullHint =
-          options.surface === "cli" || options.surface === "mcp" ? "" : " or pass --full";
-        kept.push(
-          `// ... (+${omittedCount} more files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget — narrow path/filter${fullHint})`,
-        );
+        kept.push(`// +${omittedCount} more entries — narrow path or pass -d <depth>`);
         break;
       }
       kept.push(ln);
@@ -2218,8 +2333,20 @@ function executeFilesOnlyRead(
     formattedBundle = kept.join("\n");
   }
 
-  const approxTokenCount = Math.max(0, Math.ceil(Buffer.byteLength(formattedBundle, "utf-8") / 4));
-  const approxOrigTokens = Math.max(0, Math.ceil(totalSourceChars / 4));
+  const targetLabel =
+    scanRoots.length === 1
+      ? formatReadDisplayPath(scanRoots[0]!, projectRoot)
+      : scanRoots.map((r) => formatReadDisplayPath(r, projectRoot)).join(", ");
+
+  const honestFdBaseline = computeHonestReadBaselineText({
+    mode: "files",
+    relPath: targetLabel || ".",
+    projectRoot: scanRoots.length === 1 ? scanRoots[0] : projectRoot,
+    filePaths: discovered.map((d) => d.path),
+    maxDepth: effectiveMaxDepth,
+    filePattern: primaryFilter,
+    includeToolWrapper: false,
+  });
 
   const jsonData = {
     mode: "files" as const,
@@ -2229,9 +2356,17 @@ function executeFilesOnlyRead(
   };
   const jsonOutput = options.json ? JSON.stringify(jsonData, null, 2) : undefined;
   const output = jsonOutput ?? formattedBundle;
-
   const aicePayload = jsonOutput ?? formattedBundle;
-  const aiceApproxTok = Math.max(0, Math.ceil(Buffer.byteLength(aicePayload, "utf-8") / 4));
+
+  const tokenCount = estimateTokens(formattedBundle, "cl100k_base");
+  const aiceTok = jsonOutput !== undefined ? estimateTokens(jsonOutput, "cl100k_base") : tokenCount;
+  const honestOrigTokens = estimateTokens(honestFdBaseline, "cl100k_base");
+  const rawBytesSum = discovered.reduce((acc, d) => acc + d.bytes, 0);
+  const rawCorpusCl100k =
+    discovered.length === 0
+      ? honestOrigTokens
+      : Math.max(honestOrigTokens, Math.ceil(rawBytesSum / 4));
+
   recordTelemetryEvent({
     targetPath: scanRoots[0] ?? projectRoot,
     projectRoot,
@@ -2240,33 +2375,25 @@ function executeFilesOnlyRead(
     surface,
     idiomsUsed: false,
     nativeText: "",
-    nativeChars: totalSourceChars,
-    nativeCl100k: approxOrigTokens,
-    nativeO200k: approxOrigTokens,
-    realisticNativeCl100k: Math.min(
-      approxOrigTokens,
-      Math.max(aiceApproxTok, discovered.length * 10),
-    ),
+    nativeChars: Math.max(honestFdBaseline.length, rawBytesSum),
+    nativeCl100k: rawCorpusCl100k,
+    nativeO200k: rawCorpusCl100k,
+    realisticNativeText: honestFdBaseline,
+    realisticNativeCl100k: Math.min(rawCorpusCl100k, honestOrigTokens),
     aiceText: aicePayload,
     aiceChars: aicePayload.length,
-    aiceCl100k: aiceApproxTok,
-    aiceO200k: aiceApproxTok,
+    aiceCl100k: aiceTok,
   });
 
-  const targetLabel =
-    scanRoots.length === 1
-      ? formatReadDisplayPath(scanRoots[0]!, projectRoot)
-      : scanRoots.map((r) => formatReadDisplayPath(r, projectRoot)).join(", ");
-
   const stats: ReadStats = {
-    tokenCount: approxTokenCount,
-    originalTokens: approxOrigTokens,
-    savedTokens: approxOrigTokens - approxTokenCount,
+    tokenCount,
+    originalTokens: honestOrigTokens,
+    savedTokens: honestOrigTokens - tokenCount,
     savingsPct:
-      approxOrigTokens > 0
-        ? Math.round(((approxOrigTokens - approxTokenCount) / approxOrigTokens) * 100)
+      honestOrigTokens > 0
+        ? Math.round(((honestOrigTokens - tokenCount) / honestOrigTokens) * 100)
         : 0,
-    originalChars: totalSourceChars,
+    originalChars: honestFdBaseline.length,
     outputChars: formattedBundle.length,
     dependenciesCount: 0,
     callersCount: 0,
@@ -2275,12 +2402,12 @@ function executeFilesOnlyRead(
 
   return {
     mode: "files",
-    targetPath: targetLabel,
+    targetPath: targetLabel || ".",
     text: formattedBundle,
     formattedBundle,
     targetContent: formattedBundle,
     output,
-    tokenCount: approxTokenCount,
+    tokenCount,
     targets: scanRoots.map((r) => ({
       targetPath: formatReadDisplayPath(r, projectRoot),
       resolvedPath: r,
@@ -2295,6 +2422,120 @@ function executeFilesOnlyRead(
   };
 }
 
+interface SearchCandidateFile {
+  absPath: string;
+  relPath: string;
+  projectRoot: string;
+  isExplicitTestSearch: boolean;
+}
+
+function collectSearchCandidateFiles(classified: ClassifiedReadTarget[]): SearchCandidateFile[] {
+  const seenRealOrAbs = new Set<string>();
+  const out: SearchCandidateFile[] = [];
+
+  const pushCandidate = (
+    absPath: string,
+    relPath: string,
+    projectRoot: string,
+    isExplicitTestSearch: boolean,
+  ): void => {
+    let dedupKey = path.resolve(absPath);
+    try {
+      dedupKey = fs.realpathSync(absPath);
+    } catch {}
+    if (seenRealOrAbs.has(dedupKey)) return;
+    seenRealOrAbs.add(dedupKey);
+    out.push({ absPath, relPath, projectRoot, isExplicitTestSearch });
+  };
+
+  const walkSearchDir = (
+    dirAbs: string,
+    projectRoot: string,
+    rootInNodeModules: boolean,
+    explicitAllowedDirs: Set<string>,
+    isExplicitTestSearch: boolean,
+  ): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dirAbs, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const ent of entries) {
+      const childAbs = path.join(dirAbs, ent.name);
+      if (ent.isDirectory()) {
+        if (ent.name === ".git") continue;
+        if (ent.name === "node_modules" && !explicitAllowedDirs.has("node_modules")) continue;
+        if (
+          DEFAULT_IGNORED_SCAN_DIRECTORIES.has(ent.name) &&
+          !explicitAllowedDirs.has(ent.name) &&
+          !(
+            rootInNodeModules &&
+            (ent.name === "dist" || ent.name === "build" || ent.name === "out")
+          )
+        ) {
+          continue;
+        }
+        if (
+          ent.name.startsWith(".") &&
+          ent.name !== ".github" &&
+          !explicitAllowedDirs.has(ent.name)
+        ) {
+          continue;
+        }
+        walkSearchDir(
+          childAbs,
+          projectRoot,
+          rootInNodeModules,
+          explicitAllowedDirs,
+          isExplicitTestSearch,
+        );
+      } else if (ent.isFile()) {
+        if (
+          isSupportedReadDiskFile(childAbs, {
+            allowDotfiles: explicitAllowedDirs.has(ent.name),
+          })
+        ) {
+          pushCandidate(
+            childAbs,
+            formatReadDisplayPath(childAbs, projectRoot),
+            projectRoot,
+            isExplicitTestSearch,
+          );
+        }
+      }
+    }
+  };
+
+  for (const item of classified) {
+    const relTarget = path.relative(item.resolved.projectRoot, item.diskPath).replace(/\\/g, "/");
+    const baseName = path.basename(item.diskPath);
+    const isExplicitTest =
+      /(?:^|\/)(?:tests?|__tests__|mocks?|__mocks__|fixtures?|benchmarks?|specs?)(?:\/|$)/i.test(
+        relTarget,
+      ) || /^(?:tests?|__tests__|mocks?|__mocks__|fixtures?|specs?)$/i.test(baseName);
+
+    if (item.isDir) {
+      const explicitAllowed = new Set<string>();
+      for (const seg of item.norm.targetPath.replace(/\\/g, "/").split("/").filter(Boolean)) {
+        if (seg !== "." && seg !== "..") explicitAllowed.add(seg);
+      }
+      const inNodeMods = item.diskPath.split(path.sep).includes("node_modules");
+      walkSearchDir(
+        item.diskPath,
+        item.resolved.projectRoot,
+        inNodeMods,
+        explicitAllowed,
+        isExplicitTest,
+      );
+    } else {
+      pushCandidate(item.diskPath, item.displayPath, item.resolved.projectRoot, isExplicitTest);
+    }
+  }
+
+  return out;
+}
+
 function executeFilesWithMatchesSearch(params: {
   classified: ClassifiedReadTarget[];
   missingTargets: string[];
@@ -2306,37 +2547,13 @@ function executeFilesWithMatchesSearch(params: {
 }): ReadResult {
   const { classified, missingTargets, regex, selector, rawPattern, options, surface } = params;
   const primaryRoot = classified[0]?.resolved.projectRoot ?? process.cwd();
-  const seenAbs = new Set<string>();
-  const candidateFiles: Array<{ absPath: string; relPath: string; projectRoot: string }> = [];
+  const candidateFiles = collectSearchCandidateFiles(classified);
 
-  for (const item of classified) {
-    if (item.isDir) {
-      for (const fp of item.resolved.files) {
-        const abs = path.resolve(fp);
-        if (!seenAbs.has(abs)) {
-          seenAbs.add(abs);
-          candidateFiles.push({
-            absPath: abs,
-            relPath: formatReadDisplayPath(abs, item.resolved.projectRoot),
-            projectRoot: item.resolved.projectRoot,
-          });
-        }
-      }
-    } else {
-      const abs = path.resolve(item.diskPath);
-      if (!seenAbs.has(abs)) {
-        seenAbs.add(abs);
-        candidateFiles.push({
-          absPath: abs,
-          relPath: item.displayPath,
-          projectRoot: item.resolved.projectRoot,
-        });
-      }
-    }
+  interface ScoredPathHit {
+    relPath: string;
+    score: number;
   }
-
-  const matchedScored: Array<{ relPath: string; score: number }> = [];
-  let totalNativeChars = 0;
+  const matchedScored: ScoredPathHit[] = [];
 
   for (const file of candidateFiles) {
     let raw: string;
@@ -2345,11 +2562,10 @@ function executeFilesWithMatchesSearch(params: {
     } catch {
       continue;
     }
-    totalNativeChars += raw.length;
     regex.lastIndex = 0;
     if (!regex.test(raw)) continue;
 
-    const isTest = isTestOrMockPath(file.absPath, file.projectRoot);
+    const isTest = !file.isExplicitTestSearch && isTestOrMockPath(file.absPath, file.projectRoot);
     const lines = raw.split(/\r?\n/);
     let bestLineScore = 10;
     for (const ln of lines) {
@@ -2375,7 +2591,7 @@ function executeFilesWithMatchesSearch(params: {
     formattedBundle = formattedBundle ? `${formattedBundle}\n${missingFooter}` : missingFooter;
   }
 
-  let tokenCount = estimateTokens(formattedBundle);
+  let tokenCount = estimateTokens(formattedBundle, "cl100k_base");
   const jsonData = {
     mode: "search" as const,
     filesWithMatches: true,
@@ -2403,7 +2619,24 @@ function executeFilesWithMatchesSearch(params: {
     tokenCount = capped.tokenCount;
   }
 
-  const approxOrigTokens = Math.ceil(totalNativeChars / 4);
+  const targetLabel = classified.map((c) => c.displayPath || ".").join(", ") || ".";
+  const honestFilesMatchBaseline = computeHonestReadBaselineText({
+    filesWithMatches: true,
+    matchedPaths,
+    relPath: targetLabel,
+    symbolSelector: rawPattern,
+    includeToolWrapper: false,
+  });
+  const honestOrigTokens = estimateTokens(honestFilesMatchBaseline, "cl100k_base");
+  const rawMatchCorpusChars = candidateFiles.reduce((acc, f) => {
+    try {
+      return acc + fs.statSync(f.absPath).size;
+    } catch {
+      return acc;
+    }
+  }, 0);
+  const rawMatchCorpusTokens = Math.max(honestOrigTokens, Math.ceil(rawMatchCorpusChars / 4));
+
   if (classified[0]) {
     const aicePayload = jsonOutput ?? formattedBundle;
     recordTelemetryEvent({
@@ -2412,11 +2645,13 @@ function executeFilesWithMatchesSearch(params: {
       operation: "context",
       surface,
       idiomsUsed: false,
+      isSearchMode: true,
       nativeText: "",
-      nativeChars: totalNativeChars,
-      nativeCl100k: approxOrigTokens,
-      nativeO200k: approxOrigTokens,
-      realisticNativeCl100k: approxOrigTokens,
+      nativeChars: Math.max(honestFilesMatchBaseline.length, rawMatchCorpusChars),
+      nativeCl100k: rawMatchCorpusTokens,
+      nativeO200k: rawMatchCorpusTokens,
+      realisticNativeText: honestFilesMatchBaseline,
+      realisticNativeCl100k: Math.min(rawMatchCorpusTokens, honestOrigTokens),
       aiceText: aicePayload,
       aiceCl100k: jsonOutput !== undefined ? undefined : tokenCount,
     });
@@ -2424,14 +2659,14 @@ function executeFilesWithMatchesSearch(params: {
 
   return {
     mode: "search",
-    targetPath: classified.map((c) => c.displayPath).join(", "),
+    targetPath: targetLabel,
     text: formattedBundle,
     formattedBundle,
     targetContent: formattedBundle,
     output,
     tokenCount,
     targets: classified.map((c) => ({
-      targetPath: c.displayPath,
+      targetPath: c.displayPath || ".",
       resolvedPath: c.diskPath,
       mode: "search" as const,
       selector,
@@ -2443,9 +2678,9 @@ function executeFilesWithMatchesSearch(params: {
     jsonOutput,
     stats: {
       tokenCount,
-      originalTokens: approxOrigTokens,
-      savedTokens: approxOrigTokens - tokenCount,
-      originalChars: totalNativeChars,
+      originalTokens: honestOrigTokens,
+      savedTokens: honestOrigTokens - tokenCount,
+      originalChars: honestFilesMatchBaseline.length,
       outputChars: formattedBundle.length,
       dependenciesCount: 0,
       callersCount: 0,
@@ -2467,6 +2702,264 @@ function formatAggregateOutlineStatsFooter(
     `  Outline tokens:  ${totalOutlineTokens.toLocaleString()}`,
     `  Token savings:   ${savings.toLocaleString()} tokens (${savingsPct}%)`,
   ].join("\n");
+}
+
+interface ScoredCompactSearchHit {
+  relPath: string;
+  absPath: string;
+  rawSource: string;
+  formattedEntry: string;
+  score: number;
+}
+
+function executeUnifiedCompactSearch(params: {
+  classified: ClassifiedReadTarget[];
+  missingTargets: string[];
+  defaultSelector?: string;
+  rawPatternLabel: string;
+  options: ReadOptions;
+  surface: "cli" | "mcp";
+}): ReadResult {
+  const { classified, missingTargets, defaultSelector, rawPatternLabel, options, surface } = params;
+  const primaryRoot = classified[0]?.resolved.projectRoot ?? process.cwd();
+  const candidateFiles = collectSearchCandidateFiles(classified);
+  const effectiveBudgets = resolveEffectiveReadBudgets(options);
+  const enforceCeiling = shouldEnforceDefaultReadBudget(
+    options,
+    classified.map((c) => c.norm),
+  );
+
+  const primarySelector =
+    defaultSelector ??
+    classified.find((c) => Boolean(c.effectiveSelector))?.effectiveSelector ??
+    "//";
+  const selectorPieces = splitCommaSelectors(primarySelector).filter(Boolean);
+  const activeSelectors = selectorPieces.length > 0 ? selectorPieces : [primarySelector];
+  const primaryQueryKw = extractPrimaryQueryKeyword(activeSelectors[0] ?? "");
+
+  const hits: ScoredCompactSearchHit[] = [];
+  const baselineEntries: HonestBaselineFileEntry[] = [];
+
+  for (const file of candidateFiles) {
+    let raw: string;
+    try {
+      raw = fs.readFileSync(file.absPath, "utf-8");
+    } catch {
+      continue;
+    }
+    baselineEntries.push({ relPath: file.relPath, rawSource: raw });
+
+    const matchedParts: string[] = [];
+    let fileMaxScore = 0;
+    for (const selPiece of activeSelectors) {
+      let cleanPiece = selPiece.trim();
+      if (
+        cleanPiece.startsWith("/") &&
+        cleanPiece.length > 1 &&
+        cleanPiece.indexOf("/", 1) === -1
+      ) {
+        const rawBody = cleanPiece.slice(1).replace(/[.*+?^${}()|[\]\\/]/g, "\\$&");
+        cleanPiece = `/${rawBody}/`;
+      }
+      const det = extractPatternMatchesDetailed(raw, cleanPiece, options.contextLines, {
+        filePath: file.absPath,
+        projectRoot: file.projectRoot,
+        isExplicitTestSearch: file.isExplicitTestSearch,
+        full: options.full,
+        dsl: options.dsl,
+        compactGrouped: true,
+      });
+      if (det) {
+        matchedParts.push(det.formattedText.trimEnd());
+        if (det.maxScore > fileMaxScore) {
+          fileMaxScore = det.maxScore;
+        }
+      }
+    }
+
+    if (matchedParts.length === 0) {
+      if (primaryQueryKw && doesFileStemMatchQuery(file.absPath, primaryQueryKw)) {
+        const cleanLines = (raw.length > 0 ? raw.replace(/\r?\n$/, "") : "").split(/\r?\n/);
+        const previewCount = Math.min(2, cleanLines.length);
+        const preview = cleanLines
+          .slice(0, previewCount)
+          .map((l, idx) => `  L${idx + 1}: ${l}`)
+          .join("\n");
+        matchedParts.push(preview);
+        const isMock =
+          !file.isExplicitTestSearch && isTestOrMockPath(file.absPath, file.projectRoot);
+        fileMaxScore = isMock ? 25 : 1000;
+      } else {
+        continue;
+      }
+    }
+
+    hits.push({
+      relPath: file.relPath,
+      absPath: file.absPath,
+      rawSource: raw,
+      formattedEntry: `${file.relPath}:\n${matchedParts.join("\n")}`,
+      score: fileMaxScore,
+    });
+  }
+
+  hits.sort(
+    (a, b) => b.score - a.score || (a.relPath < b.relPath ? -1 : a.relPath > b.relPath ? 1 : 0),
+  );
+
+  const unclosedSlashHint =
+    primarySelector.startsWith("/") &&
+    primarySelector.length > 1 &&
+    primarySelector.indexOf("/", 1) === -1
+      ? `// Hint: quote regex selectors in shell: '${classified[0]?.displayPath || "file"}:${primarySelector}|.../'\n`
+      : "";
+
+  const targetLabel = classified.map((c) => c.displayPath || ".").join(", ") || ".";
+  const keptBlocks: string[] = [];
+  const omittedFiles: string[] = [];
+  let usedBytes = Buffer.byteLength(unclosedSlashHint, "utf-8");
+  const maxBodyBytes = enforceCeiling ? Math.max(512, effectiveBudgets.maxBytes - 180) : Infinity;
+
+  for (let i = 0; i < hits.length; i++) {
+    const h = hits[i]!;
+    const sep = keptBlocks.length > 0 ? 1 : 0;
+    const addBytes = Buffer.byteLength(h.formattedEntry, "utf-8") + sep;
+    if (enforceCeiling && keptBlocks.length > 0 && usedBytes + addBytes > maxBodyBytes) {
+      for (let j = i; j < hits.length; j++) {
+        omittedFiles.push(hits[j]!.relPath);
+      }
+      break;
+    }
+    keptBlocks.push(h.formattedEntry);
+    usedBytes += addBytes;
+  }
+
+  let formattedBundle: string;
+  if (keptBlocks.length > 0) {
+    formattedBundle = `${unclosedSlashHint}${keptBlocks.join("\n")}`;
+    if (omittedFiles.length > 0) {
+      const nextFile = omittedFiles[0] ?? ".";
+      const safePat = rawPatternLabel.replace(/"/g, '\\"');
+      formattedBundle += `\n// +${omittedFiles.length} more matching files — next: aice search "${safePat}" ${nextFile}`;
+    }
+  } else {
+    formattedBundle = `${unclosedSlashHint}// 0 matches for '${rawPatternLabel || primarySelector}' in ${targetLabel}`;
+  }
+
+  if (missingTargets.length > 0) {
+    const missingFooter = missingTargets.map((m) => `// not found: ${m}`).join("\n");
+    formattedBundle = `${formattedBundle}\n${missingFooter}`;
+  }
+
+  if (options.maxTokens !== undefined) {
+    formattedBundle = truncateBundleToMaxTokens(formattedBundle, options.maxTokens).text;
+  }
+
+  let tokenCount = estimateTokens(formattedBundle, "cl100k_base");
+  const jsonData = {
+    mode: "search" as const,
+    pattern: rawPatternLabel || primarySelector,
+    selector: primarySelector,
+    count: hits.length,
+    files: hits.map((h) => h.relPath),
+    formattedBundle,
+  };
+  const jsonOutput = options.json ? JSON.stringify(jsonData, null, 2) : undefined;
+  const statsText = options.stats
+    ? formatContextStatsFooter(tokenCount, 0, 0, formattedBundle.length)
+    : undefined;
+  let output = jsonOutput ?? (statsText ? `${formattedBundle}\n\n${statsText}` : formattedBundle);
+
+  if (enforceCeiling && Buffer.byteLength(output, "utf-8") > effectiveBudgets.maxBytes) {
+    const capped = enforceReadBudgetCeiling({
+      bundle: formattedBundle,
+      fallbackTargetPath: omittedFiles[0] ?? hits[0]?.relPath ?? ".",
+      statsText,
+      projectRoot: primaryRoot,
+      maxBytes: effectiveBudgets.maxBytes,
+      maxTokens: effectiveBudgets.maxTokens,
+      sliceByteBudget: effectiveBudgets.sliceByteBudget,
+      budgetLabel: effectiveBudgets.budgetLabel,
+    });
+    formattedBundle = capped.formattedBundle;
+    output = capped.output;
+    tokenCount = capped.tokenCount;
+  }
+
+  const honestRgBaseline = computeHonestReadBaselineText({
+    relPath: targetLabel,
+    workspaceFiles: baselineEntries,
+    symbolSelector: primarySelector,
+    mode: "search",
+    includeToolWrapper: false,
+  });
+  const honestOrigTokens = estimateTokens(honestRgBaseline, "cl100k_base");
+  const rawSearchCorpusChars = baselineEntries.reduce((acc, e) => acc + e.rawSource.length, 0);
+  const rawSearchCorpusCl100k = Math.max(
+    honestOrigTokens,
+    baselineEntries.reduce((acc, e) => acc + estimateTokens(e.rawSource, "cl100k_base"), 0),
+  );
+
+  if (classified[0]) {
+    const aicePayload = jsonOutput ?? formattedBundle;
+    const multiFiles =
+      classified.length > 1 && classified.some((c) => !c.isDir)
+        ? classified.filter((c) => !c.isDir).map((c) => c.displayPath)
+        : undefined;
+    recordTelemetryEvent({
+      targetPath: classified[0].diskPath,
+      projectRoot: primaryRoot,
+      ...(multiFiles && multiFiles.length > 1 ? { filePath: "<multi-context>", multiFiles } : {}),
+      operation: "context",
+      surface,
+      idiomsUsed: false,
+      isSearchMode: true,
+      nativeText: "",
+      nativeChars: Math.max(honestRgBaseline.length, rawSearchCorpusChars),
+      nativeCl100k: rawSearchCorpusCl100k,
+      nativeO200k: rawSearchCorpusCl100k,
+      realisticNativeText: honestRgBaseline,
+      realisticNativeCl100k: Math.min(rawSearchCorpusCl100k, honestOrigTokens),
+      aiceText: aicePayload,
+      aiceCl100k: jsonOutput !== undefined ? undefined : tokenCount,
+    });
+  }
+
+  return {
+    mode: "search",
+    targetPath: targetLabel,
+    text: formattedBundle,
+    formattedBundle,
+    targetContent: formattedBundle,
+    output,
+    tokenCount,
+    targets: classified.map((c) => ({
+      targetPath: c.displayPath || ".",
+      resolvedPath: c.diskPath,
+      mode: "search" as const,
+      selector: c.effectiveSelector ?? primarySelector,
+    })),
+    missingTargets,
+    dependencies: [],
+    callers: [],
+    jsonData,
+    jsonOutput,
+    stats: {
+      tokenCount,
+      originalTokens: honestOrigTokens,
+      savedTokens: honestOrigTokens - tokenCount,
+      savingsPct:
+        honestOrigTokens > 0
+          ? Math.round(((honestOrigTokens - tokenCount) / honestOrigTokens) * 100)
+          : 0,
+      originalChars: honestRgBaseline.length,
+      outputChars: formattedBundle.length,
+      dependenciesCount: 0,
+      callersCount: 0,
+      fileCount: hits.length,
+    },
+    statsText,
+  };
 }
 
 interface ClassifiedReadTarget {
@@ -2611,18 +3104,23 @@ export async function aiceRead(
 
     const nativeFiles = resolvedWs.files;
     let nativeText = "";
+    let rawWsFullText = "";
     try {
       const wsEntries = nativeFiles
-        .slice(0, 60)
+        .slice(0, 20)
         .filter((fp) => fs.existsSync(fp))
         .map((fp) => ({
           relPath: formatReadDisplayPath(fp, projectRoot),
           rawSource: fs.readFileSync(fp, "utf-8"),
         }));
+      rawWsFullText = wsEntries.map((e) => e.rawSource).join("\n");
       nativeText = computeHonestReadBaselineText({
+        relPath: ".",
         workspaceFiles: wsEntries,
         symbolSelector:
           sharedSymTrimmed && isPureRegexSelector(sharedSymTrimmed) ? sharedSymTrimmed : undefined,
+        mode: wsMode === "search" ? "search" : "workspace",
+        includeToolWrapper: false,
       });
     } catch {
       // ignore unreadable workspace files
@@ -2661,14 +3159,19 @@ export async function aiceRead(
       tokenCount = capped.tokenCount;
     }
 
+    const wsRealTok = estimateTokens(nativeText, "cl100k_base");
+    const wsRawTok = Math.max(wsRealTok, estimateTokens(rawWsFullText, "cl100k_base"));
     recordTelemetryEvent({
       targetPath: resolvedWs.resolvedPath,
       projectRoot,
       operation: "context",
       surface,
       idiomsUsed: Boolean(ctxRes.idioms && Object.keys(ctxRes.idioms).length > 0),
-      nativeText,
+      isSearchMode: wsMode === "search",
+      nativeText: rawWsFullText || nativeText,
+      nativeCl100k: wsRawTok,
       realisticNativeText: nativeText,
+      realisticNativeCl100k: Math.min(wsRawTok, wsRealTok),
       aiceText: jsonOutput ?? wsFormattedBundle,
     });
 
@@ -2773,19 +3276,29 @@ export async function aiceRead(
     let lineCount: number | undefined;
     let needsDynamicBudget = false;
 
+    const isUnclosedSlashSel = Boolean(
+      effectiveSelector &&
+        effectiveSelector.startsWith("/") &&
+        effectiveSelector.length > 1 &&
+        effectiveSelector.indexOf("/", 1) === -1,
+    );
     if (isExplicitOutline) {
       route = "outline";
     } else if (isDir) {
       if (!effectiveSelector && options.autoOutlineDirectories !== false) {
         route = "auto-outline-dir";
       } else {
-        route = isPureRegexSelector(effectiveSelector) ? "search" : "context";
+        route = isPureRegexSelector(effectiveSelector) || isUnclosedSlashSel ? "search" : "context";
       }
     } else if (effectiveSelector) {
-      route = isPureRegexSelector(effectiveSelector) ? "search" : "context";
+      route = isPureRegexSelector(effectiveSelector) || isUnclosedSlashSel ? "search" : "context";
     } else {
       const ext = path.extname(diskPath).toLowerCase();
-      const isOutlinableFile = KNOWN_TARGET_EXTENSIONS.has(ext) || diskPath.endsWith(".aice");
+      const isOutlinableFile =
+        EXTENDED_READ_EXTENSIONS.has(ext) ||
+        EXTENDED_READ_FILENAMES.has(path.basename(diskPath)) ||
+        diskPath.endsWith(".aice") ||
+        isSupportedReadDiskFile(diskPath);
       if (
         isOutlinableFile &&
         !effectiveFull &&
@@ -2794,16 +3307,12 @@ export async function aiceRead(
       ) {
         preReadSource = fs.readFileSync(diskPath, "utf-8");
         lineCount = countSourceLines(preReadSource);
-        if (explicitLineThreshold !== undefined) {
-          if (lineCount > explicitLineThreshold) {
-            route = "auto-outline-file";
-          } else {
-            route = "context";
-            sharedScanCache.fileContentByPath.set(diskPath, preReadSource);
-          }
-        } else if (options.maxTokens !== undefined) {
+        const effectiveThreshold = explicitLineThreshold ?? DEFAULT_AUTO_OUTLINE_LINE_THRESHOLD;
+        if (options.maxTokens !== undefined && explicitLineThreshold === undefined) {
           route = "context";
           sharedScanCache.fileContentByPath.set(diskPath, preReadSource);
+        } else if (lineCount > effectiveThreshold) {
+          route = "auto-outline-file";
         } else {
           route = "context";
           needsDynamicBudget = true;
@@ -2841,6 +3350,49 @@ export async function aiceRead(
       regex: resolvedSearch.regex,
       selector: resolvedSearch.selector,
       rawPattern: rawPat,
+      options,
+      surface,
+    });
+  }
+
+  // R1: Unified deduplicated search across 1 or N files/directories (zero omitted dirs / :outline downgrades!)
+  if (
+    classified.length > 0 &&
+    classified.every((c) => c.route === "search") &&
+    effectiveRawNative &&
+    effectiveIncludeDeps !== true &&
+    effectiveIncludeCallers !== true &&
+    options.idioms !== true
+  ) {
+    const rawPatLabel = options.search ?? classified[0]?.effectiveSelector ?? options.symbol ?? "";
+    if (
+      rawPatLabel.startsWith("/") &&
+      rawPatLabel.length > 1 &&
+      rawPatLabel.indexOf("/", 1) === -1 &&
+      options.search === undefined
+    ) {
+      const testFiles = collectSearchCandidateFiles(classified);
+      const rawPrefix = rawPatLabel.slice(1).trim();
+      const anyHit =
+        rawPrefix.length > 0 &&
+        testFiles.some((f) => {
+          try {
+            return fs.readFileSync(f.absPath, "utf-8").includes(rawPrefix);
+          } catch {
+            return false;
+          }
+        });
+      if (!anyHit) {
+        throw new Error(
+          `Unclosed regex selector '${rawPatLabel}'. Quote regex selectors containing '|' in shell: '${classified[0]?.displayPath || "file"}:/${rawPrefix || "pattern"}|.../'`,
+        );
+      }
+    }
+    return executeUnifiedCompactSearch({
+      classified,
+      missingTargets,
+      defaultSelector: safeSearch?.selector,
+      rawPatternLabel: rawPatLabel,
       options,
       surface,
     });
@@ -3019,10 +3571,12 @@ export async function aiceRead(
 
   const outlineSectionBody =
     outlineItems.length === 1 && !outlineItems[0]?.isDir && outlineItems[0]
-      ? `// === ${outlineItems[0].displayPath} ===\n${outlinePart.formattedBundle}`
+      ? outlinePart.formattedBundle.startsWith("// ")
+        ? outlinePart.formattedBundle
+        : `// ${outlineItems[0].displayPath}\n${outlinePart.formattedBundle}`
       : outlinePart.formattedBundle;
 
-  let combinedBundle = `${ctxPart.formattedBundle}\n\n## Outlined Targets:\n\`\`\`aice\n${outlineSectionBody}\n\`\`\``;
+  let combinedBundle = `${ctxPart.formattedBundle}\n\n${outlineSectionBody}`;
   if (missingTargets.length > 0) {
     const missingFooter = missingTargets.map((m) => `// not found: ${m}`).join("\n");
     combinedBundle = `${combinedBundle}\n${missingFooter}`;
@@ -3223,7 +3777,9 @@ function buildPureOutlineResult(params: {
           })}\n`
         : "";
       outlineDisplayKeys.push(displayKey);
-      textBlocks.push(`// === ${displayKey} ===\n${headerLine}${itemRes.text}`);
+      textBlocks.push(
+        headerLine ? `${headerLine}${itemRes.text}` : `// ${displayKey}\n${itemRes.text}`,
+      );
 
       jsonItems.push({
         ...(itemRes.json ?? {
@@ -3260,12 +3816,12 @@ function buildPureOutlineResult(params: {
     const enforceOutlineBudget = shouldEnforceDefaultReadBudget(options);
     if (textBlocks.length === 0) {
       const emptyLabel = classified.map((c) => c.displayPath).join(", ") || ".";
-      rawBundle = `// === ${emptyLabel} ===\n// (no supported target files)`;
+      rawBundle = `// ${emptyLabel}\n// (no supported target files)`;
     } else if (enforceOutlineBudget) {
       const keptOutlineBlocks: string[] = [];
       const omittedDisplayPaths: string[] = [];
       let runningBytes = 0;
-      const budgetThresholdBytes = effectiveBudgets.maxBytes - 512;
+      const budgetThresholdBytes = effectiveBudgets.maxBytes - 220;
       for (let i = 0; i < textBlocks.length; i++) {
         const blk = textBlocks[i]!;
         const blkBytes = Buffer.byteLength(blk, "utf-8") + (keptOutlineBlocks.length > 0 ? 2 : 0);
@@ -3277,19 +3833,12 @@ function buildPureOutlineResult(params: {
         runningBytes += blkBytes;
       }
       if (omittedDisplayPaths.length > 0) {
-        const hintCmds = omittedDisplayPaths
-          .slice(0, 3)
-          .map((p) =>
-            buildNextSliceHintCommand(p, 1, undefined, {
-              projectRoot,
-              sliceByteBudget: effectiveBudgets.sliceByteBudget,
-            }),
-          )
-          .join(" | ");
-        const fullHint =
-          options.surface === "cli" || options.surface === "mcp" ? "" : " (or pass --full)";
+        const nextCmd = buildNextSliceHintCommand(omittedDisplayPaths[0]!, 1, undefined, {
+          projectRoot,
+          sliceByteBudget: effectiveBudgets.sliceByteBudget,
+        });
         keptOutlineBlocks.push(
-          `// ... (+${omittedDisplayPaths.length} more target files omitted to fit ${effectiveBudgets.budgetLabel} stdout budget)\n// Next slices: ${hintCmds}${fullHint}`,
+          `// +${omittedDisplayPaths.length} more files omitted — next: ${nextCmd}`,
         );
       }
       rawBundle = keptOutlineBlocks.join("\n\n");
@@ -3329,56 +3878,21 @@ function buildPureOutlineResult(params: {
         budgetLabel: effectiveBudgets.budgetLabel,
         nextSliceCmd,
       });
-      const body = outlineRes.text ? `${autoHeader}\n${outlineRes.text}` : autoHeader;
-      let parallelSlicesLine = "";
-      const sliceMatch = nextSliceCmd.match(/^aice read (.+?):L1-L(\d+)$/);
-      if (sliceMatch) {
-        const safePath = sliceMatch[1]!;
-        const firstEnd = Number.parseInt(sliceMatch[2]!, 10);
-        if (autoMeta.lineCount > firstEnd) {
-          const allSlices: Array<{ startLine: number; endLine: number }> = [
-            { startLine: 1, endLine: firstEnd },
-          ];
-          let curStart = firstEnd + 1;
-          let hasMore = false;
-          while (curStart <= autoMeta.lineCount) {
-            if (allSlices.length >= 6) {
-              hasMore = true;
-              break;
-            }
-            let curEnd: number;
-            if (autoMeta.preReadSource) {
-              const span = computeDynamicSliceSpan(
-                autoMeta.diskPath ?? safePath,
-                autoMeta.preReadSource,
-                curStart,
-                effectiveBudgets.sliceByteBudget,
-              );
-              curEnd = Math.min(span.endLine, autoMeta.lineCount);
-            } else {
-              const fallbackSpan =
-                effectiveBudgets.sliceByteBudget <= DEFAULT_CLI_SLICE_BYTE_BUDGET ? 134 : 159;
-              curEnd = Math.min(curStart + fallbackSpan, autoMeta.lineCount);
-            }
-            if (curEnd < curStart) curEnd = curStart;
-            allSlices.push({ startLine: curStart, endLine: curEnd });
-            curStart = curEnd + 1;
-          }
-          if (allSlices.length >= 2) {
-            parallelSlicesLine = `// Parallel 1-turn slices (separate calls in 1 turn, never sequential): ${allSlices
-              .map((r) => `${safePath}:L${r.startLine}-L${r.endLine}`)
-              .join(", ")}${hasMore ? ", ..." : ""}`;
+      let compactOutlineBody = outlineRes.text;
+      if (autoMeta.preReadSource && compactOutlineBody) {
+        const rawTokEst = estimateTokens(autoMeta.preReadSource, "cl100k_base");
+        const outLines = compactOutlineBody.split("\n");
+        if (
+          rawTokEst > 0 &&
+          estimateTokens(`${autoHeader}\n${compactOutlineBody}`, "cl100k_base") > rawTokEst * 0.48
+        ) {
+          const maxKeep = Math.max(12, Math.min(35, Math.floor(outLines.length * 0.35)));
+          if (outLines.length > maxKeep) {
+            compactOutlineBody = `${outLines.slice(0, maxKeep).join("\n")}\n// ... (+${outLines.length - maxKeep} more symbols — slice ${autoMeta.displayPath}:L<start>-L<end> or search)`;
           }
         }
       }
-      const sliceHintFooter = parallelSlicesLine
-        ? `// Next slice: ${nextSliceCmd}\n${parallelSlicesLine}`
-        : `// Next slice: ${nextSliceCmd}`;
-      if (!body.includes(`// Next slice: ${nextSliceCmd}`)) {
-        rawBundle = `${body}\n\n${sliceHintFooter}`;
-      } else {
-        rawBundle = body;
-      }
+      rawBundle = compactOutlineBody ? `${autoHeader}\n${compactOutlineBody}` : autoHeader;
     } else {
       rawBundle = outlineRes.text;
     }
@@ -3456,38 +3970,79 @@ function buildPureOutlineResult(params: {
   }
 
   if (!skipTelemetry && classified[0]) {
-    const nativeJoined = nativeParts.join("\n\n");
-    const nativeCl100k =
-      totalOrigTokens > 0
-        ? totalOrigTokens
-        : nativeJoined
-          ? estimateTokens(nativeJoined, "cl100k_base")
-          : 0;
-    const aicePayload = jsonOutput ?? formattedBundle;
-    const aiceCl100k = jsonOutput !== undefined ? estimateTokens(jsonOutput) : tokenCount;
-    const structuralCompressionPct =
-      nativeCl100k > 0 ? Math.round(((nativeCl100k - aiceCl100k) / nativeCl100k) * 100) : 0;
     const isDirOrMultiOutline = outlineRes instanceof Map || Boolean(classified[0]?.isDir);
-    const realisticNativeCl100k = isDirOrMultiOutline
-      ? Math.min(nativeCl100k, Math.max(aiceCl100k, fileCount * 45))
-      : nativeCl100k;
+    const aicePayload = jsonOutput ?? formattedBundle;
+    const aiceCl100k =
+      jsonOutput !== undefined ? estimateTokens(jsonOutput, "cl100k_base") : tokenCount;
+
+    let honestRealisticText: string;
+    let rawOutlineCl100k: number;
+    let rawOutlineChars: number;
+    let rawOutlinePayload = "";
+    if (isDirOrMultiOutline) {
+      const dirEntries: HonestBaselineFileEntry[] = [];
+      let rawSumChars = 0;
+      let rawSumTok = 0;
+      if (outlineRes instanceof Map) {
+        let count = 0;
+        for (const [k, v] of outlineRes.entries()) {
+          try {
+            if (fs.existsSync(v.file) && fs.statSync(v.file).isFile()) {
+              const rawContent = fs.readFileSync(v.file, "utf-8");
+              rawSumChars += rawContent.length;
+              rawSumTok += estimateTokens(rawContent, "cl100k_base");
+              if (count < 20) {
+                dirEntries.push({ relPath: k, rawSource: rawContent });
+                count++;
+              }
+            }
+          } catch {}
+        }
+      }
+      honestRealisticText = computeHonestReadBaselineText({
+        relPath: classified[0].displayPath || ".",
+        workspaceFiles: dirEntries,
+        mode: "outline-dir",
+        includeToolWrapper: false,
+      });
+      const realTok = estimateTokens(honestRealisticText, "cl100k_base");
+      rawOutlineCl100k = Math.max(realTok, totalOrigTokens || rawSumTok);
+      rawOutlineChars = Math.max(honestRealisticText.length, totalOrigChars || rawSumChars);
+    } else {
+      const singleRaw = nativeParts[0] ?? "";
+      rawOutlinePayload = singleRaw;
+      honestRealisticText = singleRaw;
+      rawOutlineCl100k = estimateTokens(singleRaw, "cl100k_base");
+      rawOutlineChars = singleRaw.length;
+    }
+
+    const realOutlineCl100k = Math.min(
+      rawOutlineCl100k,
+      estimateTokens(honestRealisticText, "cl100k_base"),
+    );
+    const structuralCompressionPct =
+      rawOutlineCl100k > 0
+        ? Math.round(((rawOutlineCl100k - aiceCl100k) / rawOutlineCl100k) * 100)
+        : 0;
+
     recordTelemetryEvent({
       targetPath: classified[0].diskPath,
       projectRoot,
       operation: "outline",
       surface,
       idiomsUsed: anyIdiomsUsed,
-      nativeText: nativeJoined,
-      nativeCl100k,
+      nativeText: rawOutlinePayload,
+      nativeChars: rawOutlineChars,
+      nativeCl100k: rawOutlineCl100k,
+      nativeO200k: rawOutlineCl100k,
       aiceCl100k,
-      realisticNativeText: nativeJoined,
-      realisticNativeCl100k,
+      realisticNativeText: honestRealisticText,
+      realisticNativeCl100k: realOutlineCl100k,
       ...(outlineDisplayKeys.length > 1 ? { multiFiles: outlineDisplayKeys } : {}),
       structuralCompressionPct,
       aiceText: aicePayload,
     });
   }
-
   const savedTokens = hasStats ? totalOrigTokens - tokenCount : undefined;
   const savingsPct =
     hasStats && totalOrigTokens > 0
@@ -3567,9 +4122,10 @@ async function executeContextStream(params: {
 
   let firstResolvedPath = "";
   let firstProjectRoot = process.cwd();
-  let totalNativeChars = 0;
-  let totalNativeCl100k = 0;
-  let totalNativeO200k = 0;
+  let totalFullNativeChars = 0;
+  let totalFullNativeCl100k = 0;
+  let totalFullNativeO200k = 0;
+  let totalRealisticNativeCl100k = 0;
   let resolvedNativeTargetCount = 0;
 
   const effectiveRawNative = resolveEffectiveReadRawNative(options);
@@ -3579,10 +4135,17 @@ async function executeContextStream(params: {
   );
 
   for (const item of contextItems) {
+    const hasMultiCommaSelectors = Boolean(
+      item.effectiveSelector &&
+        item.effectiveSelector.includes(",") &&
+        splitCommaSelectors(item.effectiveSelector).length > 1,
+    );
     const contextOpts: ContextOptions = {
       depth: options.depth,
       symbol: item.effectiveSelector,
-      allowPartialSymbolMatch: options.allowPartialSymbolMatch ?? (isMultiInput ? true : undefined),
+      allowPartialSymbolMatch:
+        options.allowPartialSymbolMatch ??
+        (isMultiInput || hasMultiCommaSelectors ? true : undefined),
       idioms: options.idioms,
       includeDeps: effectiveIncludeDeps,
       includeCallers: effectiveIncludeCallers,
@@ -3600,8 +4163,8 @@ async function executeContextStream(params: {
       surface: options.surface,
       full: options.full,
       unboundedCli: options.unboundedCli,
+      _isMultiTarget: isMultiInput,
     };
-
     let targetMatched = false;
     try {
       const res = await withSuppressedTelemetryAsync(() =>
@@ -3671,38 +4234,55 @@ async function executeContextStream(params: {
             item.preReadSource ??
             sharedScanCache.fileContentByPath.get(item.diskPath) ??
             fs.readFileSync(item.diskPath, "utf-8");
-          const baselineSlice = computeHonestReadBaselineText({
+          const realisticSlice = computeHonestReadBaselineText({
             rawSource: rawText,
             relPath: item.displayPath,
             symbolSelector: item.effectiveSelector,
+            mode: item.route === "search" ? "search" : item.effectiveSelector ? "slice" : "file",
+            includeToolWrapper: false,
           });
-          totalNativeChars +=
-            baselineSlice.length +
-            (resolvedNativeTargetCount > 0 && baselineSlice.length > 0 ? 2 : 0);
-          totalNativeCl100k += estimateTokens(baselineSlice, "cl100k_base");
-          totalNativeO200k += estimateTokens(baselineSlice, "o200k_base");
+          const fullTok = estimateTokens(rawText, "cl100k_base");
+          const fullO200k = estimateTokens(rawText, "o200k_base");
+          const realTok = Math.min(fullTok, estimateTokens(realisticSlice, "cl100k_base"));
+          totalFullNativeChars +=
+            rawText.length + (resolvedNativeTargetCount > 0 && rawText.length > 0 ? 2 : 0);
+          totalFullNativeCl100k += fullTok;
+          totalFullNativeO200k += fullO200k;
+          totalRealisticNativeCl100k += realTok;
           resolvedNativeTargetCount++;
         } else if (item.isDir && fs.existsSync(item.diskPath)) {
           const dirFiles =
-            sharedScanCache.filesByRoot.get(item.diskPath) ?? item.resolved.files.slice(0, 60);
-          const dirEntries: Array<{ relPath: string; rawSource: string }> = [];
+            sharedScanCache.filesByRoot.get(item.diskPath) ?? item.resolved.files.slice(0, 20);
+          const dirEntries: HonestBaselineFileEntry[] = [];
+          let dirRawChars = 0;
+          let dirRawCl100k = 0;
+          let dirRawO200k = 0;
           for (const df of dirFiles) {
             if (!fs.existsSync(df)) continue;
             const rawText =
               sharedScanCache.fileContentByPath.get(df) ?? fs.readFileSync(df, "utf-8");
+            dirRawChars += rawText.length;
+            dirRawCl100k += estimateTokens(rawText, "cl100k_base");
+            dirRawO200k += estimateTokens(rawText, "o200k_base");
             dirEntries.push({
               relPath: formatReadDisplayPath(df, item.resolved.projectRoot),
               rawSource: rawText,
             });
           }
           const dirBaseline = computeHonestReadBaselineText({
+            relPath: item.displayPath || ".",
             workspaceFiles: dirEntries,
             symbolSelector: item.effectiveSelector,
+            mode: item.route === "search" ? "search" : "workspace",
+            includeToolWrapper: false,
           });
-          totalNativeChars +=
-            dirBaseline.length + (resolvedNativeTargetCount > 0 && dirBaseline.length > 0 ? 2 : 0);
-          totalNativeCl100k += estimateTokens(dirBaseline, "cl100k_base");
-          totalNativeO200k += estimateTokens(dirBaseline, "o200k_base");
+          const dirRealTok = estimateTokens(dirBaseline, "cl100k_base");
+          const dirFullCl100k = Math.max(dirRealTok, dirRawCl100k);
+          const dirFullO200k = Math.max(estimateTokens(dirBaseline, "o200k_base"), dirRawO200k);
+          totalFullNativeChars += Math.max(dirBaseline.length, dirRawChars);
+          totalFullNativeCl100k += dirFullCl100k;
+          totalFullNativeO200k += dirFullO200k;
+          totalRealisticNativeCl100k += Math.min(dirFullCl100k, dirRealTok);
           resolvedNativeTargetCount++;
         }
       } catch {
@@ -3789,6 +4369,8 @@ async function executeContextStream(params: {
       includeDeps: effectiveIncludeDeps,
       includeCallers: effectiveIncludeCallers,
       depth: options.depth,
+      rawNative: effectiveRawNative,
+      surface: options.surface,
     });
     let formattedBundle = merged.formattedBundle;
     const paginationHints: string[] = [];
@@ -3872,11 +4454,14 @@ async function executeContextStream(params: {
           partialFillHandled = true;
           const partialBudgetBytes = remainingBytes - 240;
           const rawBundleLines = resItem.formattedBundle.split("\n");
-          const hasNumberedLines = rawBundleLines.some((ln) => /^\s*\d+│/.test(ln));
-          if (hasNumberedLines && partialBudgetBytes > 120) {
+          const hasTrackableLines = rawBundleLines.some(
+            (ln) => /^\s*\d+[│:]\s/.test(ln) || /^\/\/ [^\s:]+:\d+(?:-\d+)?$/.test(ln),
+          );
+          if (hasTrackableLines && partialBudgetBytes > 120) {
             const keptPartialLines: string[] = [];
             let partialBytes = 0;
             let lastEmittedLine = 0;
+            let trackingContiguous = false;
             for (const ln of rawBundleLines) {
               const lnBytes =
                 Buffer.byteLength(ln, "utf-8") + (keptPartialLines.length > 0 ? 1 : 0);
@@ -3885,12 +4470,29 @@ async function executeContextStream(params: {
               }
               keptPartialLines.push(ln);
               partialBytes += lnBytes;
-              const numMatch = ln.match(/^\s*(\d+)│/);
+              const hdrMatch = ln.match(/^\/\/ [^\s:]+:(\d+)(?:-\d+)?$/);
+              if (hdrMatch?.[1]) {
+                const sNum = Number.parseInt(hdrMatch[1], 10);
+                lastEmittedLine = sNum > 0 ? sNum - 1 : 0;
+                trackingContiguous = true;
+                continue;
+              }
+              const foldMatch = ln.match(/^\/\/ \[L\d+-L(\d+):/);
+              if (foldMatch?.[1]) {
+                lastEmittedLine = Number.parseInt(foldMatch[1], 10);
+                continue;
+              }
+              const numMatch = ln.match(/^\s*(\d+)[│:]\s/);
               if (numMatch?.[1]) {
                 const parsedNum = Number.parseInt(numMatch[1], 10);
                 if (parsedNum > 0) {
                   lastEmittedLine = parsedNum;
+                  trackingContiguous = true;
                 }
+                continue;
+              }
+              if (trackingContiguous && !ln.startsWith("// ")) {
+                lastEmittedLine++;
               }
             }
 
@@ -3969,7 +4571,7 @@ async function executeContextStream(params: {
 
         if (isExplicitLineRange) {
           downgradedBlocks.push(
-            `// === ${targetMeta.displayPath}:${targetMeta.effectiveSelector} (omitted — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`,
+            `// ${targetMeta.displayPath}:${targetMeta.effectiveSelector} (omitted — ${effectiveBudgets.budgetLabel} budget; next: ${nextCmd})`,
           );
         } else {
           try {
@@ -3985,16 +4587,16 @@ async function executeContextStream(params: {
               const singleOutline =
                 oRes instanceof Map ? (Array.from(oRes.values())[0]?.text ?? "") : oRes.text;
               downgradedBlocks.push(
-                `// === ${targetMeta.displayPath} (auto-downgraded to :outline — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===\n${singleOutline}`,
+                `// Auto-outlined ${targetMeta.displayPath} (${effectiveBudgets.budgetLabel} budget — next: ${nextCmd})\n${singleOutline}`,
               );
             } else {
               downgradedBlocks.push(
-                `// === ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`,
+                `// ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next: ${nextCmd})`,
               );
             }
           } catch {
             downgradedBlocks.push(
-              `// === ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next slice: ${nextCmd}) ===`,
+              `// ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next: ${nextCmd})`,
             );
           }
         }
@@ -4007,20 +4609,13 @@ async function executeContextStream(params: {
           includeDeps: effectiveIncludeDeps,
           includeCallers: effectiveIncludeCallers,
           depth: options.depth,
+          rawNative: effectiveRawNative,
+          surface: options.surface,
         });
         partsAfterDowngrade.push(merged.formattedBundle);
       }
       if (downgradedBlocks.length > 0) {
         partsAfterDowngrade.push(downgradedBlocks.join("\n\n"));
-      }
-      if (paginationHints.length > 0) {
-        const hintPrefix =
-          options.surface === "cli" || options.surface === "mcp"
-            ? `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling — run in next call):`
-            : `// Pagination hints (${effectiveBudgets.budgetLabel} stdout ceiling; pass --full to override):`;
-        partsAfterDowngrade.push(
-          `${hintPrefix}\n${paginationHints.map((cmd) => `//   ${cmd}`).join("\n")}`,
-        );
       }
       formattedBundle = partsAfterDowngrade.join("\n\n");
     }
@@ -4084,11 +4679,12 @@ async function executeContextStream(params: {
         operation: "context",
         surface,
         idiomsUsed: Boolean(merged.idioms && Object.keys(merged.idioms).length > 0),
+        isSearchMode: overallMode === "search",
         nativeText: "",
-        nativeChars: totalNativeChars,
-        nativeCl100k: totalNativeCl100k,
-        nativeO200k: totalNativeO200k,
-        realisticNativeCl100k: totalNativeCl100k,
+        nativeChars: totalFullNativeChars,
+        nativeCl100k: totalFullNativeCl100k,
+        nativeO200k: totalFullNativeO200k,
+        realisticNativeCl100k: Math.min(totalFullNativeCl100k, totalRealisticNativeCl100k),
         aiceText: aicePayload,
         aiceCl100k: jsonOutput !== undefined ? undefined : tokenCount,
       });
@@ -4098,13 +4694,15 @@ async function executeContextStream(params: {
       tokenCount,
       ...(resolvedNativeTargetCount > 0
         ? {
-            originalTokens: totalNativeCl100k,
-            savedTokens: totalNativeCl100k - tokenCount,
+            originalTokens: totalRealisticNativeCl100k,
+            savedTokens: totalRealisticNativeCl100k - tokenCount,
             savingsPct:
-              totalNativeCl100k > 0
-                ? Math.round(((totalNativeCl100k - tokenCount) / totalNativeCl100k) * 100)
+              totalRealisticNativeCl100k > 0
+                ? Math.round(
+                    ((totalRealisticNativeCl100k - tokenCount) / totalRealisticNativeCl100k) * 100,
+                  )
                 : 0,
-            originalChars: totalNativeChars,
+            originalChars: totalFullNativeChars,
           }
         : {}),
       outputChars: formattedBundle.length,
@@ -4208,10 +4806,10 @@ async function executeContextStream(params: {
       idiomsUsed: Boolean(singleResult.idioms && Object.keys(singleResult.idioms).length > 0),
       isSearchMode: overallMode === "search",
       nativeText: "",
-      nativeChars: totalNativeChars,
-      nativeCl100k: totalNativeCl100k,
-      nativeO200k: totalNativeO200k,
-      realisticNativeCl100k: totalNativeCl100k,
+      nativeChars: totalFullNativeChars,
+      nativeCl100k: totalFullNativeCl100k,
+      nativeO200k: totalFullNativeO200k,
+      realisticNativeCl100k: Math.min(totalFullNativeCl100k, totalRealisticNativeCl100k),
       aiceText: aicePayload,
       aiceCl100k: jsonOutput !== undefined ? undefined : tokenCount,
     });
@@ -4221,13 +4819,15 @@ async function executeContextStream(params: {
     tokenCount,
     ...(resolvedNativeTargetCount > 0
       ? {
-          originalTokens: totalNativeCl100k,
-          savedTokens: totalNativeCl100k - tokenCount,
+          originalTokens: totalRealisticNativeCl100k,
+          savedTokens: totalRealisticNativeCl100k - tokenCount,
           savingsPct:
-            totalNativeCl100k > 0
-              ? Math.round(((totalNativeCl100k - tokenCount) / totalNativeCl100k) * 100)
+            totalRealisticNativeCl100k > 0
+              ? Math.round(
+                  ((totalRealisticNativeCl100k - tokenCount) / totalRealisticNativeCl100k) * 100,
+                )
               : 0,
-          originalChars: totalNativeChars,
+          originalChars: totalFullNativeChars,
         }
       : {}),
     outputChars: formattedBundle.length,
