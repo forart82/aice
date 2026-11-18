@@ -11,19 +11,22 @@ NO_CHEATSHEET=0
 NO_AGENTS=0
 NO_UPDATE=0
 DRY_RUN=0
+SYNC_PROJECTS=0
+SYNC_PROJECTS_DIR=""
 
 print_help() {
   cat <<'HELP_EOF'
 Usage: ./install.sh [options]
 
 Options:
-  -y, --yes             Auto-confirm dependency installation, git update, and Zsh cheatsheet
-  -u, --update          Force in-place update check against origin/main and refresh all rules/schemas
-      --no-update       Skip checking the remote git repository for newer versions
-      --no-cheatsheet   Skip the Zsh startup cheatsheet prompt/injection
-      --no-agents       Skip automatic CLI coding agent configuration (aice agents setup)
-      --dry-run         Print actions that would be performed without mutating the system
-  -h, --help            Display this help message
+  -y, --yes                   Auto-confirm dependency installation, git update, and Zsh cheatsheet
+  -u, --update                Force in-place update check against origin/main and refresh schemas
+      --no-update             Skip checking the remote git repository for newer versions
+      --no-cheatsheet         Skip the Zsh startup cheatsheet prompt/injection
+      --no-agents             Skip automatic CLI coding agent configuration (aice agents setup)
+      --sync-projects [dir]   Explicitly refresh existing aice.config.json projects under dir (opt-in)
+      --dry-run               Print actions that would be performed without mutating the system
+  -h, --help                  Display this help message
 HELP_EOF
 }
 
@@ -47,6 +50,20 @@ while [[ $# -gt 0 ]]; do
       ;;
     --no-agents)
       NO_AGENTS=1
+      shift
+      ;;
+    --sync-projects)
+      SYNC_PROJECTS=1
+      if [[ $# -ge 2 ]] && [[ "$2" != -* ]]; then
+        SYNC_PROJECTS_DIR="$2"
+        shift 2
+      else
+        shift
+      fi
+      ;;
+    --sync-projects=*)
+      SYNC_PROJECTS=1
+      SYNC_PROJECTS_DIR="${1#*=}"
       shift
       ;;
     --dry-run)
@@ -472,12 +489,14 @@ else
   fi
 fi
 
-# ── Substep 2.5: Global Agent Wiring, MCP Schemas & Workspace Rule Refresh ───
+# ── Substep 2.5: Global Agent Wiring, MCP Schemas & Opt-In Workspace Refresh ──
 if [[ "$DRY_RUN" -eq 1 ]]; then
   if [[ "$NO_AGENTS" -eq 0 ]]; then
     printf '  [dry-run] %s agents setup\n' "$AICE_BIN"
     printf '  [dry-run] regenerate MCP schemas in ~/.gemini/antigravity-cli/mcp/aice/\n'
-    printf '  [dry-run] refresh AICE rule blocks across ~/dev/* AICE-enabled projects\n'
+    if [[ "$SYNC_PROJECTS" -eq 1 ]] || [[ -n "${AICE_PROJECTS_DIR:-}" ]]; then
+      printf '  [dry-run] refresh explicit aice.config.json projects in %s\n' "${SYNC_PROJECTS_DIR:-${AICE_PROJECTS_DIR:-~/dev}}"
+    fi
   fi
   printf '  [dry-run] %s --version\n' "$AICE_BIN"
   printf '  [dry-run] %s agents status\n' "$AICE_BIN"
@@ -489,188 +508,45 @@ else
     log_info "Regenerating MCP tool schemas (aice mcp --generate-schemas)..."
     "$AICE_BIN" mcp --generate-schemas
 
-    log_info "Refreshing AICE-enabled workspaces in ~/dev/*..."
-    node -e '
-      const fs = require("node:fs");
-      const os = require("node:os");
-      const path = require("node:path");
-      const { spawnSync } = require("node:child_process");
-      const aiceBin = process.argv[1];
-      const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
-      const devDir = process.env.AICE_PROJECTS_DIR
-        ? path.resolve(process.env.AICE_PROJECTS_DIR)
-        : path.join(homeDir, "dev");
+    if [[ "$SYNC_PROJECTS" -eq 1 ]] || [[ -n "${AICE_PROJECTS_DIR:-}" ]]; then
+      TARGET_PROJECTS_DIR="${SYNC_PROJECTS_DIR:-${AICE_PROJECTS_DIR:-}}"
+      log_info "Refreshing opted-in AICE workspaces in ${TARGET_PROJECTS_DIR:-~/dev}..."
+      AICE_SYNC_TARGET_DIR="$TARGET_PROJECTS_DIR" node -e '
+        const fs = require("node:fs");
+        const os = require("node:os");
+        const path = require("node:path");
+        const { spawnSync } = require("node:child_process");
+        const aiceBin = process.argv[1];
+        const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
+        const rawDir = process.env.AICE_SYNC_TARGET_DIR || process.env.AICE_PROJECTS_DIR || path.join(homeDir, "dev");
+        const devDir = path.resolve(rawDir);
+        const SKIP_DIRS = new Set(["node_modules", "android-env", ".git", "zshrc"]);
 
-      const TARGET_MDS = [
-        "AGENTS.md",
-        "CLAUDE.md",
-        path.join(".claude", "CLAUDE.md"),
-        "GEMINI.md",
-        ".GEMINI.md",
-        "CODEX.md",
-        ".CODEX.md",
-        path.join(".codex", "AGENTS.md"),
-        path.join(".codex", "CODEX.md"),
-        path.join(".codex", "instructions.md"),
-      ];
-      const TARGET_RULES = [
-        path.join(".agents", "rules", "aice.md"),
-        path.join(".gemini", "rules", "aice.md"),
-        path.join(".claude", "rules", "aice.md"),
-      ];
-
-      function stripDirectivesFenceAware(markdown) {
-        let fenceChar = null;
-        let fenceLen = 0;
-        let activeStart = -1;
-        const spans = [];
-        let pos = 0;
-        const total = markdown.length;
-        while (pos <= total) {
-          const nl = markdown.indexOf("\n", pos);
-          const lineEnd = nl === -1 ? total : nl;
-          const raw = markdown.slice(pos, lineEnd);
-          const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-          const fence = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
-          if (fence) {
-            const m = fence[1];
-            const ch = m[0];
-            const rest = fence[2] || "";
-            if (!fenceChar) {
-              if (ch === "~" || !rest.includes("`")) {
-                fenceChar = ch;
-                fenceLen = m.length;
-              }
-            } else if (ch === fenceChar && m.length >= fenceLen && /^[ \t]*$/.test(rest)) {
-              fenceChar = null;
-              fenceLen = 0;
-            }
-          } else if (!fenceChar) {
-            const isStart =
-              /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(line) ||
-              /^[ \t]*##\s+AICE(?:\s+\(?v?[0-9A-Za-z._-]+\)?)?\s*[-—]\s*(?:MANDATORY|\d+-Tool\s+AST\s+Cheat-Card)/i.test(line);
-            const isEnd = /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(line);
-            const isNonAiceHeading =
-              /^[ \t]*#{1,2}[ \t]+/.test(line) && !/^[ \t]*##\s+AICE\b/i.test(line);
-            if (activeStart === -1) {
-              if (isStart) activeStart = pos;
-            } else {
-              if (isEnd) {
-                spans.push({ start: activeStart, end: pos + line.length });
-                activeStart = -1;
-              } else if (isNonAiceHeading) {
-                spans.push({ start: activeStart, end: pos });
-                activeStart = -1;
-              }
-            }
-          }
-          if (nl === -1) break;
-          pos = nl + 1;
-        }
-        if (activeStart !== -1) spans.push({ start: activeStart, end: total });
-        if (spans.length === 0) return { stripped: markdown.trim(), hadDirective: false };
-        const segs = [];
-        let last = 0;
-        for (const s of spans) {
-          const seg = markdown.slice(last, s.start).trim();
-          if (seg) segs.push(seg);
-          last = s.end;
-        }
-        const trail = markdown.slice(last).trim();
-        if (trail) segs.push(trail);
-        return { stripped: segs.join("\n\n"), hadDirective: true };
-      }
-
-      const ALLOWED = new Set([".claude", ".codex", ".agents", ".gemini", "rules"]);
-      function cleanEmptyDir(projPath, dirPath) {
-        try {
-          const rel = path.relative(projPath, dirPath);
-          if (!rel || rel.startsWith("..") || path.isAbsolute(rel) || !ALLOWED.has(path.basename(dirPath))) return;
-          if (fs.existsSync(dirPath) && fs.readdirSync(dirPath).length === 0) {
-            fs.rmdirSync(dirPath);
-            cleanEmptyDir(projPath, path.dirname(dirPath));
-          }
-        } catch {}
-      }
-
-      function hasAiceTrace(projPath) {
-        for (const r of TARGET_RULES) {
-          if (fs.existsSync(path.join(projPath, r))) return true;
-        }
-        for (const m of TARGET_MDS) {
-          const full = path.join(projPath, m);
-          if (!fs.existsSync(full)) continue;
-          try {
-            const content = fs.readFileSync(full, "utf-8");
-            if (/<!--\s*AICE:START|##\s+AICE/i.test(content)) return true;
-          } catch {}
-        }
-        return false;
-      }
-
-      function cleanProjectTrace(projPath) {
-        let changed = false;
-        for (const r of TARGET_RULES) {
-          const full = path.join(projPath, r);
-          if (fs.existsSync(full)) {
-            try {
-              fs.unlinkSync(full);
-              cleanEmptyDir(projPath, path.dirname(full));
-              changed = true;
-            } catch {}
-          }
-        }
-        for (const m of TARGET_MDS) {
-          const full = path.join(projPath, m);
-          if (!fs.existsSync(full)) continue;
-          try {
-            const raw = fs.readFileSync(full, "utf-8");
-            const { stripped, hadDirective } = stripDirectivesFenceAware(raw);
-            if (hadDirective || raw.trim().length === 0) {
-              changed = true;
-              if (stripped.length === 0) {
-                fs.unlinkSync(full);
-              } else {
-                fs.writeFileSync(full, stripped + "\n", "utf-8");
-              }
-              cleanEmptyDir(projPath, path.dirname(full));
-            }
-          } catch {}
-        }
-        return changed;
-      }
-
-      let refreshedCount = 0;
-      let cleanedCount = 0;
-      if (fs.existsSync(devDir) && fs.statSync(devDir).isDirectory()) {
-        for (const entry of fs.readdirSync(devDir, { withFileTypes: true })) {
-          if (!entry.isDirectory()) continue;
-          const projPath = path.join(devDir, entry.name);
-          const cfgPath = path.join(projPath, "aice.config.json");
-          if (fs.existsSync(cfgPath)) {
+        let refreshedCount = 0;
+        let disabledCleanedCount = 0;
+        if (fs.existsSync(devDir) && fs.statSync(devDir).isDirectory()) {
+          for (const entry of fs.readdirSync(devDir, { withFileTypes: true })) {
+            if (!entry.isDirectory()) continue;
+            if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
+            if (/_no(?:n)?aice$/i.test(entry.name)) continue;
+            const projPath = path.join(devDir, entry.name);
+            const cfgPath = path.join(projPath, "aice.config.json");
+            if (!fs.existsSync(cfgPath)) continue;
             try {
               const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
               if (cfg.enabled !== false) {
                 spawnSync(aiceBin, ["enable"], { cwd: projPath, stdio: "ignore" });
                 refreshedCount++;
               } else {
-                if (hasAiceTrace(projPath)) {
-                  spawnSync(aiceBin, ["disable"], { cwd: projPath, stdio: "ignore" });
-                  cleanedCount++;
-                }
+                spawnSync(aiceBin, ["disable"], { cwd: projPath, stdio: "ignore" });
+                disabledCleanedCount++;
               }
             } catch {}
-          } else {
-            if (hasAiceTrace(projPath)) {
-              if (cleanProjectTrace(projPath)) {
-                cleanedCount++;
-              }
-            }
           }
         }
-      }
-      console.log(`[✔] Synchronized AICE agent rules across ${devDir} (${refreshedCount} enabled refreshed, ${cleanedCount} disabled/unmanaged cleaned)`);
-    ' "$AICE_BIN"
+        console.log(`[✔] Synchronized explicit aice.config.json projects in ${devDir} (${refreshedCount} enabled refreshed, ${disabledCleanedCount} disabled cleaned)`);
+      ' "$AICE_BIN"
+    fi
   fi
   log_info "Running post-install smoke checks..."
   VER="$("$AICE_BIN" --version)"

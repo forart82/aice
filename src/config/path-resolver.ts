@@ -73,6 +73,10 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
 ]);
 
 export const PASSTHROUGH_FILENAMES: ReadonlySet<string> = new Set([
+  "verify",
+  "new-project",
+  "gradlew",
+  "mvnw",
   "Makefile",
   "GNUmakefile",
   "makefile",
@@ -85,6 +89,10 @@ export const PASSTHROUGH_FILENAMES: ReadonlySet<string> = new Set([
   "Rakefile",
   "Justfile",
   "justfile",
+  "Gemfile",
+  "Podfile",
+  "Brewfile",
+  "Fastfile",
   ".gitignore",
   ".gitattributes",
   ".dockerignore",
@@ -98,6 +106,37 @@ export const PASSTHROUGH_FILENAMES: ReadonlySet<string> = new Set([
   "LICENSE",
   "NOTICE",
 ]);
+
+export function isExtensionlessScriptFile(filePath: string): boolean {
+  const baseName = path.basename(filePath);
+  if (PASSTHROUGH_FILENAMES.has(baseName) || baseName.startsWith(".env.")) {
+    return true;
+  }
+  if (!baseName || baseName.startsWith(".") || path.extname(baseName) !== "") {
+    return false;
+  }
+  try {
+    const stat = fs.statSync(filePath);
+    if (!stat.isFile() || stat.size < 2 || stat.size > 524_288) {
+      return false;
+    }
+    const fd = fs.openSync(filePath, "r");
+    try {
+      const buf = Buffer.alloc(128);
+      const bytesRead = fs.readSync(fd, buf, 0, 128, 0);
+      if (bytesRead < 2) return false;
+      for (let i = 0; i < bytesRead; i++) {
+        if (buf[i] === 0) return false;
+      }
+      const head = buf.subarray(0, bytesRead).toString("utf-8");
+      return head.startsWith("#!");
+    } finally {
+      fs.closeSync(fd);
+    }
+  } catch {
+    return false;
+  }
+}
 
 const OPTIONAL_METADATA_FILENAMES: ReadonlySet<string> = new Set([
   "package.json",
@@ -291,7 +330,10 @@ export function scanDirectoryFiles(
         }
         if (options.includeTargets) {
           const ext = path.extname(lowerName);
-          if (ext && KNOWN_TARGET_EXTENSIONS.has(ext) && !lowerName.endsWith(".aice")) {
+          if (
+            !lowerName.endsWith(".aice") &&
+            ((ext && KNOWN_TARGET_EXTENSIONS.has(ext)) || isExtensionlessScriptFile(fullPath))
+          ) {
             targetFiles.push(fullPath);
           }
         }
@@ -371,10 +413,13 @@ export function resolveWorktreeRoot(
     } else if (!startDir.endsWith("/") && !startDir.endsWith("\\")) {
       const lower = cur.toLowerCase();
       const ext = path.extname(lower);
+      const base = path.basename(cur);
       if (
         lower.endsWith(".aice") ||
         lower.endsWith(".d.ts") ||
         lower.endsWith(".html.twig") ||
+        PASSTHROUGH_FILENAMES.has(base) ||
+        base.startsWith(".env.") ||
         (ext && KNOWN_TARGET_EXTENSIONS.has(ext))
       ) {
         cur = path.dirname(cur);
@@ -527,7 +572,6 @@ export function resolvePathTargets(
       trimmed.endsWith("\\") ||
       (!isKnownExtensionlessFile && path.extname(absPath) === "" && !trimmed.endsWith(".aice"));
   }
-
   if (isDir) {
     const fallbackDir = isSameOrDescendant(cwd, absPath) ? cwd : absPath;
     const rawRoot = options.projectRoot

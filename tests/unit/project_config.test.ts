@@ -844,8 +844,8 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
 
     it("aligns MANDATORY_AGENT_RULES_MARKDOWN with 2-Pillar architecture without active-mode write_file contradiction", () => {
       expect(MANDATORY_AGENT_RULES_MARKDOWN).not.toContain(", or standard `write_file`");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("Adaptive Sibling Outlining");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("4-tier ranked");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN.match(/<!--\s*AICE:START[^>]*-->/g)).toHaveLength(1);
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("'f:/a|b/'");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice write");
     });
 
@@ -853,30 +853,26 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       expect(detectLanguageName("src/workflow.aipl")).toBe("AIPL");
     });
 
-    it("enforces <= 650 BPE token budget (cl100k_base & o200k_base) and all core invariants in MANDATORY_AGENT_RULES_MARKDOWN", () => {
+    it("enforces <= 900B & <= 300 BPE token budget (cl100k_base & o200k_base) and all core invariants in MANDATORY_AGENT_RULES_MARKDOWN", () => {
       const cl100k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base");
       const o200k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base");
-      expect(cl100k).toBeLessThanOrEqual(650);
-      expect(o200k).toBeLessThanOrEqual(650);
+      expect(Buffer.byteLength(MANDATORY_AGENT_RULES_MARKDOWN, "utf-8")).toBeLessThanOrEqual(900);
+      expect(cl100k).toBeLessThanOrEqual(300);
+      expect(o200k).toBeLessThanOrEqual(300);
       expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base")).toBeLessThanOrEqual(
-        650,
+        300,
       );
-      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base")).toBeLessThanOrEqual(650);
+      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base")).toBeLessThanOrEqual(300);
 
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice read");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice_read");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice_splice");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("python3 with open");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("cat << 'EOF' >");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("echo >");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("NEVER run `sed -n`");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice splice --stdin << 'EOF'");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":symbol");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":Lstart-Lend");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("<<< === >>>");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":eof");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(":imports");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("=== f:sym ===");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("=== f:L1-L20 ===");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("--delete");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toMatch(/multi-line[\s\S]*<<</i);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice.config.json");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain('"enabled": true');
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice disable");
@@ -884,8 +880,6 @@ describe("Step 14: Unified Project Configuration (AiceProjectConfig)", () => {
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
         "Use AICE (aice read / aice splice) for all file exploration and edits.",
       );
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("Board-only swarm monitors/coordinators");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("zero overhead");
     });
 
     it("defaults idiomsEnabled to false while honoring explicit idiomsEnabled: true and --idioms overrides", () => {

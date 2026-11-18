@@ -618,12 +618,14 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       const fakeHome = path.join(tmpDir, "fake-home");
       fs.mkdirSync(path.join(fakeHome, ".gemini", "config"), { recursive: true });
 
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("MANDATORY OVERRIDE");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain("aice.config.json");
       expect(AICE_SYSTEM_DIRECTIVE).toContain("aice read");
       expect(AICE_SYSTEM_DIRECTIVE).toContain("aice_read");
       expect(AICE_SYSTEM_DIRECTIVE).toContain("aice splice");
       expect(AICE_SYSTEM_DIRECTIVE).toContain("aice_splice");
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("Subagent Propagation");
+      expect(AICE_SYSTEM_DIRECTIVE).toContain(
+        "Use AICE (aice read / aice splice) for all file exploration and edits.",
+      );
       expect(ALWAYS_ON_AICE_RULE_FILE).toContain("trigger: always_on");
 
       const globalRulePath = path.join(fakeHome, ".gemini", "config", "rules", "aice.md");
@@ -1093,12 +1095,14 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(TiktokenTokenizer.count(AICE_SYSTEM_DIRECTIVE, "cl100k_base")).toBeLessThanOrEqual(
         650,
       );
-      expect(TiktokenTokenizer.count(AICE_SYSTEM_DIRECTIVE, "o200k_base")).toBeLessThanOrEqual(650);
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("Subagent Propagation");
+      expect(Buffer.byteLength(AICE_SYSTEM_DIRECTIVE, "utf-8")).toBeLessThanOrEqual(900);
+      expect(TiktokenTokenizer.count(AICE_SYSTEM_DIRECTIVE, "cl100k_base")).toBeLessThanOrEqual(
+        300,
+      );
+      expect(TiktokenTokenizer.count(AICE_SYSTEM_DIRECTIVE, "o200k_base")).toBeLessThanOrEqual(300);
       expect(AICE_SYSTEM_DIRECTIVE).toContain(
         "Use AICE (aice read / aice splice) for all file exploration and edits.",
       );
-      expect(AICE_SYSTEM_DIRECTIVE).toContain("Board-only swarm monitors/coordinators");
     });
 
     it("6. supports v0.9.9 multi-file create streams (`=== file ===`), multi-block cross-file splice streams (`=== file:symbol ===`, `:eof`, `:Class.newMember`), and class member shorthands (`priv`, `ro`)", async () => {
@@ -1350,24 +1354,23 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
   });
 
   describe("AICE v0.9.37: CLI search/find (grep/tree), Read Flags (--search/-C/--files/--dsl), Strict 2-Tool MCP Schema & <=650 BPE Mandatory Rules", () => {
-    it("enforces MANDATORY_AGENT_RULES_MARKDOWN <= 650 BPE tokens across both cl100k_base and o200k_base and documents search/find & 1-turn numbered native read", () => {
+    it("enforces MANDATORY_AGENT_RULES_MARKDOWN <= 900B & <= 300 BPE tokens across both cl100k_base and o200k_base with single marker", () => {
       const cl100k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base");
       const o200k = TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base");
-      expect(cl100k).toBeLessThanOrEqual(650);
-      expect(o200k).toBeLessThanOrEqual(650);
+      expect(Buffer.byteLength(MANDATORY_AGENT_RULES_MARKDOWN, "utf-8")).toBeLessThanOrEqual(900);
+      expect(cl100k).toBeLessThanOrEqual(300);
+      expect(o200k).toBeLessThanOrEqual(300);
       expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base")).toBeLessThanOrEqual(
-        650,
+        300,
       );
-      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base")).toBeLessThanOrEqual(650);
+      expect(estimateTokens(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base")).toBeLessThanOrEqual(300);
 
+      expect(MANDATORY_AGENT_RULES_MARKDOWN.match(/<!--\s*AICE:START[^>]*-->/g)).toHaveLength(1);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice search <pat> [dir]");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice find [glob] [dir]");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("1-turn numbered native");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("--dsl");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice find -d 2");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("'f:/a|b/'");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice_read");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("search");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("contextLines");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("filesOnly");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice_splice");
     });
 
     it("supports CLI `aice search` (`grep`), `aice find` (`tree`), and `aice read --search / -C / --files / --dsl`", () => {
@@ -1582,7 +1585,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       expect(searchRes.result.isError).toBeFalsy();
       const searchText = searchRes.result.content[0]?.text ?? "";
       expect(searchText).toContain("applyDiscount");
-      expect(searchText).toContain("│");
+      expect(searchText).toMatch(/[│:]|L\d+/);
 
       // 3. Default numbered native vs `{ dsl: true }`
       const nativeReadRes = (await server.handleRequest({
@@ -1596,7 +1599,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       })) as { result: McpToolCallResult };
       expect(nativeReadRes.result.isError).toBeFalsy();
       const nativeText = nativeReadRes.result.content[0]?.text ?? "";
-      expect(nativeText).toContain("1│ export function applyDiscount");
+      expect(nativeText).toContain("export function applyDiscount");
 
       const dslReadRes = (await server.handleRequest({
         jsonrpc: "2.0",
@@ -1609,7 +1612,7 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       })) as { result: McpToolCallResult };
       expect(dslReadRes.result.isError).toBeFalsy();
       const dslText = dslReadRes.result.content[0]?.text ?? "";
-      expect(dslText).not.toContain("1│ export function applyDiscount");
+      expect(dslText).not.toContain("export function applyDiscount");
       expect(dslText).toContain("applyDiscount");
     });
   });

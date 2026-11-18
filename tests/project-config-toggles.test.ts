@@ -305,4 +305,19 @@ describe("Phase 3: Project-Level Controls in aice.config.json (enabled & idiomsE
     expect(ctxRes.content[0].text).toContain("fn renderParticle");
     expect(ctxRes.content[0].text).not.toContain("$drawCircle");
   });
+
+  it("supports `aice status` alias, `aice enable --force`, and `.git/info/exclude` for untracked aice.config.json", () => {
+    spawnSync("git", ["init"], { cwd: tmpDir, stdio: "ignore" });
+    const enableRes = runCli(["enable", "--json"], tmpDir);
+    expect(enableRes.status).toBe(0);
+    expect(JSON.parse(enableRes.stdout).enabled).toBe(true);
+
+    const statusRes = runCli(["status", "--json"], tmpDir);
+    expect(statusRes.status).toBe(0);
+    expect(JSON.parse(statusRes.stdout).enabled).toBe(true);
+
+    const excludeFile = path.join(tmpDir, ".git", "info", "exclude");
+    expect(fs.existsSync(excludeFile)).toBe(true);
+    expect(fs.readFileSync(excludeFile, "utf-8")).toContain("aice.config.json");
+  });
 });

@@ -84,10 +84,11 @@ function inferCliTelemetryOperation(rawArgs: ReadonlyArray<string>): TelemetryOp
   return "context";
 }
 
-function recordCliFailureTelemetry(
+export function recordCliFailureTelemetry(
   errorMessage: string,
   explicitOperation?: TelemetryOperation,
   explicitTargetPath?: string,
+  wastedPayloadOrTokens?: string | number,
 ): void {
   if (cliFailureRecordedForInvocation) return;
   cliFailureRecordedForInvocation = true;
@@ -106,19 +107,38 @@ function recordCliFailureTelemetry(
         : trimmedTarget
       : undefined;
   const resolvedTarget = cleanedTarget ? path.resolve(process.cwd(), cleanedTarget) : process.cwd();
+  const wastedPayload =
+    typeof wastedPayloadOrTokens === "string" && wastedPayloadOrTokens.trim().length > 0
+      ? wastedPayloadOrTokens
+      : undefined;
+  const explicitWastedTokens =
+    typeof wastedPayloadOrTokens === "number" &&
+    Number.isFinite(wastedPayloadOrTokens) &&
+    wastedPayloadOrTokens > 0
+      ? Math.floor(wastedPayloadOrTokens)
+      : wastedPayload
+        ? Math.max(1, Math.ceil(Buffer.byteLength(wastedPayload, "utf-8") / 3.5))
+        : undefined;
+  const composedAiceText = [invokedCmd, wastedPayload, cleanError].filter(Boolean).join("\n");
   recordTelemetryEvent({
     targetPath: resolvedTarget,
     filePath: "<cli-error>",
     operation: op,
     surface: "cli",
     nativeText: "",
-    aiceText: cleanError ? `${invokedCmd}\n${cleanError}` : invokedCmd,
+    aiceText: composedAiceText || invokedCmd,
+    ...(typeof wastedPayloadOrTokens === "number" && explicitWastedTokens !== undefined
+      ? { aiceCl100k: explicitWastedTokens, aiceO200k: explicitWastedTokens }
+      : {}),
   });
   recordTelemetryError({
     targetPath: cleanedTarget ? resolvedTarget : undefined,
     operation: op,
     surface: "cli",
     errorMessage: cleanError || invokedCmd,
+    ...(explicitWastedTokens !== undefined
+      ? ({ wastedInputTokens: explicitWastedTokens } as Record<string, unknown>)
+      : {}),
   });
 }
 
@@ -130,13 +150,14 @@ program
     "AICE: On-the-Fly AI Context Engine & Multi-File Idiom CLI (by @forart82 — https://github.com/forart82/aice)",
   )
   .version(AICE_VERSION)
+  .option("--no-color", "Disable ANSI terminal colors")
+  .option("--color", "Enable ANSI terminal colors")
   .configureOutput({
     outputError: (str, write) => {
       recordCliFailureTelemetry(str);
       write(str);
     },
   });
-
 export function normalizeCliContextFlag(
   rawArgv: readonly string[],
   parseOpts?: { from: "node" | "electron" | "user" },
@@ -366,6 +387,45 @@ export function normalizeCliContextFlag(
         i++;
         continue;
       }
+
+      // 9. Depth options (--max-depth, --maxDepth, --depth=N, -L N on find/tree)
+      const depthEqMatch = token.match(/^--(?:max-depth|maxDepth|depth)=(\d+)$/);
+      if (depthEqMatch) {
+        if (isFindFamily || isReadFamily) {
+          normalized.push("-d", depthEqMatch[1]!);
+        }
+        i++;
+        continue;
+      }
+      if (token === "--max-depth" || token === "--maxDepth" || (isFindFamily && token === "-L")) {
+        if (isFindFamily || isReadFamily) {
+          normalized.push("-d");
+        }
+        i++;
+        continue;
+      }
+      const shortDepthMatch = token.match(/^-(L|d)(\d+)$/);
+      if (shortDepthMatch) {
+        const [, flagCh, digits] = shortDepthMatch;
+        if (
+          (flagCh === "L" && isFindFamily) ||
+          (flagCh === "d" && (isFindFamily || isReadFamily))
+        ) {
+          normalized.push("-d", digits!);
+          i++;
+          continue;
+        }
+      }
+
+      // 10. Search --line-number=true/false compatibility
+      const lineNumMatch = token.match(/^--(?:line-number|lineNumber)=(true|false)$/);
+      if (lineNumMatch) {
+        if (isSearchFamily && lineNumMatch[1] === "true") {
+          normalized.push("-n");
+        }
+        i++;
+        continue;
+      }
     }
     normalized.push(token);
     i++;
@@ -379,7 +439,34 @@ program.parseAsync = async (
   argv?: readonly string[],
   parseOpts?: { from: "node" | "electron" | "user" },
 ) => {
-  const effectiveArgv = normalizeCliContextFlag(argv ? Array.from(argv) : process.argv, parseOpts);
+  const rawList = argv ? Array.from(argv) : Array.from(process.argv);
+  const pfxCount = parseOpts?.from === "user" ? 0 : 2;
+  const cleanedRaw: string[] = rawList.slice(0, pfxCount);
+  let seenDoubleDash = false;
+  for (let idx = pfxCount; idx < rawList.length; idx++) {
+    const tok = rawList[idx]!;
+    if (tok === "--") {
+      seenDoubleDash = true;
+      cleanedRaw.push(tok);
+      continue;
+    }
+    if (!seenDoubleDash && (tok === "--no-color" || tok === "--color=false")) {
+      process.env.NO_COLOR = "1";
+      process.env.NODE_DISABLE_COLORS = "1";
+      if (tok === "--color=false") {
+        continue;
+      }
+    } else if (!seenDoubleDash && (tok === "--color" || tok === "--color=true")) {
+      delete process.env.NO_COLOR;
+      delete process.env.NODE_DISABLE_COLORS;
+      if (tok === "--color=true") {
+        continue;
+      }
+    }
+    cleanedRaw.push(tok);
+  }
+
+  const effectiveArgv = normalizeCliContextFlag(cleanedRaw, parseOpts);
   activeCliArgs = parseOpts?.from === "user" ? effectiveArgv.slice() : effectiveArgv.slice(2);
   cliFailureRecordedForInvocation = false;
   for (const sub of program.commands) {
@@ -1842,6 +1929,13 @@ Examples:
         preserveDocs?: boolean;
       },
     ) => {
+      let capturedWastedPayload: string | undefined =
+        options.code ?? options.template ?? options.body;
+      const normalizeTrailingStreamDelete = (streamText: string): string =>
+        streamText.replace(
+          /^([ \t]*={3,}[ \t]*[^=\r\n]+?)[ \t]*={3,}[ \t]+(--delete|-d)[ \t]*$/gm,
+          "$1 $2 ===",
+        );
       try {
         const { parseMultiBlockSpliceStream, splice, spliceBatch, splitInlineFileSelector } =
           await import("../src/tools/splice.js");
@@ -1863,11 +1957,22 @@ Examples:
             : findProjectRoot(process.cwd());
           const batchProjectConfig = loadProjectConfig(batchProjectRoot);
           if (!isProjectAiceEnabled(batchProjectConfig)) {
+            const wastedBatch =
+              capturedWastedPayload ??
+              spliceItems
+                .map((it) => it.code ?? it.body ?? "")
+                .filter(Boolean)
+                .join("\n");
+            recordCliFailureTelemetry(
+              AICE_DISABLED_MESSAGE,
+              "splice",
+              firstCleanFp || undefined,
+              wastedBatch,
+            );
             console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
             process.exit(1);
           }
           const batchEffectiveIdioms = isProjectIdiomsEnabled(batchProjectConfig, options.idioms);
-
           const combinedInlineIdioms = [...(inlineIdiomList ?? [])];
           let idiomSummary:
             | { updatedIdioms: number; totalOcc: number; modifiedFiles: number }
@@ -2095,6 +2200,7 @@ Examples:
                 ? fs.readFileSync(batchCandidatePath, "utf-8")
                 : options.batch;
           }
+          capturedWastedPayload = rawJson;
           const allEntries = parseJsonBatchEntries(rawJson);
           const { spliceItems, idiomItems } = partitionBatchEntries(allEntries);
           await executeBatchSpliceAndIdioms(spliceItems, idiomItems);
@@ -2142,9 +2248,14 @@ Examples:
         if (targetPath && targetPath !== "-") {
           const trimmedTarget = targetPath.trim();
           if (!options.symbol && /:+$/.test(trimmedTarget)) {
-            console.error(
-              `❌ Error: Malformed target '${trimmedTarget}': missing <symbol>, L<start>-L<end>, :overwrite, or :eof after ':'.`,
+            const malMsg = `Error: Malformed target '${trimmedTarget}': missing <symbol>, L<start>-L<end>, :overwrite, or :eof after ':'.`;
+            recordCliFailureTelemetry(
+              malMsg,
+              "splice",
+              trimmedTarget.replace(/:+$/, ""),
+              capturedWastedPayload,
             );
+            console.error(`❌ ${malMsg}`);
             process.exit(1);
           }
           const splitTarget = splitInlineFileSelector(targetPath, process.cwd());
@@ -2188,6 +2299,7 @@ Examples:
             options.template ??
             (await readStdin(Boolean(options.stdin || targetPath === "-")));
           if (rawCrossStream && rawCrossStream.trim().length > 0) {
+            capturedWastedPayload = rawCrossStream;
             if (rawCrossStream.trimStart().startsWith("[")) {
               const allEntries = parseJsonBatchEntries(rawCrossStream);
               const { spliceItems, idiomItems } = partitionBatchEntries(allEntries);
@@ -2196,7 +2308,8 @@ Examples:
                 return;
               }
             }
-            const parsedStream = parseMultiBlockSpliceStream(rawCrossStream);
+            const normalizedStream = normalizeTrailingStreamDelete(rawCrossStream);
+            const parsedStream = parseMultiBlockSpliceStream(normalizedStream);
             if (parsedStream?.batchItems && parsedStream.batchItems.length > 0) {
               await executeBatchSpliceAndIdioms(parsedStream.batchItems);
               return;
@@ -2206,8 +2319,10 @@ Examples:
           const headerDiag = badHeader
             ? ` Malformed or incomplete header '=== ${badHeader} ==='.`
             : "";
+          const streamErrMsg = `Error: Must provide <path>, --batch <fileOrJson>, or pipe valid '=== <filePath> ===' / '=== <filePath>:<symbol> ===' blocks via --stdin.${headerDiag}`;
+          recordCliFailureTelemetry(streamErrMsg, "splice", undefined, rawCrossStream);
           console.error(
-            `❌ Error: Must provide <path>, --batch <fileOrJson>, or pipe valid '=== <filePath> ===' / '=== <filePath>:<symbol> ===' blocks via --stdin.${headerDiag}\n` +
+            `❌ ${streamErrMsg}\n` +
               "Valid --stdin heredoc block examples:\n" +
               "  1. Full-file creation / overwrite:\n" +
               "     === src/new_file.ts ===\n" +
@@ -2230,6 +2345,9 @@ Examples:
         const spliceProjectRoot = resolveCliProjectRoot(fullSpliceTarget);
         const spliceProjectConfig = loadProjectConfig(spliceProjectRoot);
         if (!isProjectAiceEnabled(spliceProjectConfig)) {
+          const disabledWasted =
+            capturedWastedPayload ?? (options.stdin ? await readStdin(false) : undefined);
+          recordCliFailureTelemetry(AICE_DISABLED_MESSAGE, "splice", targetPath, disabledWasted);
           console.error(`❌ ${AICE_DISABLED_MESSAGE}`);
           process.exit(1);
         }
@@ -2258,10 +2376,13 @@ Examples:
         if (options.from) {
           const fromPath = path.resolve(process.cwd(), options.from);
           if (!fs.existsSync(fromPath)) {
-            console.error(`❌ Error: --from file not found: ${options.from}`);
+            const fromErrMsg = `Error: --from file not found: ${options.from}`;
+            recordCliFailureTelemetry(fromErrMsg, "splice", targetPath, code);
+            console.error(`❌ ${fromErrMsg}`);
             process.exit(1);
           }
           code = fs.readFileSync(fromPath, "utf-8");
+          capturedWastedPayload = code;
         }
 
         let parsedEdits: SpliceOptions["edits"];
@@ -2270,6 +2391,7 @@ Examples:
           (options.stdin && !options.symbol && code === undefined && options.body === undefined)
         ) {
           const stdinRaw = await readStdin(true);
+          capturedWastedPayload = stdinRaw;
           try {
             const parsed = JSON.parse(stdinRaw.trim());
             if (Array.isArray(parsed)) {
@@ -2286,9 +2408,12 @@ Examples:
             fs.existsSync(editsCandidatePath) && fs.statSync(editsCandidatePath).isFile()
               ? fs.readFileSync(editsCandidatePath, "utf-8")
               : options.edits;
+          capturedWastedPayload = rawEditsJson;
           const parsed = JSON.parse(rawEditsJson.trim());
           if (!Array.isArray(parsed)) {
-            console.error("❌ Error: --edits must be a JSON array of symbol edit objects.");
+            const editsErrMsg = "Error: --edits must be a JSON array of symbol edit objects.";
+            recordCliFailureTelemetry(editsErrMsg, "splice", targetPath, rawEditsJson);
+            console.error(`❌ ${editsErrMsg}`);
             process.exit(1);
           }
           parsedEdits = parsed;
@@ -2296,6 +2421,7 @@ Examples:
 
         if (options.stdin && code === undefined && !parsedEdits) {
           code = await readStdin(true);
+          capturedWastedPayload = code;
         }
 
         if (
@@ -2307,6 +2433,7 @@ Examples:
           const stdinContent = await readStdin(false);
           if (stdinContent && stdinContent.trim().length > 0) {
             code = stdinContent;
+            capturedWastedPayload = code;
           } else if (symbolCameFromPositional && options.symbol) {
             const trimmedPos = options.symbol.trim();
             const withoutClone = trimmedPos.replace(/@clone\s*\([^)]*\)/gi, "");
@@ -2319,6 +2446,7 @@ Examples:
               );
             if (isPositionalCodePayload) {
               code = options.symbol;
+              capturedWastedPayload = code;
               options.symbol = undefined;
             }
           }
@@ -2330,8 +2458,10 @@ Examples:
             !(options.symbol && /@clone\b|\(clone\b/i.test(options.symbol))
           ) {
             const symHint = options.symbol ? `:${options.symbol}` : ":<symbol>";
+            const emptyErrMsg = `Error: Empty or missing splice body for '=== ${targetPath}${symHint} ==='. Must provide --code, --from, --stdin, --body, --delete, or --edits.`;
+            recordCliFailureTelemetry(emptyErrMsg, "splice", targetPath, capturedWastedPayload);
             console.error(
-              `❌ Error: Empty or missing splice body for '=== ${targetPath}${symHint} ==='. Must provide --code, --from, --stdin, --body, --delete, or --edits.\n` +
+              `❌ ${emptyErrMsg}\n` +
                 `Valid heredoc syntax:\n` +
                 `  • Full file: aice write ${targetPath} --stdin << 'EOF'\n` +
                 `  • Symbol: === ${targetPath}:ClassName.method ===\n` +
@@ -2343,7 +2473,10 @@ Examples:
         }
 
         if (!options.symbol && (!parsedEdits || parsedEdits.length === 0) && code) {
-          const multiStream = parseMultiBlockSpliceStream(code, targetPath);
+          const multiStream = parseMultiBlockSpliceStream(
+            normalizeTrailingStreamDelete(code),
+            targetPath,
+          );
           if (multiStream?.batchItems && multiStream.batchItems.length > 0) {
             await executeBatchSpliceAndIdioms(multiStream.batchItems);
             return;
@@ -2353,7 +2486,6 @@ Examples:
             code = undefined;
           }
         }
-
         const primarySymForMsg = options.symbol;
         if (extraDeleteSymbol) {
           if (parsedEdits && parsedEdits.length > 0) {
@@ -2449,6 +2581,7 @@ Examples:
           msg,
           "splice",
           typeof errTarget === "string" ? errTarget : undefined,
+          capturedWastedPayload,
         );
         console.error(`❌ Error splicing ${errTarget ?? "<stdin>"}: ${msg}`);
         process.exit(1);
@@ -2923,35 +3056,81 @@ Examples:
     },
   );
 
-// Command: search <pattern> [targets...] (alias: grep)
+// Command: search [pattern] [targets...] (alias: grep)
 program
   .command("search")
   .alias("grep")
   .description(
     "AST-aware workspace/file search (rg-style pattern-first alias routing into Unified Read Engine)",
   )
-  .argument("<pattern>", "Plain regex or literal search pattern (without /.../ wrappers)")
+  .argument("[pattern]", "Plain regex or literal search pattern (without /.../ wrappers)")
   .argument("[targets...]", "Optional file(s) or directory path(s) to search (default: '.')")
   .option("-C, --context <lines>", "Context radius (lines before and after each match)", (val) =>
     Number.parseInt(val, 10),
   )
+  .option("-n, --line-number", "Emit 1-based line numbers (enabled by default)")
+  .option("-s, --symbol <selector>", "Optional symbol scope or search pattern alias")
+  .option("--search <pattern>", "Optional search pattern alias")
   .option("-l, --files-with-matches", "Emit only matching relative file paths concisely")
   .option("--full", "Bypass default stdout ceiling and emit full search context")
   .option("--json", "Output structured JSON bundle")
   .option("--max-tokens <number>", "Maximum token limit", (rawMax) => Number.parseInt(rawMax, 10))
   .action(
     async (
-      pattern: string,
+      patternArg: string | undefined,
       targetPaths: string[] | undefined,
       options: {
         context?: number;
+        lineNumber?: boolean;
+        symbol?: string;
+        search?: string;
         filesWithMatches?: boolean;
         full?: boolean;
         json?: boolean;
         maxTokens?: number;
       },
     ) => {
-      const effectiveTargets = targetPaths && targetPaths.length > 0 ? targetPaths : ["."];
+      let shiftedTargets = targetPaths ? [...targetPaths] : [];
+      let rawPositionalPattern = patternArg;
+      if (
+        rawPositionalPattern &&
+        (options.symbol !== undefined || options.search !== undefined) &&
+        shiftedTargets.length === 0 &&
+        fs.existsSync(path.resolve(process.cwd(), rawPositionalPattern))
+      ) {
+        shiftedTargets = [rawPositionalPattern];
+        rawPositionalPattern = undefined;
+      }
+
+      let effectivePattern = rawPositionalPattern ?? options.search;
+      let effectiveSymbol: string | undefined;
+      if (!effectivePattern && options.symbol) {
+        const trimmedSym = options.symbol.trim();
+        const slashMatch = trimmedSym.match(/^\/(.*)\/[gimsuy]*$/);
+        effectivePattern = slashMatch ? slashMatch[1] : trimmedSym;
+      } else if (effectivePattern && options.symbol) {
+        const trimmedSym = options.symbol.trim();
+        const slashMatch = trimmedSym.match(/^\/(.*)\/[gimsuy]*$/);
+        if (slashMatch) {
+          const inner = slashMatch[1]!;
+          if (/^[A-Za-z_$][\w$.]*$/.test(inner)) {
+            effectiveSymbol = inner;
+          } else if (inner && inner !== effectivePattern) {
+            effectivePattern = `(?:${effectivePattern})|(?:${inner})`;
+          }
+        } else {
+          effectiveSymbol = trimmedSym;
+        }
+      }
+
+      if (!effectivePattern) {
+        const errMsg = "Error: Missing required <pattern> argument for 'aice search'.";
+        recordCliFailureTelemetry(errMsg, "context");
+        console.error(`❌ ${errMsg}`);
+        process.exit(1);
+      }
+
+      const effectiveTargets = shiftedTargets.length > 0 ? shiftedTargets : ["."];
       try {
         const shellInv = detectCliShellInvocation();
         const unboundedCli = Boolean(options.full && shellInv.isInteractiveHuman);
@@ -2965,7 +3144,8 @@ program
           const budgetLease = acquireSharedCliReadBudget(shellInv.key, DEFAULT_CLI_READ_MAX_BYTES);
           if (budgetLease.exhausted) {
             if (budgetLease.emitDeferralNotice) {
-              const rerunRaw = `aice search "${pattern}" ${effectiveTargets.join(" ")}`.trim();
+              const rerunRaw =
+                `aice search "${effectivePattern}" ${effectiveTargets.join(" ")}`.trim();
               const rerunCmd = rerunRaw.length > 96 ? `${rerunRaw.slice(0, 93)}...` : rerunRaw;
               const line = `// [9 KB CLI stdout budget already filled by prior chained command — run separately: ${rerunCmd}]`;
               console.log(line);
@@ -2974,7 +3154,8 @@ program
             return;
           }
           const res = await aiceRead(effectiveTargets, {
-            search: pattern,
+            search: effectivePattern,
+            ...(effectiveSymbol ? { symbol: effectiveSymbol } : {}),
             contextLines: parsedContextLines,
             filesWithMatches: options.filesWithMatches ? true : undefined,
             full: options.full,
@@ -2989,7 +3170,8 @@ program
           commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(res.output, "utf-8") + 1);
         } else {
           const res = await aiceRead(effectiveTargets, {
-            search: pattern,
+            search: effectivePattern,
+            ...(effectiveSymbol ? { symbol: effectiveSymbol } : {}),
             contextLines: parsedContextLines,
             filesWithMatches: options.filesWithMatches ? true : undefined,
             full: options.full,
@@ -3019,6 +3201,12 @@ program
   )
   .argument("[pattern]", "Optional glob/substring file filter or target directory/file path")
   .argument("[targets...]", "Optional directory or file path(s) to scan (default: '.')")
+  .option("-d, --depth <number>", "Maximum directory traversal depth", (val) =>
+    Number.parseInt(val, 10),
+  )
+  .option("--max-depth <number>", "Alias for --depth", (val) => Number.parseInt(val, 10))
+  .option("-L <number>", "Tree-style depth alias for --depth", (val) => Number.parseInt(val, 10))
+  .option("--search <pattern>", "Filter discovered file paths by substring, glob, or regex")
   .option("--full", "Bypass default stdout ceiling and emit full file tree")
   .option("--json", "Output structured JSON bundle")
   .option("--max-tokens <number>", "Maximum token limit", (rawMax) => Number.parseInt(rawMax, 10))
@@ -3027,6 +3215,10 @@ program
       pattern: string | undefined,
       targetPaths: string[] | undefined,
       options: {
+        depth?: number;
+        maxDepth?: number;
+        L?: number;
+        search?: string;
         full?: boolean;
         json?: boolean;
         maxTokens?: number;
@@ -3047,10 +3239,64 @@ program
           effectiveTargets = restTargets.length > 0 ? restTargets : ["."];
         }
       }
+      const rawDepth = options.depth ?? options.maxDepth ?? options.L;
+      const parsedDepth =
+        rawDepth !== undefined && Number.isFinite(Number(rawDepth))
+          ? Math.max(1, Math.floor(Number(rawDepth)))
+          : undefined;
+
+      let effectiveSearch = options.search?.trim();
+      if (effectiveSearch && effectiveSearch.includes("|") && !effectiveSearch.startsWith("{")) {
+        const branches = effectiveSearch
+          .split("|")
+          .map((part) => part.trim().replace(/^\^+|\$+$/g, ""))
+          .filter(Boolean)
+          .map((part) => (part.includes("*") ? part : `*${part}*`));
+        if (branches.length > 1) {
+          effectiveSearch = `{${branches.join(",")}}`;
+        } else if (branches.length === 1) {
+          effectiveSearch = branches[0];
+        }
+      }
+      const filterOutputByDepth = (rawOut: string): string => {
+        if (parsedDepth === undefined || options.json) return rawOut;
+        const projRoot = findProjectRoot(process.cwd());
+        const scanBases = effectiveTargets
+          .map((t) => path.resolve(process.cwd(), t))
+          .filter((abs) => {
+            try {
+              return fs.existsSync(abs) && fs.statSync(abs).isDirectory();
+            } catch {
+              return false;
+            }
+          });
+        const baseDirs = scanBases.length > 0 ? scanBases : [projRoot];
+        return rawOut
+          .split("\n")
+          .filter((line) => {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith("//") || trimmed.startsWith("#")) return true;
+            const relMatch = trimmed.match(/^([^\s(]+)(?:\s+\(|$)/);
+            if (!relMatch?.[1]) return true;
+            const itemAbs = path.resolve(projRoot, relMatch[1]);
+            return baseDirs.some((bd) => {
+              const rel = path.relative(bd, itemAbs).replace(/\\/g, "/");
+              if (!rel || rel.startsWith("..")) return false;
+              const segCount = rel.split("/").filter(Boolean).length;
+              return segCount <= parsedDepth;
+            });
+          })
+          .join("\n");
+      };
+
       try {
         const shellInv = detectCliShellInvocation();
         const unboundedCli = Boolean(options.full && shellInv.isInteractiveHuman);
         const { aiceRead } = await import("../src/tools/read.js");
+        const depthSpread =
+          parsedDepth !== undefined
+            ? ({ depth: parsedDepth, maxDepth: parsedDepth } as Record<string, unknown>)
+            : {};
 
         if (!options.json && options.maxTokens === undefined && !unboundedCli) {
           const budgetLease = acquireSharedCliReadBudget(shellInv.key, DEFAULT_CLI_READ_MAX_BYTES);
@@ -3068,6 +3314,8 @@ program
           const res = await aiceRead(effectiveTargets, {
             filesOnly: true,
             ...(filePattern !== undefined ? { filePattern } : {}),
+            ...(effectiveSearch !== undefined ? { search: effectiveSearch } : {}),
+            ...depthSpread,
             full: options.full,
             maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
             maxBytes: budgetLease.maxBytes,
@@ -3075,19 +3323,22 @@ program
             json: !!options.json,
             surface: "cli",
           });
-          console.log(res.output);
-          commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(res.output, "utf-8") + 1);
+          const finalOut = filterOutputByDepth(res.output);
+          console.log(finalOut);
+          commitSharedCliReadBytes(shellInv.key, Buffer.byteLength(finalOut, "utf-8") + 1);
         } else {
           const res = await aiceRead(effectiveTargets, {
             filesOnly: true,
             ...(filePattern !== undefined ? { filePattern } : {}),
+            ...(effectiveSearch !== undefined ? { search: effectiveSearch } : {}),
+            ...depthSpread,
             full: options.full,
             maxTokens: options.maxTokens !== undefined ? Number(options.maxTokens) : undefined,
             unboundedCli,
             json: !!options.json,
             surface: "cli",
           });
-          console.log(res.output);
+          console.log(filterOutputByDepth(res.output));
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : String(err);
@@ -3097,7 +3348,6 @@ program
       }
     },
   );
-
 // Command: fmt [target]
 program
   .command("fmt", { hidden: true })
@@ -3899,12 +4149,13 @@ program
 program
   .command("enable [dir]")
   .description('Enable AICE for a project in aice.config.json ("enabled": true)')
+  .option("-f, --force", "Force AGENTS.md rule injection even if exceeding 22,000-byte cap")
   .option("--json", "Output updated project configuration as JSON")
-  .action((dirArg: string | undefined, options: { json?: boolean }) => {
+  .action((dirArg: string | undefined, options: { force?: boolean; json?: boolean }) => {
     try {
       const targetDir = path.resolve(process.cwd(), dirArg ?? ".");
       const projectRoot = findProjectRoot(targetDir);
-      const updated = setProjectAiceEnabled(projectRoot, true);
+      const updated = setProjectAiceEnabled(projectRoot, true, { force: options.force });
       if (options.json) {
         console.log(
           JSON.stringify(
@@ -3924,7 +4175,9 @@ program
         `✔ AICE ENABLED ("enabled": true) in ${path.join(path.relative(process.cwd(), projectRoot) || ".", "aice.config.json")}`,
       );
     } catch (err: unknown) {
-      console.error(`❌ Error enabling AICE: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      recordCliFailureTelemetry(msg, "context", dirArg);
+      console.error(`❌ Error enabling AICE: ${msg}`);
       process.exit(1);
     }
   });
@@ -3958,17 +4211,21 @@ program
         `✔ AICE DISABLED ("enabled": false) in ${path.join(path.relative(process.cwd(), projectRoot) || ".", "aice.config.json")}`,
       );
     } catch (err: unknown) {
-      console.error(`❌ Error disabling AICE: ${err instanceof Error ? err.message : String(err)}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      recordCliFailureTelemetry(msg, "context", dirArg);
+      console.error(`❌ Error disabling AICE: ${msg}`);
       process.exit(1);
     }
   });
 
-// Command: config [dir]
+// Command: config [dir] (alias: status)
 program
   .command("config [dir]")
+  .alias("status")
   .description("Inspect or toggle project-level AICE and $idioms configuration in aice.config.json")
   .option("--enable", 'Set "enabled": true in aice.config.json')
   .option("--disable", 'Set "enabled": false in aice.config.json')
+  .option("-f, --force", "Force AGENTS.md rule injection even if exceeding 22,000-byte cap")
   .option("--idioms-on", 'Set "idiomsEnabled": true in aice.config.json')
   .option("--idioms-off", 'Set "idiomsEnabled": false in aice.config.json')
   .option("--json", "Output project configuration status in JSON format")
@@ -3978,6 +4235,7 @@ program
       options: {
         enable?: boolean;
         disable?: boolean;
+        force?: boolean;
         idiomsOn?: boolean;
         idiomsOff?: boolean;
         json?: boolean;
@@ -3989,7 +4247,7 @@ program
         let config = loadProjectConfig(projectRoot);
 
         if (options.enable) {
-          config = setProjectAiceEnabled(projectRoot, true);
+          config = setProjectAiceEnabled(projectRoot, true, { force: options.force });
         } else if (options.disable) {
           config = setProjectAiceEnabled(projectRoot, false);
         }
@@ -4025,14 +4283,13 @@ program
         console.log(`  Idioms Status:  ${idiomsEnabled ? "ENABLED" : "DISABLED"}`);
         console.log(`  Active Idioms:  ${idiomsCount}`);
       } catch (err: unknown) {
-        console.error(
-          `❌ Error reading project config: ${err instanceof Error ? err.message : String(err)}`,
-        );
+        const msg = err instanceof Error ? err.message : String(err);
+        recordCliFailureTelemetry(msg, "context", dirArg);
+        console.error(`❌ Error reading project config: ${msg}`);
         process.exit(1);
       }
     },
   );
-
 // Command: agents [action]
 program
   .command("agents [action]")
@@ -4132,7 +4389,7 @@ async function promptLine(question: string): Promise<string> {
 // Command: gain [project]
 program
   .command("gain [project]")
-  .aliases(["gains", "stats"])
+  .aliases(["gains", "stats", "telemetry"])
   .description(
     "100% honest BPE token-savings telemetry dashboard (global overview & per-project drill-down)",
   )

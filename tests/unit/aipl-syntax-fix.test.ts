@@ -267,17 +267,15 @@ pub fn getRadius(light: PointLight25D): float:
   });
 
   describe("Step 3: Zero-Grep & Zero-Sed Directives in MANDATORY_AGENT_RULES_MARKDOWN (v0.9.24)", () => {
-    it("embeds current version and enforces .aipl + zero-grep/sed directives in compact MANDATORY_AGENT_RULES_MARKDOWN", () => {
+    it("embeds current version with single start marker and enforces <= 900B & zero-grep/sed directives in MANDATORY_AGENT_RULES_MARKDOWN", () => {
       expect(AICE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("33 supported file extensions");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(".aipl");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        "NEVER run `sed -n` or grep/awk/head/tail/cat/ls/find",
-      );
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        'aice read <fileOrDir> -s "/<searchPattern>/"',
-      );
+      expect(MANDATORY_AGENT_RULES_MARKDOWN.match(/<!--\s*AICE:START[^>]*-->/g)).toEqual([
+        `<!-- AICE:START v${AICE_VERSION} -->`,
+      ]);
+      expect(Buffer.byteLength(MANDATORY_AGENT_RULES_MARKDOWN, "utf-8")).toBeLessThanOrEqual(900);
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("`sed`/`grep`/`cat`/`find`");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("'f:/a|b/'");
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice read f1:sym f2:L1-L50");
     });
   });

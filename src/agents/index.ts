@@ -64,7 +64,9 @@ export function extractMarkdownDirectiveVersion(filePath: string): string | unde
     if (verMatch?.[1]) return verMatch[1];
     const headingMatch = activeSlice.match(/##\s+AICE(?:\s+2\.0)?\s+\(v([0-9A-Za-z._-]+)\)/);
     if (headingMatch?.[1]) return headingMatch[1];
-    if (activeSlice.includes(AICE_DIRECTIVE_START)) return "legacy";
+    if (/<!--\s*AICE:START\s*-->/.test(activeSlice) || activeSlice.includes(AICE_DIRECTIVE_START)) {
+      return "legacy";
+    }
     return undefined;
   } catch {
     return undefined;

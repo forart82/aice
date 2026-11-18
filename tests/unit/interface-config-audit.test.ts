@@ -377,21 +377,17 @@ describe("CLI, Config, Rules & Stdin Interface Audit Regressions", () => {
     );
   });
 
-  it("includes Section 1 heading, @clone(SourceSym), @replace-docs, <= 650 BPE token ceiling, and opt-in idioms default", () => {
-    expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-      "### 1. Opt-In Activation Gate & Non-AICE Bypass",
-    );
-    expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("@clone(SourceSym)");
-    expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("@replace-docs");
+  it("enforces single start marker, <= 900B & <= 300 BPE token ceiling, and opt-in idioms default", () => {
+    expect(MANDATORY_AGENT_RULES_MARKDOWN.match(/<!--\s*AICE:START[^>]*-->/g)).toHaveLength(1);
+    expect(Buffer.byteLength(MANDATORY_AGENT_RULES_MARKDOWN, "utf-8")).toBeLessThanOrEqual(900);
     expect(
       TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "cl100k_base"),
-    ).toBeLessThanOrEqual(650);
+    ).toBeLessThanOrEqual(300);
     expect(
       TiktokenTokenizer.count(MANDATORY_AGENT_RULES_MARKDOWN, "o200k_base"),
-    ).toBeLessThanOrEqual(650);
+    ).toBeLessThanOrEqual(300);
     expect(DEFAULT_PROJECT_CONFIG.idiomsEnabled).toBe(false);
     expect(hasAgentsMdInclude("@AGENTS.md")).toBe(true);
-
     const ruleAuditDir = path.join(tmpDir, "rule-audit");
     fs.mkdirSync(path.join(ruleAuditDir, ".agents", "rules"), { recursive: true });
     fs.writeFileSync(path.join(ruleAuditDir, ".agents", "rules", "aice.md"), "stale", "utf-8");

@@ -109,117 +109,32 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_read",
     description:
-      "Unified Read Engine: 1-turn 1-based disk-numbered native output by default across bare files (within dynamic 9 KB / ~145-line anti-spill slice budget + next slice: pagination), AST symbol/test/heading slices (with Adaptive Sibling Outlining, dependency contracts & downstream callers), line slices (:Lstart-Lend), AST-aware pattern searches (search + contextLines, or :/pattern/), and zero-AST workspace file discovery (filesOnly: true); automatic directory & overflow-file structural outlining with AST-snapped pagination hints; opt-in dsl: true for AICE shorthand decompilation; opt-in $idioms (default OFF) across all 20 languages / 33 file extensions. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch 2+ targets into a SINGLE call via space-separated 'path' (e.g. 'src/a.ts:fnA src/b.ts:L10-L50 src/rules') or 'targets' / 'paths' array.",
+      "Read files, dirs, symbols, :L, search, or file list. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch in path or paths.",
     inputSchema: {
       type: "object",
       properties: {
-        path: {
-          type: "string",
-          description:
-            "Target file, directory, or glob path (supports inline 'file:sym1,sym2', 'file:L10-L30', 'file:outline', 'dir:/pattern/', or space-separated multi-target paths in 1 call; defaults to '.' when 'search' or 'filesOnly' is set)",
-        },
-        paths: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Optional array of target file, directory, or glob paths with optional inline ':symbol', ':Lstart-Lend', or ':outline' selectors",
-        },
-        targets: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Alias for 'paths': array of target file or directory paths/selectors to read in 1 call",
-        },
-        filePath: {
-          type: "string",
-          description: "Alias for 'path': target file path",
-        },
-        fileOrDir: {
-          type: "string",
-          description: "Alias for 'path': target file or directory path",
-        },
-        symbol: {
-          type: "string",
-          description:
-            "Optional selector: symbol ('Class.method'), test ID ('TC-001'), Markdown heading, line range ('L10-L30'), regex ('/pattern/'), or 'outline'",
-        },
-        selector: {
-          type: "string",
-          description: "Alias for 'symbol'",
-        },
-        search: {
-          type: "string",
-          description:
-            "Optional plain regex or literal search pattern (without requiring /.../ wrappers; when filesOnly: true, filters file paths by glob or substring)",
-        },
-        filesOnly: {
-          type: "boolean",
-          description:
-            "Fast zero-AST workspace file discovery (<relPath> (<lines>L, <sizeKB>KB)); combine with 'search' or 'path' to filter",
-        },
-        contextLines: {
-          type: "number",
-          description:
-            "Optional context radius override (number of lines before and after each search match)",
-        },
-        dsl: {
-          type: "boolean",
-          description:
-            "Opt into AICE shorthand decompilation (default: false; emits 1-based disk-numbered native source lines)",
-        },
-        outline: {
-          type: "boolean",
-          description:
-            "Force structural skeleton outline (85-90% token reduction) regardless of file size",
-        },
-        full: {
-          type: "boolean",
-          description:
-            "Bypass dynamic auto-outline (>250 lines) to emit numbered code slices within the default 9 KB anti-spill ceiling (set maxTokens to raise budget)",
-        },
-        depth: {
-          type: "number",
-          description:
-            "Dependency traversal depth (for context) or maximum symbol nesting depth (for outline)",
-        },
-        maxTokens: {
-          type: "number",
-          description:
-            "Maximum token budget override (bypasses default 9 KB ceiling when explicitly set)",
-        },
-        includeDeps: {
-          type: "boolean",
-          description:
-            "Explicitly force or skip Imported Dependency Contracts (opt-in on <=150-line bare files, line slices, and regex searches)",
-        },
-        includeCallers: {
-          type: "boolean",
-          description:
-            "Include reverse downstream callers and 1-based call-site line numbers (opt-in on <=150-line bare files, line slices, and regex searches)",
-        },
-        compact: {
-          type: "boolean",
-          description:
-            "Optional compact directory outline mode override (auto-enabled for 60+ files)",
-        },
-        types: {
-          type: "boolean",
-          description:
-            "Optional flag to include or omit type/interface field details when outlining (default: true)",
-        },
-        idioms: {
-          type: "boolean",
-          description:
-            "Optional override to enable or disable project $idioms (default: false unless idiomsEnabled: true in aice.config.json)",
-        },
-        stats: {
-          type: "boolean",
-          description: "Include token reduction and context telemetry statistics",
-        },
-        json: {
-          type: "boolean",
-          description: "Return structured machine-readable JSON output",
-        },
+        path: { type: "string", description: "File/dir, f:sym, f:L1-L50, or space-separated list" },
+        paths: { type: "array", items: { type: "string" } },
+        targets: { type: "array", items: { type: "string" } },
+        filePath: { type: "string" },
+        fileOrDir: { type: "string" },
+        symbol: { type: "string", description: "Symbol, L1-L30, /pat/, outline" },
+        selector: { type: "string" },
+        search: { type: "string" },
+        filesOnly: { type: "boolean" },
+        contextLines: { type: "number" },
+        dsl: { type: "boolean" },
+        outline: { type: "boolean" },
+        full: { type: "boolean" },
+        depth: { type: "number" },
+        maxTokens: { type: "number" },
+        includeDeps: { type: "boolean" },
+        includeCallers: { type: "boolean" },
+        compact: { type: "boolean" },
+        types: { type: "boolean" },
+        idioms: { type: "boolean" },
+        stats: { type: "boolean" },
+        json: { type: "boolean" },
       },
       required: [],
     },
@@ -227,169 +142,34 @@ export const AICE_MCP_TOOLS: McpToolDefinition[] = [
   {
     name: "aice_splice",
     description:
-      "Unified Write & Surgical AST Mutation Engine (also callable as `aice_write`): automatically applies greenfield file creation (missing parent directories, $idioms, AICE DSL compilation), full-file overwrites (when `symbol` is omitted or `:overwrite` / `:create`), or surgical AST/CST/hunk (`<<< / === / >>>`)/line-range (`L10-L25`, `imports`, `eof`) mutations across all 20 languages / 33 file extensions. RECOMMENDED: For multi-symbol or multi-file edits, pass a single flat `code` string with `=== <filePath>:<symbolOrRange> ===` headers (and `=== <filePath>:<symbolOrRange> --delete ===` for deletions). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+      "Create, overwrite, or splice files/symbols/:L/hunks (aice_write). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code.",
     inputSchema: {
       type: "object",
       properties: {
-        filePath: {
-          type: "string",
-          description:
-            "Optional path to target native or .aice file, or inline 'file:symbol' / 'file:L10-L20' (omit when 'code' contains '=== <filePath> ===' / '=== <filePath>:<symbol> ===' multi-file stream headers, or when 'batch' / 'files' / 'edits' includes filePath)",
-        },
-        path: {
-          type: "string",
-          description: "Alias for filePath: target file path",
-        },
-        fileOrDir: {
-          type: "string",
-          description: "Alias for filePath: target file path",
-        },
-        symbolSelector: {
-          type: "string",
-          description:
-            "Optional identifier of target symbol (e.g., 'calculate', 'GameEngine.step', 'imports', 'eof', ':overwrite', or line range 'L10-L25'). Omit to create a new file or overwrite the entire file.",
-        },
-        symbol: {
-          type: "string",
-          description: "Alias for 'symbolSelector'",
-        },
-        selector: {
-          type: "string",
-          description: "Alias for 'symbolSelector'",
-        },
-        range: {
-          type: "string",
-          description: "Alias for 'symbolSelector' when targeting a line range (e.g., 'L10-L25')",
-        },
-        code: {
-          type: "string",
-          description:
-            "Replacement or full-file code, AST-scoped hunk ('<<<\\n<search>\\n===\\n<replace>\\n>>>'), or multi-file stream with '=== <filePath>:<symbolOrRange> ===' / '=== <filePath> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions). RECOMMENDED: For multi-symbol or multi-file batches, pass a single flat 'code' string using '=== <filePath>:<symbolOrRange> ===' headers instead of nested object arrays (avoiding host array serialization glitches). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `batch` / `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
-        },
-        content: {
-          type: "string",
-          description: "Alias for 'code'",
-        },
-        newAiceCode: {
-          type: "string",
-          description:
-            "Alias for 'code': replacement snippet, '<<< / === / >>>' hunk, or multi-file '=== <filePath>:<symbol> ===' stream",
-        },
-        body: {
-          type: "string",
-          description: "Optional body-only replacement statements keeping the existing signature",
-        },
-        delete: {
-          type: "boolean",
-          description: "If true, removes the symbol entirely",
-        },
-        create: {
-          type: "boolean",
-          description:
-            "If true, explicitly routes through full-file creation/compilation (auto-detected when file does not exist or symbol is omitted)",
-        },
-        force: {
-          type: "boolean",
-          description:
-            "Alias for 'overwrite': force full-file write/replacement even when target file already exists",
-        },
-        overwrite: {
-          type: "boolean",
-          description:
-            "If true, explicitly authorizes full-file replacement (including empty truncation)",
-        },
-        insertAfter: {
-          type: "string",
-          description: "Inserts the new code directly after the named symbol",
-        },
-        insertBefore: {
-          type: "string",
-          description: "Inserts the new code directly before the named symbol",
-        },
-        preserveDocs: {
-          type: "boolean",
-          description:
-            "Whether to preserve existing leading JSDoc/docstrings on replaced symbols (default: true)",
-        },
-        dryRun: {
-          type: "boolean",
-          description: "If true, preview the spliced output/diff without writing to disk",
-        },
-        idioms: {
-          type: "boolean",
-          description: "Optional override to enable or disable project/inline $idioms",
-        },
-        inlineIdioms: {
-          type: "array",
-          items: { type: "string" },
-          description:
-            "Optional inline idiom specifications (e.g. ['$clamp($0,$1,$2)=Math.min(Math.max($0,$1),$2)'])",
-        },
-        edits: {
-          type: "array",
-          description:
-            "Optional multi-symbol or multi-file batch edits applied atomically in reverse offset order (bottom-to-top). RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead — flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
-          items: {
-            type: "object",
-            properties: {
-              filePath: { type: "string" },
-              symbol: { type: "string" },
-              code: { type: "string" },
-              body: { type: "string" },
-              delete: { type: "boolean" },
-              insertAfter: { type: "string" },
-              insertBefore: { type: "string" },
-              preserveDocs: { type: "boolean" },
-            },
-            required: ["symbol"],
-          },
-        },
-        batch: {
-          type: "array",
-          description:
-            "Alias for 'files': optional array of per-file create/write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations. RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead — flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
-          items: {
-            type: "object",
-            properties: {
-              filePath: { type: "string" },
-              path: { type: "string" },
-              symbol: { type: "string" },
-              code: { type: "string" },
-              content: { type: "string" },
-              body: { type: "string" },
-              delete: { type: "boolean" },
-              create: { type: "boolean" },
-              force: { type: "boolean" },
-              overwrite: { type: "boolean" },
-              insertAfter: { type: "string" },
-              insertBefore: { type: "string" },
-              preserveDocs: { type: "boolean" },
-            },
-          },
-        },
-        files: {
-          type: "array",
-          description:
-            "Optional array of per-file write/splice items ({ filePath, symbol?, code?, body?, delete?, create?, force?, overwrite?, insertAfter?, insertBefore?, preserveDocs?, edits? }) for atomic multi-file operations. RECOMMENDED: Prefer passing a single flat 'code' string with '=== <filePath>:<symbolOrRange> ===' headers (and '=== <filePath>:<symbolOrRange> --delete ===' for deletions) instead — flat 'code' strings avoid [null] array coercion in lazy call_mcp_tool hosts.",
-          items: {
-            type: "object",
-            properties: {
-              filePath: { type: "string" },
-              symbol: { type: "string" },
-              code: { type: "string" },
-              content: { type: "string" },
-              body: { type: "string" },
-              delete: { type: "boolean" },
-              create: { type: "boolean" },
-              force: { type: "boolean" },
-              overwrite: { type: "boolean" },
-              insertAfter: { type: "string" },
-              insertBefore: { type: "string" },
-              preserveDocs: { type: "boolean" },
-            },
-            required: ["filePath"],
-          },
-        },
+        filePath: { type: "string", description: "File or file:selector" },
+        path: { type: "string" },
+        fileOrDir: { type: "string" },
+        symbolSelector: { type: "string", description: "Symbol, L1-L25, imports, eof, :overwrite" },
+        symbol: { type: "string" },
+        selector: { type: "string" },
+        range: { type: "string" },
+        code: { type: "string", description: "Code, multi-line hunk, or === file:sym === stream" },
+        content: { type: "string" },
+        newAiceCode: { type: "string" },
+        body: { type: "string" },
+        delete: { type: "boolean" },
+        create: { type: "boolean" },
+        force: { type: "boolean" },
+        overwrite: { type: "boolean" },
+        insertAfter: { type: "string" },
+        insertBefore: { type: "string" },
+        preserveDocs: { type: "boolean" },
+        dryRun: { type: "boolean" },
+        idioms: { type: "boolean" },
+        inlineIdioms: { type: "array", items: { type: "string" } },
+        edits: { type: "array", items: { type: "object" } },
+        batch: { type: "array", items: { type: "object" } },
+        files: { type: "array", items: { type: "object" } },
       },
     },
   },
@@ -399,7 +179,7 @@ export const AICE_WRITE_TOOL: McpToolDefinition = {
   ...AICE_MCP_TOOLS.find((t) => t.name === "aice_splice")!,
   name: "aice_write",
   description:
-    "Alias for aice_splice: Surgically replace, delete, hunk-patch, create, or full-file overwrite one or more named symbols, line ranges, or files across all 20 languages / 33 file extensions. RECOMMENDED: For multi-symbol or multi-file edits, pass a single flat `code` string with `=== <filePath>:<symbolOrRange> ===` headers (and `=== <filePath>:<symbolOrRange> --delete ===` for deletions). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! When creating or editing 2+ files, batch ALL files into a SINGLE call using `=== <filePath> ===` or `=== <filePath>:<symbol> ===` headers inside `code` (or `files` / `edits` array), or use 1 Bash `aice splice --stdin << 'EOF'` heredoc.",
+    "Alias for aice_splice: create, overwrite, or splice files/symbols/:L/hunks. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code.",
 };
 
 export interface McpToolCallResult {
@@ -900,12 +680,20 @@ export class AiceMcpServer {
         this.sendResponse(request.id, result);
         return result;
       } catch (err: unknown) {
-        const errCode =
+        const explicitCode =
           err && typeof err === "object" && typeof (err as { code?: unknown }).code === "number"
             ? (err as { code: number }).code
-            : -32603;
+            : undefined;
+        if (request.method === "tools/call" && explicitCode === undefined) {
+          const toolErrorResult: McpToolCallResult = {
+            content: [{ type: "text", text: err instanceof Error ? err.message : String(err) }],
+            isError: true,
+          };
+          this.sendResponse(request.id, toolErrorResult);
+          return toolErrorResult;
+        }
         const error = {
-          code: errCode,
+          code: explicitCode ?? -32603,
           message: err instanceof Error ? err.message : String(err),
         };
         this.sendResponse(request.id, undefined, error);
@@ -956,6 +744,7 @@ export class AiceMcpServer {
           const res = await this.executeToolCall(callParams?.name, toolArgs);
           return wrapOut(res);
         } catch (err: unknown) {
+          const errMsg = err instanceof Error ? err.message : String(err);
           const toolToOp: Record<string, TelemetryOperation> = {
             aice_read: "context",
             read: "context",
@@ -972,11 +761,17 @@ export class AiceMcpServer {
           };
           const op = toolToOp[callParams?.name ?? ""];
           if (op) {
+            const firstArrTarget = Array.isArray(toolArgs.targets)
+              ? toolArgs.targets[0]
+              : Array.isArray(toolArgs.paths)
+                ? toolArgs.paths[0]
+                : undefined;
             const rawTarget = String(
               toolArgs.filePath ??
                 toolArgs.path ??
                 toolArgs.file ??
                 toolArgs.dir ??
+                firstArrTarget ??
                 this.workspaceRoot,
             );
             recordTelemetryError({
@@ -984,13 +779,18 @@ export class AiceMcpServer {
               projectRoot: this.resolveProjectRoot(this.workspaceRoot),
               operation: op,
               surface: "mcp",
-              errorMessage: err instanceof Error ? err.message : String(err),
+              errorMessage: errMsg,
+            });
+          }
+          if (isObjCall) {
+            return wrapOut({
+              content: [{ type: "text", text: errMsg }],
+              isError: true,
             });
           }
           throw err;
         }
       }
-
       default: {
         throw Object.assign(new Error(`Method not found: ${method}`), { code: -32601 });
       }

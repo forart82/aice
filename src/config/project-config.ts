@@ -8,6 +8,7 @@
  * and target output path resolution.
  */
 
+import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -123,14 +124,17 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".cxx",
   ".h",
   ".cs",
+  ".java",
   ".html",
   ".htm",
+  ".xml",
   ".css",
   ".js",
   ".jsx",
   ".mjs",
   ".cjs",
   ".json",
+  ".webmanifest",
   ".yaml",
   ".yml",
   ".cff",
@@ -138,6 +142,10 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".php",
   ".kt",
   ".kts",
+  ".gradle",
+  ".pro",
+  ".properties",
+  ".example",
   ".sh",
   ".bash",
   ".zsh",
@@ -165,10 +173,13 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".cxx": "cpp",
   ".h": "cpp",
   ".cs": "csharp",
+  ".java": "kotlin",
   ".html": "html",
   ".htm": "html",
+  ".xml": "html",
   ".css": "css",
   ".json": "json",
+  ".webmanifest": "json",
   ".yaml": "yaml",
   ".yml": "yaml",
   ".cff": "yaml",
@@ -176,6 +187,10 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".php": "php",
   ".kt": "kotlin",
   ".kts": "kotlin",
+  ".gradle": "kotlin",
+  ".pro": "shell",
+  ".properties": "shell",
+  ".example": "shell",
   ".sh": "shell",
   ".bash": "shell",
   ".zsh": "shell",
@@ -594,9 +609,41 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
   return "side-by-side";
 }
 
+const KNOWN_EXTENSIONLESS_SCRIPT_NAMES: ReadonlySet<string> = new Set([
+  "verify",
+  "new-project",
+  "gradlew",
+  "mvnw",
+  "Makefile",
+  "GNUmakefile",
+  "makefile",
+  "Dockerfile",
+  "Containerfile",
+  "Jenkinsfile",
+  "Vagrantfile",
+  "Procfile",
+  "Rakefile",
+  "Justfile",
+  "justfile",
+  ".gitignore",
+  ".gitattributes",
+  ".dockerignore",
+  ".npmignore",
+  ".eslintignore",
+  ".prettierignore",
+  ".editorconfig",
+  ".env",
+  "LICENSE",
+  "NOTICE",
+]);
+
 function isLikelyTargetFilePath(rawInput: string, resolvedPath: string): boolean {
   if (rawInput.endsWith("/") || rawInput.endsWith("\\")) {
     return false;
+  }
+  const base = path.basename(resolvedPath);
+  if (KNOWN_EXTENSIONLESS_SCRIPT_NAMES.has(base) || base.startsWith(".env.")) {
+    return true;
   }
   const lower = resolvedPath.toLowerCase();
   if (lower.endsWith(".aice") || lower.endsWith(".d.ts") || lower.endsWith(".html.twig")) {
@@ -1405,33 +1452,99 @@ export function stripAllMarkdownDirectives(markdown: string): {
   };
 }
 
-export function upsertMarkdownDirective(mdPath: string, blockText?: string): void {
-  const directiveBlock = blockText ?? MANDATORY_AGENT_RULES_MARKDOWN;
+export const AGENTS_MD_SAFE_BYTE_CAP = 22_000;
+
+export interface WorkspaceRuleSyncOptions {
+  force?: boolean;
+  maxAgentsMdBytes?: number;
+  enforceByteCap?: boolean;
+  onWarning?: (message: string) => void;
+}
+
+function stripOrphanAiceMarkersOutsideFences(markdown: string): string {
+  if (!markdown.includes("AICE:START") && !markdown.includes("AICE:END")) {
+    return markdown;
+  }
+  let fenceChar: "`" | "~" | null = null;
+  let fenceLen = 0;
+  const kept: string[] = [];
+  for (const rawLine of markdown.split(/\r?\n/)) {
+    const fenceMatch = rawLine.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
+    if (fenceMatch?.[1]) {
+      const marker = fenceMatch[1];
+      const ch = marker[0] as "`" | "~";
+      const rest = fenceMatch[2] ?? "";
+      if (!fenceChar) {
+        if (ch === "~" || !rest.includes("`")) {
+          fenceChar = ch;
+          fenceLen = marker.length;
+        }
+      } else if (ch === fenceChar && marker.length >= fenceLen && /^[ \t]*$/.test(rest)) {
+        fenceChar = null;
+        fenceLen = 0;
+      }
+      kept.push(rawLine);
+      continue;
+    }
+    if (
+      !fenceChar &&
+      /^[ \t]*<!--\s*AICE:(?:START(?:\s+v[0-9A-Za-z._-]+)?|END)\s*-->[ \t]*$/.test(rawLine)
+    ) {
+      continue;
+    }
+    kept.push(rawLine);
+  }
+  return kept.join("\n").trim();
+}
+
+export function upsertMarkdownDirective(
+  mdPath: string,
+  blockText?: string,
+  options?: WorkspaceRuleSyncOptions,
+): void {
+  const rawBlock = blockText ?? MANDATORY_AGENT_RULES_MARKDOWN;
+  const directiveBlock = rawBlock.replace(
+    /^(?:[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*\r?\n)+(?=[ \t]*<!--\s*AICE:START\b)/,
+    "",
+  );
   fs.mkdirSync(path.dirname(mdPath), { recursive: true });
   let existing = "";
   if (fs.existsSync(mdPath)) {
     existing = fs.readFileSync(mdPath, "utf-8");
   }
-  const { stripped } = stripAllMarkdownDirectives(existing);
+  const { stripped: rawStripped } = stripAllMarkdownDirectives(existing);
+  const stripped = stripOrphanAiceMarkersOutsideFences(rawStripped);
 
+  let nextContent: string;
   if (stripped.length === 0) {
-    writeFileAtomic(mdPath, `${directiveBlock}\n`);
-    return;
+    nextContent = `${directiveBlock}\n`;
+  } else {
+    const headingMatch = stripped.match(/^(\s*#[ \t]+[^\r\n]+)/);
+    if (headingMatch) {
+      const heading = headingMatch[0].trim();
+      const rest = stripped.slice(headingMatch[0].length).trim();
+      nextContent =
+        rest.length > 0
+          ? `${heading}\n\n${directiveBlock}\n\n${rest}\n`
+          : `${heading}\n\n${directiveBlock}\n`;
+    } else {
+      nextContent = `${directiveBlock}\n\n${stripped}\n`;
+    }
   }
 
-  const headingMatch = stripped.match(/^(\s*#[ \t]+[^\r\n]+)/);
-  if (headingMatch) {
-    const heading = headingMatch[0].trim();
-    const rest = stripped.slice(headingMatch[0].length).trim();
-    const nextContent =
-      rest.length > 0
-        ? `${heading}\n\n${directiveBlock}\n\n${rest}\n`
-        : `${heading}\n\n${directiveBlock}\n`;
-    writeFileAtomic(mdPath, nextContent);
-    return;
+  if (options?.enforceByteCap) {
+    const maxBytes = options.maxAgentsMdBytes ?? AGENTS_MD_SAFE_BYTE_CAP;
+    const projectedBytes = Buffer.byteLength(nextContent, "utf-8");
+    if (projectedBytes > maxBytes) {
+      const warnMsg = `⚠️ Warning: Injecting AICE rules into ${mdPath} would reach ${projectedBytes} bytes (> ${maxBytes} B cap).${options.force ? " Proceeding because --force was set." : " Skipping AGENTS.md injection to protect workspace byte caps (pass --force to override)."}`;
+      (options.onWarning ?? console.warn)(warnMsg);
+      if (!options.force) {
+        return;
+      }
+    }
   }
 
-  writeFileAtomic(mdPath, `${directiveBlock}\n\n${stripped}\n`);
+  writeFileAtomic(mdPath, nextContent);
 }
 
 /**
@@ -1556,7 +1669,45 @@ function cleanEmptySubdir(dirPath: string): void {
  * while purging legacy duplicate rule blocks from `GEMINI.md`, `.GEMINI.md`, `CODEX.md`, `.CODEX.md`,
  * `.codex/*`, and rule files under `.agents/rules/aice.md`, `.gemini/rules/aice.md`, `.claude/rules/aice.md`.
  */
-export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean): void {
+function ensureGitInfoExcludeForUntrackedConfig(projectDir: string): void {
+  try {
+    const revParse = spawnSync("git", ["rev-parse", "--git-path", "info/exclude"], {
+      cwd: projectDir,
+      encoding: "utf-8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    if (revParse.status !== 0 || !revParse.stdout.trim()) {
+      return;
+    }
+    const lsFiles = spawnSync("git", ["ls-files", "--error-unmatch", "aice.config.json"], {
+      cwd: projectDir,
+      stdio: "ignore",
+    });
+    if (lsFiles.status === 0) {
+      // Tracked in git; do not add to info/exclude
+      return;
+    }
+    const excludePath = path.resolve(projectDir, revParse.stdout.trim());
+    fs.mkdirSync(path.dirname(excludePath), { recursive: true });
+    const existing = fs.existsSync(excludePath) ? fs.readFileSync(excludePath, "utf-8") : "";
+    const hasEntry = existing
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .some((l) => l === "aice.config.json" || l === "/aice.config.json");
+    if (!hasEntry) {
+      const prefix = existing.length === 0 || existing.endsWith("\n") ? existing : `${existing}\n`;
+      fs.writeFileSync(excludePath, `${prefix}aice.config.json\n`, "utf-8");
+    }
+  } catch {
+    // Ignore when git is unavailable or directory is not a git repository
+  }
+}
+
+export function syncProjectWorkspaceRules(
+  projectDir: string,
+  enabled: boolean,
+  options?: WorkspaceRuleSyncOptions,
+): void {
   const resolvedDir = path.resolve(projectDir);
   const agentsMdPath = path.join(resolvedDir, "AGENTS.md");
   const claudeMdPath = path.join(resolvedDir, "CLAUDE.md");
@@ -1584,13 +1735,16 @@ export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean):
   removeAlwaysOnRuleFile(path.join(resolvedDir, ".claude", "rules", "aice.md"), true);
 
   if (enabled) {
-    upsertMarkdownDirective(agentsMdPath);
+    upsertMarkdownDirective(agentsMdPath, undefined, {
+      ...options,
+      enforceByteCap: true,
+    });
     if (fs.existsSync(claudeMdPath)) {
       const claudeContent = fs.readFileSync(claudeMdPath, "utf-8");
       if (hasAgentsMdInclude(claudeContent)) {
         removeMarkdownDirective(claudeMdPath, true);
       } else {
-        upsertMarkdownDirective(claudeMdPath);
+        upsertMarkdownDirective(claudeMdPath, undefined, options);
       }
       removeMarkdownDirective(dotClaudeMdPath, true);
       cleanEmptySubdir(path.join(resolvedDir, ".claude"));
@@ -1599,7 +1753,7 @@ export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean):
       if (hasAgentsMdInclude(dotClaudeContent)) {
         removeMarkdownDirective(dotClaudeMdPath, true);
       } else {
-        upsertMarkdownDirective(dotClaudeMdPath);
+        upsertMarkdownDirective(dotClaudeMdPath, undefined, options);
       }
     }
   } else {
@@ -1613,7 +1767,11 @@ export function syncProjectWorkspaceRules(projectDir: string, enabled: boolean):
 /**
  * Creates or updates `aice.config.json` with `"enabled": true | false` and synchronizes workspace agent rules.
  */
-export function setProjectAiceEnabled(projectDir: string, enabled: boolean): AiceProjectConfig {
+export function setProjectAiceEnabled(
+  projectDir: string,
+  enabled: boolean,
+  options?: WorkspaceRuleSyncOptions,
+): AiceProjectConfig {
   let resolvedDir = findProjectRoot(projectDir);
   if (
     resolvedDir === path.resolve(projectDir) &&
@@ -1635,7 +1793,10 @@ export function setProjectAiceEnabled(projectDir: string, enabled: boolean): Aic
     },
     { stripLegacyKeys: true },
   );
-  syncProjectWorkspaceRules(resolvedDir, enabled);
+  if (enabled) {
+    ensureGitInfoExcludeForUntrackedConfig(resolvedDir);
+  }
+  syncProjectWorkspaceRules(resolvedDir, enabled, options);
   return saved;
 }
 

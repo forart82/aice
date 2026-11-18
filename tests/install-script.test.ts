@@ -339,4 +339,27 @@ describe("Phase 2: Universal Linux Installer (install.sh) & Uninstaller (uninsta
       expect(line[79], `Row ${rowIdx + 1} right border at idx 79: ${line}`).toMatch(/[┤│]/);
     }
   });
+
+  it("never scans ~/dev/* automatically unless --sync-projects or AICE_PROJECTS_DIR is explicitly provided", () => {
+    const dryDefault = spawnSync(INSTALL_SCRIPT, ["--dry-run", "--no-cheatsheet"], {
+      cwd: process.cwd(),
+      encoding: "utf-8",
+    });
+    expect(dryDefault.status).toBe(0);
+    expect(dryDefault.stdout).not.toContain("refresh explicit aice.config.json projects");
+    expect(dryDefault.stdout).not.toContain("across ~/dev/*");
+
+    const dryExplicit = spawnSync(
+      INSTALL_SCRIPT,
+      ["--dry-run", "--no-cheatsheet", "--sync-projects", "/tmp/explicit-projects"],
+      {
+        cwd: process.cwd(),
+        encoding: "utf-8",
+      },
+    );
+    expect(dryExplicit.status).toBe(0);
+    expect(dryExplicit.stdout).toContain(
+      "refresh explicit aice.config.json projects in /tmp/explicit-projects",
+    );
+  });
 });

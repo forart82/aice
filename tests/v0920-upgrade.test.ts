@@ -376,17 +376,16 @@ describe("AICE v0.9.20 Real-World Readiness, Script/Markdown Dialect & Auto-Upda
       }
     });
 
-    it("enforces sed/ls/grep ban and documents 33 extensions and v0.9.24 header in MANDATORY_AGENT_RULES_MARKDOWN", () => {
+    it("enforces sed/grep/cat/find ban, single marker, quoted regex, and <= 900B in MANDATORY_AGENT_RULES_MARKDOWN", () => {
       expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(`<!-- AICE:START v${AICE_VERSION} -->`);
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("33 supported file extensions");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        ".sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl",
-      );
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("NEVER run `sed -n`");
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain(
-        'aice read <fileOrDir> -s "/<searchPattern>/"',
-      );
-      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice read src tests");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN.match(/<!--\s*AICE:START[^>]*-->/g)).toEqual([
+        `<!-- AICE:START v${AICE_VERSION} -->`,
+      ]);
+      expect(Buffer.byteLength(MANDATORY_AGENT_RULES_MARKDOWN, "utf-8")).toBeLessThanOrEqual(900);
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("`sed`/`grep`/`cat`/`find`");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("'f:/a|b/'");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice search <pat> [dir]");
+      expect(MANDATORY_AGENT_RULES_MARKDOWN).toContain("aice find -d 2");
     });
   });
 
