@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import type { TargetLanguage } from "../emitters/context.js";
+import { isLikelyNonExistentFilePath } from "./file-classification.js";
 
 export type { TargetLanguage };
 
@@ -609,47 +610,11 @@ export function autoDetectProjectMode(projectDir: string): ProjectMode {
   return "side-by-side";
 }
 
-const KNOWN_EXTENSIONLESS_SCRIPT_NAMES: ReadonlySet<string> = new Set([
-  "verify",
-  "new-project",
-  "gradlew",
-  "mvnw",
-  "Makefile",
-  "GNUmakefile",
-  "makefile",
-  "Dockerfile",
-  "Containerfile",
-  "Jenkinsfile",
-  "Vagrantfile",
-  "Procfile",
-  "Rakefile",
-  "Justfile",
-  "justfile",
-  ".gitignore",
-  ".gitattributes",
-  ".dockerignore",
-  ".npmignore",
-  ".eslintignore",
-  ".prettierignore",
-  ".editorconfig",
-  ".env",
-  "LICENSE",
-  "NOTICE",
-]);
-
 function isLikelyTargetFilePath(rawInput: string, resolvedPath: string): boolean {
-  if (rawInput.endsWith("/") || rawInput.endsWith("\\")) {
-    return false;
-  }
-  const base = path.basename(resolvedPath);
-  if (KNOWN_EXTENSIONLESS_SCRIPT_NAMES.has(base) || base.startsWith(".env.")) {
+  if (isLikelyNonExistentFilePath(rawInput, resolvedPath)) {
     return true;
   }
-  const lower = resolvedPath.toLowerCase();
-  if (lower.endsWith(".aice") || lower.endsWith(".d.ts") || lower.endsWith(".html.twig")) {
-    return true;
-  }
-  const ext = path.extname(lower);
+  const ext = path.extname(resolvedPath).toLowerCase();
   return Boolean(ext && KNOWN_TARGET_EXTENSIONS.has(ext));
 }
 

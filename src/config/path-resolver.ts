@@ -11,6 +11,7 @@ import { execSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { isLikelyNonExistentFilePath, KNOWN_TEXT_FILENAMES } from "./file-classification.js";
 import {
   type AiceProjectConfig,
   findProjectRoot,
@@ -72,40 +73,7 @@ export const DEFAULT_IGNORED_SCAN_DIRECTORIES: ReadonlySet<string> = new Set([
   "coverage",
 ]);
 
-export const PASSTHROUGH_FILENAMES: ReadonlySet<string> = new Set([
-  "verify",
-  "new-project",
-  "gradlew",
-  "mvnw",
-  "Makefile",
-  "GNUmakefile",
-  "makefile",
-  "Dockerfile",
-  "Containerfile",
-  "CMakeLists.txt",
-  "Jenkinsfile",
-  "Vagrantfile",
-  "Procfile",
-  "Rakefile",
-  "Justfile",
-  "justfile",
-  "Gemfile",
-  "Podfile",
-  "Brewfile",
-  "Fastfile",
-  ".gitignore",
-  ".gitattributes",
-  ".dockerignore",
-  ".npmignore",
-  ".eslintignore",
-  ".prettierignore",
-  ".editorconfig",
-  ".env",
-  ".env.example",
-  ".env.local",
-  "LICENSE",
-  "NOTICE",
-]);
+export const PASSTHROUGH_FILENAMES: ReadonlySet<string> = KNOWN_TEXT_FILENAMES;
 
 export function isExtensionlessScriptFile(filePath: string): boolean {
   const baseName = path.basename(filePath);
@@ -410,20 +378,8 @@ export function resolveWorktreeRoot(
       if (!fs.statSync(cur).isDirectory()) {
         cur = path.dirname(cur);
       }
-    } else if (!startDir.endsWith("/") && !startDir.endsWith("\\")) {
-      const lower = cur.toLowerCase();
-      const ext = path.extname(lower);
-      const base = path.basename(cur);
-      if (
-        lower.endsWith(".aice") ||
-        lower.endsWith(".d.ts") ||
-        lower.endsWith(".html.twig") ||
-        PASSTHROUGH_FILENAMES.has(base) ||
-        base.startsWith(".env.") ||
-        (ext && KNOWN_TARGET_EXTENSIONS.has(ext))
-      ) {
-        cur = path.dirname(cur);
-      }
+    } else if (isLikelyNonExistentFilePath(startDir, cur)) {
+      cur = path.dirname(cur);
     }
   } catch {
     cur = path.dirname(cur);
@@ -564,13 +520,7 @@ export function resolvePathTargets(
       isDir = false;
     }
   } else {
-    const baseName = path.basename(absPath);
-    const isKnownExtensionlessFile =
-      PASSTHROUGH_FILENAMES.has(baseName) || baseName.startsWith(".env.");
-    isDir =
-      trimmed.endsWith("/") ||
-      trimmed.endsWith("\\") ||
-      (!isKnownExtensionlessFile && path.extname(absPath) === "" && !trimmed.endsWith(".aice"));
+    isDir = !isLikelyNonExistentFilePath(trimmed, absPath);
   }
   if (isDir) {
     const fallbackDir = isSameOrDescendant(cwd, absPath) ? cwd : absPath;

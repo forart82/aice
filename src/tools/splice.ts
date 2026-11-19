@@ -13,8 +13,12 @@ import YAML from "yaml";
 import ts from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
+  assertSafeTextWriteTarget,
+  isBinaryExtension,
+  isLikelyBinaryDiskFile,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
+  isUniversalSpliceTargetCandidate,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   type ProjectIdiomDefinition,
@@ -9803,6 +9807,17 @@ export async function splice(
   const hasExplicitPayload =
     options.code !== undefined || options.body !== undefined || hasBatchEdits;
 
+  const incomingPayloadForGuard = [
+    options.code,
+    options.body,
+    ...(options.edits ?? []).map((e) => e?.code ?? e?.body ?? ""),
+  ]
+    .filter((s): s is string => typeof s === "string")
+    .join("\n");
+  assertSafeTextWriteTarget(fullPath, incomingPayloadForGuard, {
+    checkExistingDiskFile: options.sourceOverride === undefined,
+  });
+
   if (!options.delete && !options.cloneFrom && !hasExplicitPayload) {
     throw new Error(
       "Must provide replacement code (--code, --body, --from, or --stdin), --edits, or --delete.",
@@ -9819,6 +9834,16 @@ export async function splice(
   if (!fileExists && hasHunkInPayload) {
     throw new Error(
       `Source file not found: ${filePath} (cannot apply <<< === >>> hunk to a non-existent file)`,
+    );
+  }
+
+  const hasLineRangeInPayload =
+    isLineRangeEditSelector(options.symbol) ||
+    Boolean(hasBatchEdits && (options.edits ?? []).some((e) => isLineRangeEditSelector(e.symbol)));
+
+  if (!fileExists && hasLineRangeInPayload && !options.create && !options.overwrite) {
+    throw new Error(
+      `Source file not found: ${filePath} (cannot splice line range on a non-existent file)`,
     );
   }
 
@@ -10431,114 +10456,26 @@ export function isCreateOrOverwriteSymbol(sym: string | undefined): boolean {
   );
 }
 
-const SPLICE_PASSTHROUGH_FILENAMES = new Set([
-  "verify",
-  "new-project",
-  "Cargo.toml",
-  "Cargo.lock",
-  "go.mod",
-  "go.sum",
-  "CMakeLists.txt",
-  "Makefile",
-  "Dockerfile",
-  "Procfile",
-  "Jenkinsfile",
-  "Vagrantfile",
-  "Gemfile",
-  "Rakefile",
-  "Justfile",
-  "Brewfile",
-  "LICENSE",
-  "README",
-  "CHANGELOG",
-  "NOTICE",
-  "AUTHORS",
-  "CODEOWNERS",
-  ".gitignore",
-  ".gitattributes",
-  ".dockerignore",
-  ".editorconfig",
-  ".env",
-  ".npmrc",
-  ".nvmrc",
-  ".prettierrc",
-  ".eslintrc",
-  ".browserslistrc",
-]);
-
-const SPLICE_PASSTHROUGH_EXTENSIONS = new Set([
-  ".java",
-  ".pro",
-  ".webmanifest",
-  ".example",
-  ".gradle",
-  ".kts",
-  ".properties",
-  ".xml",
-  ".cjs",
-  ".mjs",
-  ".cts",
-  ".mts",
-  ".jsonc",
-  ".toml",
-  ".mod",
-  ".sum",
-  ".csproj",
-  ".sln",
-  ".props",
-  ".targets",
-  ".cmake",
-  ".mk",
-  ".ini",
-  ".cfg",
-  ".conf",
-  ".env",
-  ".sql",
-  ".txt",
-  ".lock",
-  ".dockerfile",
-  ".gitattributes",
-  ".gitignore",
-  ".npmrc",
-  ".nvmrc",
-  ".editorconfig",
-  ".prettierrc",
-  ".eslintrc",
-  ".browserslistrc",
-  ".svg",
-  ".csv",
-  ".tsv",
-  ".graphql",
-  ".gql",
-  ".prisma",
-  ".proto",
-  ".wgsl",
-  ".glsl",
-  ".vert",
-  ".frag",
-  ".vue",
-  ".svelte",
-  ".astro",
-]);
+function isLineRangeEditSelector(sym?: string): boolean {
+  return Boolean(sym && /^\[?:?L\d+(?:\s*(?:-|\.\.|:)\s*L?\d+)?\]?$/i.test(sym.trim()));
+}
 
 function isPassthroughSpliceFile(filePath: string): boolean {
   const clean = filePath.replace(/\\/g, "/");
   if (clean.endsWith(".aice")) return false;
-  const base = path.posix.basename(clean);
+  if (isBinaryExtension(clean)) return false;
   const ext = path.posix.extname(clean).toLowerCase();
   if (ext === ".webmanifest" || detectTargetFromPathOrContent(clean) !== "passthrough") {
     return false;
   }
-  if (SPLICE_PASSTHROUGH_FILENAMES.has(base) || SPLICE_PASSTHROUGH_EXTENSIONS.has(ext)) return true;
-  if (KNOWN_TARGET_EXTENSIONS.has(ext)) return false;
-  if (!ext && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(base)) return true;
-  if (base.startsWith(".") && /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(base)) return true;
   try {
-    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) return true;
+    if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
+      return !isLikelyBinaryDiskFile(filePath);
+    }
   } catch {
     // ignore stat errors
   }
-  return false;
+  return true;
 }
 
 function resolveEffectiveSpliceTargetLang(
@@ -10556,41 +10493,7 @@ function resolveEffectiveSpliceTargetLang(
 }
 
 function isSpliceTargetFileCandidate(cand: string, baseDir = process.cwd()): boolean {
-  const clean = cand
-    .trim()
-    .replace(/^['"`]|['"`]$/g, "")
-    .replace(/\\/g, "/");
-  if (!clean || /\s/.test(clean)) return false;
-  if (clean.length > 1 && clean.startsWith("/") && clean.endsWith("/")) return false;
-  const base = path.posix.basename(clean);
-  if (!base) return false;
-  if (SPLICE_PASSTHROUGH_FILENAMES.has(base)) return true;
-  if (base.startsWith(".") && /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(base)) return true;
-  const ext = path.posix.extname(clean).toLowerCase();
-  if (!ext) {
-    if (clean.includes("/")) {
-      return !base.startsWith("-") && /^[A-Za-z0-9._-]+$/.test(base);
-    }
-    const fullCand = path.isAbsolute(clean) ? clean : path.resolve(baseDir, clean);
-    if (fs.existsSync(fullCand)) return true;
-    if (/^[a-z][a-z0-9]*(?:-[a-z0-9]+)+$/.test(base)) {
-      return true;
-    }
-    return false;
-  }
-  if (
-    KNOWN_TARGET_EXTENSIONS.has(ext) ||
-    SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) ||
-    ext === ".aice"
-  ) {
-    return true;
-  }
-  const fullCand = path.isAbsolute(clean) ? clean : path.resolve(baseDir, clean);
-  try {
-    return fs.existsSync(fullCand) && fs.statSync(fullCand).isFile();
-  } catch {
-    return false;
-  }
+  return isUniversalSpliceTargetCandidate(cand, KNOWN_TARGET_EXTENSIONS, baseDir);
 }
 
 function isUnambiguousExtensionlessFileWithSelector(
@@ -10604,10 +10507,10 @@ function isUnambiguousExtensionlessFileWithSelector(
     .replace(/^['"`]|['"`]$/g, "")
     .replace(/\\/g, "/");
   if (!clean || /\s/.test(clean)) return false;
+  if (clean.length > 1 && clean.startsWith("/") && clean.endsWith("/")) return false;
   const base = path.posix.basename(clean);
   if (!base || base.startsWith("-") || !/^[A-Za-z0-9._-]+$/.test(base)) return false;
-  if (path.posix.extname(clean)) return false;
-  return /^(?:L?\d+(?:\s*(?:-|\.\.|:)\s*L?\d+)?|create|overwrite|eof|end|append|hunk)$/i.test(
+  return /^(?:L?\d+(?:\s*(?:-|\.\.|:)\s*L?\d+)?|create|overwrite|eof|end|append|hunk|\*)$/i.test(
     candSym.trim(),
   );
 }
@@ -11028,22 +10931,23 @@ export function parseMultiBlockSpliceStream(
     const targetFp =
       sec.filePath ?? defaultFilePath ?? (headerLooksLikePath ? undefined : lastExplicitFilePath);
     const ext = targetFp ? path.extname(targetFp).toLowerCase() : "";
-    const base = targetFp ? path.basename(targetFp) : "";
     const canHaveIdioms =
-      ext !== ".json" &&
-      ext !== ".yaml" &&
-      ext !== ".yml" &&
-      ext !== ".md" &&
-      ext !== ".markdown" &&
-      ext !== ".sh" &&
-      ext !== ".bash" &&
-      ext !== ".zsh" &&
-      ext !== ".ps1" &&
-      ext !== ".cmd" &&
-      ext !== ".bat" &&
-      Boolean(ext) &&
-      !SPLICE_PASSTHROUGH_EXTENSIONS.has(ext) &&
-      !SPLICE_PASSTHROUGH_FILENAMES.has(base);
+      Boolean(targetFp) &&
+      (targetFp!.endsWith(".aice") ||
+        (Boolean(ext) &&
+          KNOWN_TARGET_EXTENSIONS.has(ext) &&
+          !isPassthroughSpliceFile(targetFp!) &&
+          ext !== ".json" &&
+          ext !== ".yaml" &&
+          ext !== ".yml" &&
+          ext !== ".md" &&
+          ext !== ".markdown" &&
+          ext !== ".sh" &&
+          ext !== ".bash" &&
+          ext !== ".zsh" &&
+          ext !== ".ps1" &&
+          ext !== ".cmd" &&
+          ext !== ".bat"));
     const effectiveSymbol =
       sec.symbol === ":create" && containsHunkMarkers(rawBody) ? ":hunk" : sec.symbol;
     const hasExplicitOverwriteOrCreateTag =
@@ -11243,7 +11147,7 @@ export async function spliceBatch(
   }
 
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
-  const backups = new Map<string, string>();
+  const backups = new Map<string, Buffer>();
   const virtualFs = new Map<string, string>();
   const configSnapshots = new Map<string, string | null>();
   const newlyCreatedFiles: string[] = [];
@@ -11295,7 +11199,7 @@ export async function spliceBatch(
     const splitFp = splitInlineFileSelector(rawFp, baseDir).filePath;
     const fullPath = path.isAbsolute(splitFp) ? splitFp : path.resolve(baseDir, splitFp);
     if (fs.existsSync(fullPath) && !backups.has(fullPath)) {
-      backups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
+      backups.set(fullPath, fs.readFileSync(fullPath));
     }
   }
 
@@ -11365,6 +11269,17 @@ export async function spliceBatch(
         item.body !== undefined ||
         Boolean(item.edits && item.edits.length > 0);
 
+      const batchItemPayloadForGuard = [
+        resolvedCode,
+        item.body,
+        ...(item.edits ?? []).map((e) => e?.code ?? e?.body ?? ""),
+      ]
+        .filter((s): s is string => typeof s === "string")
+        .join("\n");
+      assertSafeTextWriteTarget(fullPath, batchItemPayloadForGuard, {
+        checkExistingDiskFile: !virtualFs.has(fullPath),
+      });
+
       if (!item.delete && !item.cloneFrom && !hasItemPayload) {
         throw new Error(
           `Must provide replacement code, edits, or delete for batch target '${rawFp}'.`,
@@ -11378,6 +11293,21 @@ export async function spliceBatch(
       if (!fileExistsNow && hasHunkInItem) {
         throw new Error(
           `Source file not found: ${splitTarget.filePath} (cannot apply <<< === >>> hunk to a non-existent file)`,
+        );
+      }
+
+      const hasLineRangeInBatchItem =
+        isLineRangeEditSelector(effectiveSymbol) ||
+        Boolean(item.edits && item.edits.some((e) => isLineRangeEditSelector(e.symbol)));
+
+      if (
+        !fileExistsNow &&
+        hasLineRangeInBatchItem &&
+        !item.create &&
+        !(item.overwrite ?? options.overwrite)
+      ) {
+        throw new Error(
+          `Source file not found: ${splitTarget.filePath} (cannot splice line range on a non-existent file)`,
         );
       }
 
@@ -11653,9 +11583,10 @@ export async function spliceBatch(
       }
     }
     for (const [fp, origContent] of backups.entries()) {
+      if (!modifiedSet.has(fp)) continue;
       try {
         fs.mkdirSync(path.dirname(fp), { recursive: true });
-        fs.writeFileSync(fp, origContent, "utf-8");
+        fs.writeFileSync(fp, origContent);
       } catch {
         // ignore
       }

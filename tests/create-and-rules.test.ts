@@ -360,8 +360,9 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
       const eventsBeforeFail = readTelemetryEvents(telemetryFile).length;
 
       // Now test rollback when an early item declares an @idiom and a later item in the batch fails
+      // (binary guard refuses writing to a binary extension target like .png)
       const fileC = path.join(batchRoot, "c.ts");
-      const badFile = path.join(batchRoot, "invalid.unknownext");
+      const badFile = path.join(batchRoot, "invalid.png");
       const originalA = fs.readFileSync(fileA, "utf-8");
 
       await expect(
@@ -372,11 +373,11 @@ describe("AICE v0.9.5: Greenfield File Creation (createFile / createBatch / MCP 
               filePath: fileC,
               code: "@idiom $tri($0) = $0 * 3\n^fn gamma(x:#)-># => $tri(x)",
             },
-            { filePath: badFile, code: "^fn bad()-># => 0" },
+            { filePath: badFile, code: "not-a-png" },
           ],
           { projectRoot: batchRoot, idioms: true },
         ),
-      ).rejects.toThrow(/Unsupported target extension/);
+      ).rejects.toThrow(/Refusing to write or splice binary file/i);
 
       expect(fs.readFileSync(fileA, "utf-8")).toBe(originalA);
       expect(fs.existsSync(fileC)).toBe(false);

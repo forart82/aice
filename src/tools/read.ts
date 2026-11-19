@@ -21,10 +21,15 @@ import {
   AICE_DISABLED_MESSAGE,
   DEFAULT_IGNORED_SCAN_DIRECTORIES,
   findProjectRoot,
+  isBinaryExtension,
+  isLikelyBinaryBuffer,
+  isLikelyBinaryDiskFile,
+  isLikelyTextFileShape,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
+  KNOWN_TEXT_FILENAMES,
+  LOCKFILE_SKIP_NAMES,
   loadProjectConfig,
-  PASSTHROUGH_FILENAMES,
   type ProjectIdiomDefinition,
   type ResolvedPathTargets,
   resolvePathTargets,
@@ -55,12 +60,8 @@ import {
   type WorkspaceCallerScanCache,
 } from "./context.js";
 import {
-  BINARY_SKIP_EXTENSIONS,
-  EXTENDED_READ_EXTENSIONS,
-  EXTENDED_READ_FILENAMES,
   generateOutline,
   isSupportedReadDiskFile,
-  LOCKFILE_SKIP_NAMES,
   type OutlineOptions,
   type OutlineResult,
   type OutlineSymbol,
@@ -492,14 +493,7 @@ export function parseReadTarget(rawTarget: string, baseDir = process.cwd()): Par
     const candidatePath = trimmed.slice(0, colonIdx).trim();
     const candidateSym = trimmed.slice(colonIdx + 1).trim();
     if (candidatePath && candidateSym) {
-      const ext = path.extname(candidatePath).toLowerCase();
-      const baseName = path.basename(candidatePath);
-      const isKnownFileShape =
-        EXTENDED_READ_EXTENSIONS.has(ext) ||
-        PASSTHROUGH_FILENAMES.has(baseName) ||
-        EXTENDED_READ_FILENAMES.has(baseName) ||
-        ext === ".aice" ||
-        baseName.startsWith(".env.");
+      const isKnownFileShape = isLikelyTextFileShape(candidatePath);
       const isSymbolPattern = Boolean(parseSymbolPatternSelector(candidateSym));
       const isUnclosedSlashSelector =
         candidateSym.startsWith("/") && candidateSym.length > 1 && !/\s/.test(candidateSym);
@@ -654,14 +648,11 @@ export function splitReadTargetString(rawTargetStr: string, baseDir = process.cw
   while (idx < rawTokens.length) {
     const tok = rawTokens[idx] ?? "";
     const tokParsed = parseReadTarget(tok, baseDir);
-    const tokExt = path.extname(tokParsed.targetPath).toLowerCase();
     const tokLooksStandalone =
       tokParsed.explicitOutline ||
       Boolean(tokParsed.inlineSelector) ||
       targetExistsAtBase(tokParsed.targetPath, baseDir) ||
-      EXTENDED_READ_EXTENSIONS.has(tokExt) ||
-      EXTENDED_READ_FILENAMES.has(path.basename(tokParsed.targetPath)) ||
-      tokExt === ".aice";
+      isLikelyTextFileShape(tokParsed.targetPath);
 
     if (!tokLooksStandalone && idx + 1 < rawTokens.length) {
       let combined = tok;
@@ -889,13 +880,10 @@ export function normalizeReadTargets(
     const candFile = piece.slice(0, colonPos).trim();
     const candSel = piece.slice(colonPos + 1).trim();
     if (!candFile || !candSel) return undefined;
-    const ext = path.extname(candFile).toLowerCase();
-    const baseName = path.basename(candFile);
     if (
       candFile.includes("/") ||
       candFile.includes("\\") ||
-      EXTENDED_READ_EXTENSIONS.has(ext) ||
-      EXTENDED_READ_FILENAMES.has(baseName) ||
+      isLikelyTextFileShape(candFile) ||
       targetExistsAtBase(candFile, baseDir)
     ) {
       return parseReadTarget(piece, baseDir);
@@ -1446,11 +1434,13 @@ export function computeDynamicSliceSpan(
       // fall back to rawMaxLines
     }
   } else {
-    const ext = path.extname(diskPath).toLowerCase();
     if (
-      EXTENDED_READ_EXTENSIONS.has(ext) ||
-      EXTENDED_READ_FILENAMES.has(path.basename(diskPath)) ||
-      diskPath.endsWith(".aice")
+      isLikelyTextFileShape(diskPath) ||
+      isSupportedReadDiskFile(diskPath, {
+        allowDotfiles: true,
+        allowLockfiles: true,
+        allowRootAgentDocs: true,
+      })
     ) {
       try {
         const outRes = withSuppressedTelemetry(() =>
@@ -1899,7 +1889,7 @@ function isLikelyCompactHeaderPath(candPath: string, fallbackFilePath?: string):
     return true;
   }
   const base = path.posix.basename(candPath);
-  if (EXTENDED_READ_FILENAMES.has(base) || PASSTHROUGH_FILENAMES.has(base)) {
+  if (KNOWN_TEXT_FILENAMES.has(base)) {
     return true;
   }
   return Boolean(fallbackFilePath && candPath === fallbackFilePath);
@@ -2360,48 +2350,6 @@ function buildSafeSearchRegexSelector(rawSearch: string): { selector: string; re
   };
 }
 
-const BINARY_DISCOVERY_EXTENSIONS = new Set([
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".webp",
-  ".avif",
-  ".ico",
-  ".bmp",
-  ".tiff",
-  ".woff",
-  ".woff2",
-  ".ttf",
-  ".eot",
-  ".otf",
-  ".pdf",
-  ".zip",
-  ".tar",
-  ".gz",
-  ".tgz",
-  ".bz2",
-  ".xz",
-  ".7z",
-  ".wasm",
-  ".pyc",
-  ".class",
-  ".jar",
-  ".exe",
-  ".dll",
-  ".so",
-  ".dylib",
-  ".o",
-  ".a",
-  ".mp3",
-  ".mp4",
-  ".wav",
-  ".ogg",
-  ".webm",
-  ".sqlite",
-  ".db",
-]);
-
 function countBufferLinesFast(buf: Buffer): number {
   const len = buf.length;
   if (len === 0) return 0;
@@ -2417,14 +2365,6 @@ function countBufferLinesFast(buf: Buffer): number {
     if (buf[i] === 10) lines++;
   }
   return lines;
-}
-
-function isLikelyBinaryBuffer(buf: Buffer): boolean {
-  const checkLen = Math.min(buf.length, 512);
-  for (let i = 0; i < checkLen; i++) {
-    if (buf[i] === 0) return true;
-  }
-  return false;
 }
 
 function buildFilesOnlyFilterMatcher(rawFilter?: string): ((relPath: string) => boolean) | null {
@@ -2596,8 +2536,7 @@ function executeFilesOnlyRead(
         }
         if (ent.name.startsWith(".") && !includeDotEntries) continue;
         if (!explicitLockfileRequested && LOCKFILE_SKIP_NAMES.has(ent.name)) continue;
-        const ext = path.extname(ent.name).toLowerCase();
-        if (BINARY_DISCOVERY_EXTENSIONS.has(ext) || BINARY_SKIP_EXTENSIONS.has(ext)) continue;
+        if (isBinaryExtension(ent.name)) continue;
         return true;
       }
       if (ent.isDirectory()) {
@@ -2653,8 +2592,7 @@ function executeFilesOnlyRead(
         }
         if (ent.name.startsWith(".") && !includeDotEntries) continue;
         if (!explicitLockfileRequested && LOCKFILE_SKIP_NAMES.has(ent.name)) continue;
-        const ext = path.extname(ent.name).toLowerCase();
-        if (BINARY_DISCOVERY_EXTENSIONS.has(ext) || BINARY_SKIP_EXTENSIONS.has(ext)) continue;
+        if (isBinaryExtension(ent.name)) continue;
         const relPosix = formatReadDisplayPath(childAbs, projectRoot);
         if (activeMatchers.length === 0 || activeMatchers.every((matchFn) => matchFn(relPosix))) {
           candidateFiles.set(relPosix, childAbs);
@@ -2670,9 +2608,11 @@ function executeFilesOnlyRead(
         const inNodeMods = rootAbs.split(path.sep).includes("node_modules");
         collectFromDir(rootAbs, 1, inNodeMods);
       } else if (st.isFile()) {
-        const relPosix = formatReadDisplayPath(rootAbs, projectRoot);
-        if (activeMatchers.length === 0 || activeMatchers.every((matchFn) => matchFn(relPosix))) {
-          candidateFiles.set(relPosix, rootAbs);
+        if (!isBinaryExtension(rootAbs)) {
+          const relPosix = formatReadDisplayPath(rootAbs, projectRoot);
+          if (activeMatchers.length === 0 || activeMatchers.every((matchFn) => matchFn(relPosix))) {
+            candidateFiles.set(relPosix, rootAbs);
+          }
         }
       }
     } catch {
@@ -2893,7 +2833,10 @@ interface SearchCandidateFile {
   isExplicitTestSearch: boolean;
 }
 
-function collectSearchCandidateFiles(classified: ClassifiedReadTarget[]): SearchCandidateFile[] {
+function collectSearchCandidateFiles(
+  classified: ClassifiedReadTarget[],
+  opts?: { allowDotfiles?: boolean },
+): SearchCandidateFile[] {
   const seenRealOrAbs = new Set<string>();
   const out: SearchCandidateFile[] = [];
 
@@ -2957,7 +2900,7 @@ function collectSearchCandidateFiles(classified: ClassifiedReadTarget[]): Search
       } else if (ent.isFile()) {
         if (
           isSupportedReadDiskFile(childAbs, {
-            allowDotfiles: explicitAllowedDirs.has(ent.name),
+            allowDotfiles: Boolean(opts?.allowDotfiles) || explicitAllowedDirs.has(ent.name),
           })
         ) {
           pushCandidate(
@@ -2992,7 +2935,7 @@ function collectSearchCandidateFiles(classified: ClassifiedReadTarget[]): Search
         explicitAllowed,
         isExplicitTest,
       );
-    } else {
+    } else if (!isLikelyBinaryDiskFile(item.diskPath)) {
       pushCandidate(item.diskPath, item.displayPath, item.resolved.projectRoot, isExplicitTest);
     }
   }
@@ -3011,7 +2954,9 @@ function executeFilesWithMatchesSearch(params: {
 }): ReadResult {
   const { classified, missingTargets, regex, selector, rawPattern, options, surface } = params;
   const primaryRoot = classified[0]?.resolved.projectRoot ?? process.cwd();
-  const candidateFiles = collectSearchCandidateFiles(classified);
+  const candidateFiles = collectSearchCandidateFiles(classified, {
+    allowDotfiles: Boolean(options.full),
+  });
 
   interface ScoredPathHit {
     relPath: string;
@@ -3186,7 +3131,9 @@ function executeUnifiedCompactSearch(params: {
 }): ReadResult {
   const { classified, missingTargets, defaultSelector, rawPatternLabel, options, surface } = params;
   const primaryRoot = classified[0]?.resolved.projectRoot ?? process.cwd();
-  const candidateFiles = collectSearchCandidateFiles(classified);
+  const candidateFiles = collectSearchCandidateFiles(classified, {
+    allowDotfiles: Boolean(options.full),
+  });
   const effectiveBudgets = resolveEffectiveReadBudgets(options);
   const enforceCeiling = shouldEnforceDefaultReadBudget(
     options,
@@ -3778,12 +3725,15 @@ export async function aiceRead(
     } else if (effectiveSelector) {
       route = isPureRegexSelector(effectiveSelector) || isUnclosedSlashSel ? "search" : "context";
     } else {
-      const ext = path.extname(diskPath).toLowerCase();
+      const isBinaryTarget = isLikelyBinaryDiskFile(diskPath);
       const isOutlinableFile =
-        EXTENDED_READ_EXTENSIONS.has(ext) ||
-        EXTENDED_READ_FILENAMES.has(path.basename(diskPath)) ||
-        diskPath.endsWith(".aice") ||
-        isSupportedReadDiskFile(diskPath);
+        !isBinaryTarget &&
+        (diskPath.endsWith(".aice") ||
+          isSupportedReadDiskFile(diskPath, {
+            allowDotfiles: true,
+            allowLockfiles: true,
+            allowRootAgentDocs: true,
+          }));
       if (
         isOutlinableFile &&
         !effectiveFull &&
@@ -3856,7 +3806,9 @@ export async function aiceRead(
       rawPatLabel.indexOf("/", 1) === -1 &&
       options.search === undefined
     ) {
-      const testFiles = collectSearchCandidateFiles(classified);
+      const testFiles = collectSearchCandidateFiles(classified, {
+        allowDotfiles: Boolean(options.full),
+      });
       const rawPrefix = rawPatLabel.slice(1).trim();
       const anyHit =
         rawPrefix.length > 0 &&

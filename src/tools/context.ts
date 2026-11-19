@@ -18,6 +18,8 @@ import {
   AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
   findProjectRoot,
+  isLikelyBinaryDiskFile,
+  isLikelyTextFileShape,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
   KNOWN_TARGET_EXTENSIONS,
@@ -52,8 +54,6 @@ import {
 import { estimateTokens } from "../tokenomics/index.js";
 import {
   collectNativeSyntaxDiagnostics,
-  EXTENDED_READ_EXTENSIONS,
-  EXTENDED_READ_FILENAMES,
   extractPassthroughStructuralSymbols,
   generateOutline,
   isSupportedReadDiskFile,
@@ -5505,14 +5505,7 @@ export function parseTargetWithInlineSymbol(
       const absCand = path.isAbsolute(candidateFile)
         ? candidateFile
         : path.resolve(baseDir, candidateFile);
-      const ext = path.extname(candidateFile).toLowerCase();
-      const baseName = path.basename(candidateFile);
-      if (
-        fs.existsSync(absCand) ||
-        EXTENDED_READ_EXTENSIONS.has(ext) ||
-        EXTENDED_READ_FILENAMES.has(baseName) ||
-        ext === ".aice"
-      ) {
+      if (fs.existsSync(absCand) || isLikelyTextFileShape(candidateFile)) {
         return { targetPath: candidateFile, inlineSymbol: candidateSym };
       }
     }
@@ -5589,13 +5582,12 @@ export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd(
       const parsedW = parseTargetWithInlineSymbol(w, baseDir);
       if (parsedW.inlineSymbol) return true;
       if (w.includes("/") || w.includes("\\")) return true;
-      const extW = path.extname(parsedW.targetPath).toLowerCase();
       const firstExt = path.extname(wholeCheck.targetPath).toLowerCase();
       const isDocOrTest =
         firstExt === ".md" ||
         firstExt === ".markdown" ||
         /\.(?:test|spec)\.[a-z0-9]+$/i.test(wholeCheck.targetPath);
-      if (!isDocOrTest && (KNOWN_TARGET_EXTENSIONS.has(extW) || extW === ".aice")) {
+      if (!isDocOrTest && isLikelyTextFileShape(parsedW.targetPath)) {
         return true;
       }
       return false;
@@ -5611,7 +5603,6 @@ export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd(
   while (idx < rawTokens.length) {
     const tok = rawTokens[idx]!;
     const tokParsed = parseTargetWithInlineSymbol(tok, baseDir);
-    const tokExt = path.extname(tokParsed.targetPath).toLowerCase();
     const tokIsFile =
       (targetExistsOnDisk(tokParsed.targetPath) &&
         (() => {
@@ -5624,9 +5615,7 @@ export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd(
             return false;
           }
         })()) ||
-      EXTENDED_READ_EXTENSIONS.has(tokExt) ||
-      EXTENDED_READ_FILENAMES.has(path.basename(tokParsed.targetPath)) ||
-      tokExt === ".aice";
+      isLikelyTextFileShape(tokParsed.targetPath);
     if (!tokIsFile && idx + 1 < rawTokens.length) {
       let combined = tok;
       let matchedSpan = -1;
@@ -5654,8 +5643,7 @@ export function splitContextTargets(rawTargetStr: string, baseDir = process.cwd(
   if (mergedTokens.length > 1) {
     const allLookLikeTargets = mergedTokens.every((tok) => {
       const p = parseTargetWithInlineSymbol(tok, baseDir).targetPath;
-      const ext = path.extname(p).toLowerCase();
-      return targetExistsOnDisk(p) || KNOWN_TARGET_EXTENSIONS.has(ext) || ext === ".aice";
+      return targetExistsOnDisk(p) || isLikelyTextFileShape(p);
     });
     if (allLookLikeTargets) {
       return mergedTokens;
@@ -5784,6 +5772,35 @@ export async function generateContext(
   }
 
   const displayTargetPath = formatDisplayPath(fullTargetPath, projectRoot);
+  if (isLikelyBinaryDiskFile(fullTargetPath)) {
+    const fileSize = (() => {
+      try {
+        return fs.statSync(fullTargetPath).size;
+      } catch {
+        return 0;
+      }
+    })();
+    const binaryNotice = `// [binary file skipped: ${displayTargetPath} (${fileSize} bytes)]`;
+    return {
+      targetPath: fullTargetPath,
+      targetContent: binaryNotice,
+      dependencies: [],
+      callers: [],
+      formattedBundle: options.json
+        ? JSON.stringify(
+            {
+              target: displayTargetPath,
+              binary: true,
+              bytes: fileSize,
+              message: binaryNotice,
+            },
+            null,
+            2,
+          )
+        : binaryNotice,
+      tokenCount: estimateTokens(binaryNotice, "cl100k_base"),
+    };
+  }
   const rawFileContent = fs.readFileSync(fullTargetPath, "utf-8");
 
   const rawLineCount = countContextLines(rawFileContent);

@@ -12,10 +12,15 @@ import postcss from "postcss";
 import { getCachedTsSymbolIndex, type TsFileSymbolIndex } from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
+  BINARY_EXTENSIONS,
+  DEFAULT_MAX_TEXT_FILE_BYTES,
   findProjectRoot,
+  isLikelyBinaryDiskFile,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
+  isUniversalTextDiskFile,
   KNOWN_TARGET_EXTENSIONS,
+  KNOWN_TEXT_FILENAMES,
   loadProjectConfig,
   type ProjectIdiomDefinition,
 } from "../config/index.js";
@@ -79,6 +84,8 @@ export interface OutlineResult {
   referencedIdioms?: string[];
   json?: {
     file: string;
+    binary?: boolean;
+    bytes?: number;
     symbols: OutlineSymbol[];
     referencedIdioms?: string[];
     stats?: OutlineStats;
@@ -256,6 +263,33 @@ export function generateOutline(
     if (isFile) {
       filePath = candidateFilePath;
       ensureIdiomsResolved(filePath, true);
+      if (options.preReadSource === undefined && isLikelyBinaryDiskFile(filePath)) {
+        const sizeBytes = (() => {
+          try {
+            return fs.statSync(filePath).size;
+          } catch {
+            return 0;
+          }
+        })();
+        const binaryText = `// [binary file skipped: ${path.basename(filePath)} (${sizeBytes} bytes)]`;
+        const jsonPayload = { file: filePath, binary: true, bytes: sizeBytes, symbols: [] };
+        return {
+          file: filePath,
+          text: isJson ? JSON.stringify(jsonPayload, null, 2) : binaryText,
+          symbols: [],
+          referencedIdioms: [],
+          json: jsonPayload,
+          stats: {
+            originalTokens: 0,
+            outlineTokens: 0,
+            savingsTokens: 0,
+            savingsPct: 0,
+            originalChars: 0,
+            outlineChars: binaryText.length,
+            charSavingsPct: 0,
+          },
+        };
+      }
       originalSource = options.preReadSource ?? fs.readFileSync(filePath, "utf-8");
       if (filePath.endsWith(".aice")) {
         const parsed = parseWithTrivia(originalSource, filePath);
@@ -2663,124 +2697,19 @@ export const EXTENDED_READ_EXTENSIONS: ReadonlySet<string> = new Set([
   ".txt",
 ]);
 
-export const EXTENDED_READ_FILENAMES: ReadonlySet<string> = new Set([
-  "Makefile",
-  "GNUmakefile",
-  "makefile",
-  "Dockerfile",
-  "Containerfile",
-  "CMakeLists.txt",
-  "Jenkinsfile",
-  "Vagrantfile",
-  "Procfile",
-  "Rakefile",
-  "Justfile",
-  "justfile",
-  "Podfile",
-  "Fastfile",
-  "Appfile",
-  "Gemfile",
-  "Brewfile",
-  "verify",
-  "new-project",
-  "gradlew",
-  "mvnw",
-  ".gitignore",
-  ".gitattributes",
-  ".dockerignore",
-  ".npmignore",
-  ".eslintignore",
-  ".prettierignore",
-  ".editorconfig",
-  ".env",
-  ".env.example",
-  ".env.local",
-  ".npmrc",
-  ".nvmrc",
-  "LICENSE",
-  "NOTICE",
-]);
+export const EXTENDED_READ_FILENAMES: ReadonlySet<string> = KNOWN_TEXT_FILENAMES;
 
-export const BINARY_SKIP_EXTENSIONS: ReadonlySet<string> = new Set([
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".gif",
-  ".webp",
-  ".avif",
-  ".ico",
-  ".bmp",
-  ".tiff",
-  ".woff",
-  ".woff2",
-  ".ttf",
-  ".eot",
-  ".otf",
-  ".pdf",
-  ".zip",
-  ".tar",
-  ".gz",
-  ".tgz",
-  ".bz2",
-  ".xz",
-  ".7z",
-  ".wasm",
-  ".pyc",
-  ".class",
-  ".jar",
-  ".apk",
-  ".aab",
-  ".dex",
-  ".exe",
-  ".dll",
-  ".so",
-  ".dylib",
-  ".o",
-  ".a",
-  ".mp3",
-  ".mp4",
-  ".wav",
-  ".ogg",
-  ".webm",
-  ".sqlite",
-  ".db",
-  ".lockb",
-]);
+export const BINARY_SKIP_EXTENSIONS: ReadonlySet<string> = BINARY_EXTENSIONS;
 
-export const LOCKFILE_SKIP_NAMES: ReadonlySet<string> = new Set([
-  "package-lock.json",
-  "pnpm-lock.yaml",
-  "yarn.lock",
-  "bun.lock",
-  "bun.lockb",
-  "Cargo.lock",
-  "composer.lock",
-  "Gemfile.lock",
-  "poetry.lock",
-]);
+export { LOCKFILE_SKIP_NAMES } from "../config/file-classification.js";
 
 export function isNonBinaryExtensionlessDiskFile(absPath: string): boolean {
-  let fd: number | undefined;
   try {
     const st = fs.statSync(absPath);
-    if (!st.isFile() || st.size > 2 * 1024 * 1024) return false;
-    if (st.size === 0) return true;
-    const probeLen = Math.min(st.size, 512);
-    const buf = Buffer.allocUnsafe(probeLen);
-    fd = fs.openSync(absPath, "r");
-    const readBytes = fs.readSync(fd, buf, 0, probeLen, 0);
-    for (let i = 0; i < readBytes; i++) {
-      if (buf[i] === 0) return false;
-    }
-    return true;
+    if (!st.isFile() || st.size > DEFAULT_MAX_TEXT_FILE_BYTES) return false;
+    return !isLikelyBinaryDiskFile(absPath, { maxTextBytes: DEFAULT_MAX_TEXT_FILE_BYTES });
   } catch {
     return false;
-  } finally {
-    if (fd !== undefined) {
-      try {
-        fs.closeSync(fd);
-      } catch {}
-    }
   }
 }
 
@@ -2788,45 +2717,11 @@ export function isSupportedReadDiskFile(
   absPath: string,
   opts?: { allowDotfiles?: boolean; allowLockfiles?: boolean; allowRootAgentDocs?: boolean },
 ): boolean {
-  const baseName = path.basename(absPath);
-  if (
-    baseName === ".git" ||
-    baseName.endsWith(".trivia.json") ||
-    baseName === "aice.config.json" ||
-    baseName === ".aice-idioms.json"
-  ) {
-    return false;
-  }
-  if (!opts?.allowLockfiles && LOCKFILE_SKIP_NAMES.has(baseName)) {
-    return false;
-  }
-  if (
-    !opts?.allowRootAgentDocs &&
-    (baseName === "AGENTS.md" ||
-      baseName === "CLAUDE.md" ||
-      baseName === "GEMINI.md" ||
-      baseName === ".GEMINI.md")
-  ) {
-    return false;
-  }
-  if (baseName.endsWith(".aice")) return true;
-  if (EXTENDED_READ_FILENAMES.has(baseName) || baseName.startsWith(".env.")) return true;
-
-  const lowerName = baseName.toLowerCase();
-  const ext = path.extname(lowerName);
-  if (ext) {
-    if (BINARY_SKIP_EXTENSIONS.has(ext)) return false;
-    if (EXTENDED_READ_EXTENSIONS.has(ext)) return true;
-    for (const knownExt of EXTENDED_READ_EXTENSIONS) {
-      if (lowerName.endsWith(knownExt)) return true;
-    }
-    return false;
-  }
-
-  if (baseName.startsWith(".") && !opts?.allowDotfiles) {
-    return false;
-  }
-  return isNonBinaryExtensionlessDiskFile(absPath);
+  return isUniversalTextDiskFile(absPath, {
+    allowDotfiles: opts?.allowDotfiles,
+    skipLockfiles: !opts?.allowLockfiles,
+    skipRootAgentDocs: !opts?.allowRootAgentDocs,
+  });
 }
 
 function findMatchingBraceEndLine(lines: string[], startIdx: number): number {
@@ -3351,6 +3246,26 @@ export async function outlinePath(
     let relKey = path.relative(process.cwd(), targetFile).replace(/\\/g, "/");
     if (relKey.startsWith("..") && options.projectRoot) {
       relKey = path.relative(projectRoot, targetFile).replace(/\\/g, "/");
+    }
+    if (isLikelyBinaryDiskFile(targetFile)) {
+      const sizeBytes = (() => {
+        try {
+          return fs.statSync(targetFile).size;
+        } catch {
+          return 0;
+        }
+      })();
+      const binaryText = `// [binary file skipped: ${relKey} (${sizeBytes} bytes)]`;
+      resultMap.set(relKey, {
+        file: targetFile,
+        symbols: [],
+        text: binaryText,
+        ...(options.json
+          ? { json: { file: targetFile, binary: true, bytes: sizeBytes, symbols: [] } }
+          : {}),
+      });
+      aiceParts.push(`// ${relKey}\n${binaryText}`);
+      continue;
     }
     let rawText = "";
     try {

@@ -14,9 +14,11 @@ import * as path from "node:path";
 import YAML from "yaml";
 import {
   AICE_DISABLED_MESSAGE,
+  assertSafeTextWriteTarget,
   findProjectRoot,
   isProjectAiceEnabled,
   isProjectIdiomsEnabled,
+  isUniversalSpliceTargetCandidate,
   KNOWN_TARGET_EXTENSIONS,
   loadProjectConfig,
   type ProjectIdiomDefinition,
@@ -1334,6 +1336,8 @@ export async function createFile(
     }
   }
 
+  assertSafeTextWriteTarget(fullPath, rawPayload);
+
   const overwrite = Boolean(options.overwrite || options.force || headerOverwrite);
   const dryRun = Boolean(options.dryRun);
   if (!overwrite && fs.existsSync(fullPath)) {
@@ -1362,114 +1366,13 @@ export async function createFile(
 
   const checkPath = fullPath.replace(/\.aice$/, "");
   const ext = path.extname(checkPath).toLowerCase();
-  const baseName = path.basename(checkPath);
-
-  const PASSTHROUGH_PROJECT_EXTENSIONS = new Set([
-    ".java",
-    ".pro",
-    ".example",
-    ".gradle",
-    ".properties",
-    ".xml",
-    ".toml",
-    ".mod",
-    ".sum",
-    ".csproj",
-    ".sln",
-    ".props",
-    ".targets",
-    ".cmake",
-    ".mk",
-    ".ini",
-    ".cfg",
-    ".conf",
-    ".env",
-    ".sql",
-    ".sh",
-    ".txt",
-    ".lock",
-    ".dockerfile",
-    ".gitattributes",
-    ".gitignore",
-    ".npmrc",
-    ".nvmrc",
-    ".editorconfig",
-    ".prettierrc",
-    ".eslintrc",
-    ".browserslistrc",
-    ".svg",
-    ".csv",
-    ".tsv",
-    ".graphql",
-    ".gql",
-    ".prisma",
-    ".proto",
-  ]);
-  const PASSTHROUGH_PROJECT_FILENAMES = new Set([
-    "verify",
-    "new-project",
-    "Cargo.toml",
-    "Cargo.lock",
-    "go.mod",
-    "go.sum",
-    "CMakeLists.txt",
-    "Makefile",
-    "Dockerfile",
-    "Procfile",
-    "Jenkinsfile",
-    "Vagrantfile",
-    "Gemfile",
-    "Rakefile",
-    "Justfile",
-    "Brewfile",
-    "LICENSE",
-    "README",
-    "CHANGELOG",
-    "NOTICE",
-    "AUTHORS",
-    "CODEOWNERS",
-    ".gitignore",
-    ".gitattributes",
-    ".dockerignore",
-    ".editorconfig",
-    ".env",
-    ".npmrc",
-    ".nvmrc",
-    ".prettierrc",
-    ".eslintrc",
-    ".browserslistrc",
-  ]);
-
-  const isExtensionlessTarget =
-    ext === "" && !baseName.startsWith(".") && /^[A-Za-z0-9][A-Za-z0-9_-]*$/.test(baseName);
-  const isDotfileTarget =
-    baseName.startsWith(".") &&
-    (PASSTHROUGH_PROJECT_FILENAMES.has(baseName) || /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(baseName));
   const isWebmanifest = ext === ".webmanifest";
 
   const isFirstClassEmitterTarget =
     isWebmanifest || detectTargetFromPathOrContent(checkPath) !== "passthrough";
 
   const isPassthroughManifest =
-    !options.targetLanguage &&
-    !fullPath.endsWith(".aice") &&
-    !isFirstClassEmitterTarget &&
-    (PASSTHROUGH_PROJECT_EXTENSIONS.has(ext) ||
-      PASSTHROUGH_PROJECT_FILENAMES.has(baseName) ||
-      isExtensionlessTarget ||
-      isDotfileTarget);
-
-  if (
-    !options.targetLanguage &&
-    !fullPath.endsWith(".aice") &&
-    !isWebmanifest &&
-    !KNOWN_TARGET_EXTENSIONS.has(ext) &&
-    !isPassthroughManifest
-  ) {
-    throw new Error(
-      `Unsupported target extension "${ext || path.basename(fullPath)}". Supported extensions: ${Array.from(KNOWN_TARGET_EXTENSIONS).join(", ")}`,
-    );
-  }
+    !options.targetLanguage && !fullPath.endsWith(".aice") && !isFirstClassEmitterTarget;
 
   const isScriptOrMarkdownOrPassthrough =
     isPassthroughManifest ||
@@ -1660,111 +1563,21 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
   const lines = rawStream.split(/\r?\n/);
   const headerRe = /^={3,}\s*([^\s=][^=\r\n]*?)\s*={3,}\s*$/;
 
-  const passthroughFilenames = new Set([
-    "verify",
-    "new-project",
-    "Cargo.toml",
-    "Cargo.lock",
-    "go.mod",
-    "go.sum",
-    "CMakeLists.txt",
-    "Makefile",
-    "Dockerfile",
-    "Procfile",
-    "Jenkinsfile",
-    "Vagrantfile",
-    "Gemfile",
-    "Rakefile",
-    "Justfile",
-    "Brewfile",
-    "LICENSE",
-    "README",
-    "CHANGELOG",
-    "NOTICE",
-    "AUTHORS",
-    "CODEOWNERS",
-    ".gitignore",
-    ".gitattributes",
-    ".dockerignore",
-    ".editorconfig",
-    ".env",
-    ".npmrc",
-    ".nvmrc",
-    ".prettierrc",
-    ".eslintrc",
-    ".browserslistrc",
-  ]);
-  const passthroughExtensions = new Set([
-    ".java",
-    ".pro",
-    ".webmanifest",
-    ".example",
-    ".gradle",
-    ".kts",
-    ".properties",
-    ".xml",
-    ".cjs",
-    ".mjs",
-    ".cts",
-    ".mts",
-    ".jsonc",
-    ".toml",
-    ".mod",
-    ".sum",
-    ".csproj",
-    ".sln",
-    ".props",
-    ".targets",
-    ".cmake",
-    ".mk",
-    ".ini",
-    ".cfg",
-    ".conf",
-    ".env",
-    ".sql",
-    ".sh",
-    ".bash",
-    ".zsh",
-    ".ps1",
-    ".cmd",
-    ".bat",
-    ".md",
-    ".markdown",
-    ".txt",
-    ".lock",
-    ".dockerfile",
-    ".gitattributes",
-    ".gitignore",
-    ".npmrc",
-    ".nvmrc",
-    ".editorconfig",
-    ".prettierrc",
-    ".eslintrc",
-    ".browserslistrc",
-    ".svg",
-    ".csv",
-    ".tsv",
-    ".graphql",
-    ".gql",
-    ".prisma",
-    ".proto",
-  ]);
   const isTargetFilePath = (cand: string): boolean => {
     const clean = cand
       .trim()
       .replace(/^['"`]|['"`]$/g, "")
       .replace(/\\/g, "/");
     if (!clean || /\s/.test(clean)) return false;
-    const base = path.posix.basename(clean);
-    if (passthroughFilenames.has(base)) return true;
-    if (base.startsWith(".") && /^\.env(?:\.[A-Za-z0-9_-]+)?$/.test(base)) return true;
-    const ext = path.posix.extname(clean).toLowerCase();
-    if (!ext) {
-      if (clean.includes("/")) return /^[A-Za-z0-9._-]+$/.test(base);
-      if (fs.existsSync(path.resolve(clean))) return true;
-      return /^[a-z][a-z0-9_-]*$/.test(base);
+    if (isUniversalSpliceTargetCandidate(clean, KNOWN_TARGET_EXTENSIONS)) {
+      return true;
     }
-    return KNOWN_TARGET_EXTENSIONS.has(ext) || passthroughExtensions.has(ext) || ext === ".aice";
+    const base = path.posix.basename(clean);
+    const ext = path.posix.extname(clean);
+    if (!ext && !clean.includes("/") && /^[a-z][a-z0-9_-]*$/.test(base)) {
+      return true;
+    }
+    return false;
   };
 
   const scanLineTripleQuoteState = (
@@ -1913,13 +1726,21 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
       .replace(/^\n+|\n+$/g, "")
       .replace(/\nEOF\s*(?:&&|;|\|\|)[^\n]*$/i, "");
     const ext = path.extname(sec.filePath).toLowerCase();
-    const base = path.basename(sec.filePath);
+    const detected = detectTargetFromPathOrContent(sec.filePath);
     const canHaveIdioms =
-      ext !== ".json" &&
-      ext !== ".yaml" &&
-      ext !== ".yml" &&
-      !passthroughExtensions.has(ext) &&
-      !passthroughFilenames.has(base);
+      sec.filePath.endsWith(".aice") ||
+      (detected !== "passthrough" &&
+        ext !== ".json" &&
+        ext !== ".yaml" &&
+        ext !== ".yml" &&
+        ext !== ".md" &&
+        ext !== ".markdown" &&
+        ext !== ".sh" &&
+        ext !== ".bash" &&
+        ext !== ".zsh" &&
+        ext !== ".ps1" &&
+        ext !== ".cmd" &&
+        ext !== ".bat");
     const fullCode = preIdiomPrefix && canHaveIdioms ? `${preIdiomPrefix}\n${body}` : body;
     return {
       filePath: sec.filePath,
@@ -1951,7 +1772,7 @@ export async function createBatch(
   }
 
   const baseDir = options.projectRoot ? path.resolve(options.projectRoot) : process.cwd();
-  const existingBackups = new Map<string, string>();
+  const existingBackups = new Map<string, Buffer>();
   const newlyCreatedPaths: string[] = [];
   const configSnapshots = new Map<string, string | null>();
   const snapshotConfigFile = (filePathToSnap: string) => {
@@ -1967,7 +1788,7 @@ export async function createBatch(
     if (!rawFp) continue;
     const fullPath = path.isAbsolute(rawFp) ? rawFp : path.resolve(baseDir, rawFp);
     if (fs.existsSync(fullPath) && !existingBackups.has(fullPath)) {
-      existingBackups.set(fullPath, fs.readFileSync(fullPath, "utf-8"));
+      existingBackups.set(fullPath, fs.readFileSync(fullPath));
     }
     const itemRoot = resolveTargetProjectRoot(fullPath, item.projectRoot ?? options.projectRoot);
     const resolvedRoot = path.resolve(itemRoot);
@@ -2061,8 +1882,9 @@ export async function createBatch(
         }
       }
       for (const [fp, origContent] of existingBackups.entries()) {
+        if (!createdFiles.includes(fp)) continue;
         try {
-          fs.writeFileSync(fp, origContent, "utf-8");
+          fs.writeFileSync(fp, origContent);
         } catch {
           // ignore restore error
         }

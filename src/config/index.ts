@@ -5,5 +5,6 @@
  * AICE Configuration Module Hub.
  */
 
+export * from "./file-classification.js";
 export * from "./path-resolver.js";
 export * from "./project-config.js";
