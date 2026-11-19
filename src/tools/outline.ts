@@ -297,7 +297,12 @@ export function generateOutline(
         trivia = parsed.trivia;
       } else {
         const detected = detectTargetFromPathOrContent(filePath, originalSource);
-        if (detected === "passthrough") {
+        if (
+          detected === "passthrough" ||
+          detected === "xml" ||
+          detected === "java" ||
+          detected === "text"
+        ) {
           ast = {
             kind: "Module",
             path: filePath,
@@ -351,7 +356,12 @@ export function generateOutline(
       const detected = explicitFilePath
         ? detectTargetFromPathOrContent(explicitFilePath, originalSource)
         : "passthrough";
-      if (detected !== "passthrough" && explicitFilePath && !explicitFilePath.endsWith(".aice")) {
+      const isStructuralPassthrough =
+        detected === "passthrough" ||
+        detected === "xml" ||
+        detected === "java" ||
+        detected === "text";
+      if (!isStructuralPassthrough && explicitFilePath && !explicitFilePath.endsWith(".aice")) {
         const targetLang = detected;
         try {
           const decompResult = withSuppressedTelemetry(() =>
@@ -386,7 +396,7 @@ export function generateOutline(
           ast = parsed.ast;
           trivia = parsed.trivia;
         } catch (err) {
-          if (detected !== "passthrough") {
+          if (!isStructuralPassthrough) {
             try {
               const targetLang = detected;
               const decompResult = withSuppressedTelemetry(() =>
@@ -985,10 +995,15 @@ export function generateOutline(
   }
 
   if (baseOutlineLines.length === 0 && originalSource) {
-    const isPassthroughOutline =
+    const detectedForPreview =
       filePath !== "<anonymous>" && !filePath.endsWith(".aice")
-        ? detectTargetFromPathOrContent(filePath, originalSource) === "passthrough"
-        : false;
+        ? detectTargetFromPathOrContent(filePath, originalSource)
+        : undefined;
+    const isPassthroughOutline =
+      detectedForPreview === "passthrough" ||
+      detectedForPreview === "xml" ||
+      detectedForPreview === "java" ||
+      detectedForPreview === "text";
     if (isPassthroughOutline) {
       const rawLines = originalSource.split(/\r?\n/);
       const previewCount = Math.min(rawLines.length, 20);
@@ -1742,9 +1757,13 @@ function enrichAndResolveSymbolLineRanges(
     filePath !== "<anonymous>" && !filePath.endsWith(".aice")
       ? detectTargetFromPathOrContent(filePath, originalSource)
       : undefined;
-  const isPassthrough = detectedTarget === "passthrough";
+  const isPassthrough =
+    detectedTarget === "passthrough" ||
+    detectedTarget === "xml" ||
+    detectedTarget === "java" ||
+    detectedTarget === "text";
   const targetLang: TargetLanguage | undefined =
-    detectedTarget && detectedTarget !== "passthrough" ? detectedTarget : undefined;
+    detectedTarget && !isPassthrough ? detectedTarget : undefined;
   const isNativeFile = Boolean(targetLang);
   const rawLines = originalSource !== "" ? originalSource.split(/\r?\n/) : [];
   const totalLines = Math.max(1, rawLines.length);
@@ -2660,7 +2679,7 @@ export function collectNativeSyntaxDiagnostics(
     return undefined;
   }
   const detected = detectTargetFromPathOrContent(filePath, source);
-  if (detected === "passthrough") {
+  if (detected === "passthrough" || detected === "text") {
     return undefined;
   }
   return formatNativeSyntaxDiagnosticsMarkdown(filePath, source);
@@ -2900,7 +2919,7 @@ export function extractPassthroughStructuralSymbols(
     return out;
   }
 
-  if (ext === ".xml") {
+  if (ext === ".xml" || ext === ".svg") {
     const tagRe = /^\s*<([A-Za-z_][A-Za-z0-9_:.-]*)([^>]*?)(\/?)>/;
     for (let i = 0; i < lines.length; i++) {
       const ln = lines[i]!;

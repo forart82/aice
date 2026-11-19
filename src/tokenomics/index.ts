@@ -150,6 +150,7 @@ export function detectLanguageName(filePath: string): string {
   if (lower.endsWith(".pro")) return "ProGuard";
   if (lower.endsWith(".gradle")) return "Gradle";
   if (lower.endsWith(".xml")) return "XML";
+  if (lower.endsWith(".svg")) return "SVG";
   if (lower.endsWith(".php")) return "PHP";
   if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "Twig";
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "HTML";

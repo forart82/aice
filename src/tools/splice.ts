@@ -3335,7 +3335,7 @@ function locateBraceLanguageDeclarationSpan(
           if (span) return span;
         }
       }
-    } else if (targetLang === "csharp" || targetLang === "cpp") {
+    } else if (targetLang === "csharp" || targetLang === "cpp" || targetLang === "java") {
       const trimmed = line.trim();
       if (
         trimmed.startsWith("//") ||
@@ -3354,21 +3354,30 @@ function locateBraceLanguageDeclarationSpan(
       }
       const cMethodMatch = !isInsideAnyContainer
         ? line.match(
-            /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+|friend\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_~]+)\s*(?:<[^>]+>)?\s*\(/,
+            /^([ \t]*)(?:@[A-Za-z0-9_$.]+(?:\([^)]*\))?\s+)*(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|final\s+|abstract\s+|synchronized\s+|default\s+|native\s+|strictfp\s+|virtual\s+|override\s+|async\s+|inline\s+|constexpr\s+|explicit\s+|friend\s+)*(?:<[^>]+>\s+)?(?:[A-Za-z0-9_:<>*&[\]?,.$]+\s+)+([A-Za-z0-9_~$]+)\s*(?:<[^>]+>)?\s*\(/,
           )
         : null;
+      const javaCtorMatch =
+        !cMethodMatch && targetLang === "java" && resolvedClassName && !isInsideAnyContainer
+          ? line.match(
+              /^([ \t]*)(?:@[A-Za-z0-9_$.]+(?:\([^)]*\))?\s+)*(?:public\s+|private\s+|protected\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*\(/,
+            )
+          : null;
+      const matchedMethod =
+        cMethodMatch ??
+        (javaCtorMatch && javaCtorMatch[2] === resolvedClassName ? javaCtorMatch : null);
       if (
-        cMethodMatch &&
-        (cMethodMatch[2] === memberName || normIdForSpan(cMethodMatch[2]) === normMember)
+        matchedMethod &&
+        (matchedMethod[2] === memberName || normIdForSpan(matchedMethod[2]) === normMember)
       ) {
         const res = collectOrReturn(
-          buildBraceSpanFromLine(i, cMethodMatch[1], cMethodMatch[2], resolvedClassName),
+          buildBraceSpanFromLine(i, matchedMethod[1], matchedMethod[2], resolvedClassName),
         );
         if (res) return res;
       }
       if (className) {
         const cFieldMatch = line.match(
-          /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|readonly\s+|volatile\s+|const\s+|constexpr\s+|inline\s+)*(?:[A-Za-z0-9_:<>*&[\]?,]+\s+)+([A-Za-z0-9_]+)\s*(?:=|;|\{|=>)/,
+          /^([ \t]*)(?:public\s+|private\s+|protected\s+|internal\s+|static\s+|final\s+|transient\s+|readonly\s+|volatile\s+|const\s+|constexpr\s+|inline\s+)*(?:[A-Za-z0-9_:<>*&[\]?,.$]+\s+)+([A-Za-z0-9_$]+)\s*(?:=|;|\{|=>)/,
         );
         if (
           cFieldMatch &&
@@ -3444,11 +3453,13 @@ const KNOWN_TARGET_LANGS_SET = new Set<string>([
   "tsx",
   "python",
   "html",
+  "xml",
   "css",
   "rust",
   "go",
   "cpp",
   "csharp",
+  "java",
   "json",
   "yaml",
   "twig",
@@ -3458,6 +3469,8 @@ const KNOWN_TARGET_LANGS_SET = new Set<string>([
   "powershell",
   "batch",
   "markdown",
+  "aipl",
+  "text",
 ]);
 
 function enrichSpanWithOffsetsAndLines(
@@ -3613,6 +3626,7 @@ export function locateImportBlockSpan(
       case "go":
         return /^import\b/.test(trimmed);
       case "kotlin":
+      case "java":
         return /^import\b/.test(trimmed);
       case "php":
         return /^use\b/.test(trimmed);
@@ -3620,7 +3634,6 @@ export function locateImportBlockSpan(
         return /^import\b|^use\b|^using\b|^#\s*include\b|^from\b/.test(trimmed);
     }
   };
-
   let firstImportLine = -1;
   let lastImportLine = -1;
   let groupDepth = 0;
@@ -5007,6 +5020,9 @@ function emitNativeSnippetForContext(
     targetLang === "powershell" ||
     targetLang === "batch" ||
     targetLang === "aipl" ||
+    targetLang === "xml" ||
+    targetLang === "java" ||
+    targetLang === "text" ||
     isPassthroughSpliceFile(filePath)
   ) {
     return dedentSnippet(rawSnippet).trim();
@@ -7519,7 +7535,10 @@ function resolveSingleNativeEditAgainstSource(
       targetLang === "markdown" ||
       targetLang === "shell" ||
       targetLang === "powershell" ||
-      targetLang === "batch";
+      targetLang === "batch" ||
+      targetLang === "xml" ||
+      targetLang === "java" ||
+      targetLang === "text";
     const extractedRangeIdioms = skipRangePreprocessor
       ? { cleanedCode: rawSnippet, inlineIdioms: {} as Record<string, ProjectIdiomDefinition> }
       : extractInlineIdiomsFromSource(rawSnippet);
@@ -7570,10 +7589,12 @@ function resolveSingleNativeEditAgainstSource(
       targetLang === "markdown" ||
       targetLang === "yaml" ||
       targetLang === "html" ||
+      targetLang === "xml" ||
       targetLang === "twig" ||
       targetLang === "shell" ||
       targetLang === "powershell" ||
-      targetLang === "batch";
+      targetLang === "batch" ||
+      targetLang === "text";
     const skipHalfOpenGuard = isNonBraceRangeLang || targetLang === "json" || targetLang === "css";
 
     if (!skipHalfOpenGuard) {
@@ -10464,8 +10485,8 @@ function isPassthroughSpliceFile(filePath: string): boolean {
   const clean = filePath.replace(/\\/g, "/");
   if (clean.endsWith(".aice")) return false;
   if (isBinaryExtension(clean)) return false;
-  const ext = path.posix.extname(clean).toLowerCase();
-  if (ext === ".webmanifest" || detectTargetFromPathOrContent(clean) !== "passthrough") {
+  const detected = detectTargetFromPathOrContent(clean);
+  if (detected !== "passthrough" && detected !== "text") {
     return false;
   }
   try {
@@ -10484,14 +10505,10 @@ function resolveEffectiveSpliceTargetLang(
   explicitTarget?: TargetLanguage,
 ): TargetLanguage {
   if (explicitTarget) return explicitTarget;
-  const lower = filePath.toLowerCase().replace(/\.aice$/, "");
-  if (lower.endsWith(".webmanifest")) return "json";
   const detected = detectTargetFromPathOrContent(filePath, source);
   if (detected !== "passthrough") return detected;
-  if (lower.endsWith(".java")) return "kotlin";
-  return "markdown";
+  return "text";
 }
-
 function isSpliceTargetFileCandidate(cand: string, baseDir = process.cwd()): boolean {
   return isUniversalSpliceTargetCandidate(cand, KNOWN_TARGET_EXTENSIONS, baseDir);
 }
@@ -10938,8 +10955,17 @@ export function parseMultiBlockSpliceStream(
           KNOWN_TARGET_EXTENSIONS.has(ext) &&
           !isPassthroughSpliceFile(targetFp!) &&
           ext !== ".json" &&
+          ext !== ".jsonc" &&
+          ext !== ".webmanifest" &&
           ext !== ".yaml" &&
           ext !== ".yml" &&
+          ext !== ".xml" &&
+          ext !== ".svg" &&
+          ext !== ".java" &&
+          ext !== ".gradle" &&
+          ext !== ".pro" &&
+          ext !== ".properties" &&
+          ext !== ".example" &&
           ext !== ".md" &&
           ext !== ".markdown" &&
           ext !== ".sh" &&

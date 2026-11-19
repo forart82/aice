@@ -730,6 +730,9 @@ export class RustEmitter {
       }
       case "MemberAccessExpr": {
         const obj = this.emitExpr(expr.object);
+        if (expr.isScopeAccess) {
+          return `${obj}::${expr.property}`;
+        }
         const lowered = lowerPropertyAccess(obj, expr.property, "rust");
         if (lowered.isLowered) return lowered.code;
         return `${obj}.${this.toSnakeCase(expr.property)}`;
@@ -786,6 +789,30 @@ export class RustEmitter {
     if (expr.callee.kind === "IdentifierExpr") {
       const name = expr.callee.name;
 
+      if (name === "as" && expr.args.length === 2) {
+        const targetArg = expr.args[1]!;
+        const targetTypeStr =
+          targetArg.kind === "IdentifierExpr"
+            ? targetArg.name
+            : targetArg.kind === "LiteralExpr" && typeof targetArg.value === "string"
+              ? targetArg.value
+              : argCodes[1]!;
+        return `(${argCodes[0]} as ${targetTypeStr})`;
+      }
+
+      if (
+        expr.args.length === 1 &&
+        expr.args[0]!.kind === "RecordLiteralExpr" &&
+        expr.args[0]!.properties.some((p) => p.isSpread)
+      ) {
+        const recProps = expr.args[0]!.properties.map((p) =>
+          p.isSpread
+            ? `..${this.emitExpr(p.value)}`
+            : `${this.toSnakeCase(p.key ?? "")}: ${this.emitExpr(p.value)}`,
+        ).join(", ");
+        return `${name} { ${recProps} }`;
+      }
+
       const loweredConst = lowerConstructor(name, argCodes, "rust");
       if (loweredConst.isLowered) return loweredConst.code;
 
@@ -803,11 +830,6 @@ export class RustEmitter {
 
       if (name === "len" && argCodes.length === 1) return `((${argCodes[0]}).len() as i64)`;
       if (name === "clamp") return `(${argCodes[0]}).clamp(${argCodes[1]}, ${argCodes[2]})`;
-      if (name === "min") return `std::cmp::min(${argCodes.join(", ")})`;
-      if (name === "max") return `std::cmp::max(${argCodes.join(", ")})`;
-      if (name === "abs") return `(${argCodes[0]}).abs()`;
-      if (name === "sqrt") return `(${argCodes[0]}).sqrt()`;
-      if (name === "floor") return `(${argCodes[0]}).floor()`;
       if (name === "ceil") return `(${argCodes[0]}).ceil()`;
       if (name === "round") return `(${argCodes[0]}).round()`;
       if (name === "sin") return `(${argCodes[0]}).sin()`;
@@ -829,6 +851,9 @@ export class RustEmitter {
     if (expr.callee.kind === "MemberAccessExpr") {
       const objCode = this.emitExpr(expr.callee.object);
       const method = expr.callee.property;
+      if (expr.callee.isScopeAccess) {
+        return `${objCode}::${method}(${argCodes.join(", ")})`;
+      }
 
       const loweredMethod = lowerMethodCall(objCode, method, argCodes, "rust");
       if (loweredMethod.isLowered) return loweredMethod.code;

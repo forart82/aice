@@ -73,11 +73,13 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "tsx",
   "python",
   "html",
+  "xml",
   "css",
   "go",
   "rust",
   "cpp",
   "csharp",
+  "java",
   "json",
   "yaml",
   "twig",
@@ -88,6 +90,7 @@ export const VALID_TARGET_LANGUAGES: ReadonlySet<TargetLanguage> = new Set([
   "batch",
   "markdown",
   "aipl",
+  "text",
 ]);
 const _defaultProjectConfig: AiceProjectConfig = {
   mode: "side-by-side",
@@ -129,12 +132,14 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".html",
   ".htm",
   ".xml",
+  ".svg",
   ".css",
   ".js",
   ".jsx",
   ".mjs",
   ".cjs",
   ".json",
+  ".jsonc",
   ".webmanifest",
   ".yaml",
   ".yml",
@@ -157,13 +162,14 @@ export const KNOWN_TARGET_EXTENSIONS: ReadonlySet<string> = new Set([
   ".markdown",
   ".aipl",
 ]);
+
 export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.freeze({
   ".ts": "typescript",
   ".tsx": "tsx",
-  ".js": "typescript",
+  ".js": "javascript",
   ".jsx": "tsx",
-  ".mjs": "typescript",
-  ".cjs": "typescript",
+  ".mjs": "javascript",
+  ".cjs": "javascript",
   ".py": "python",
   ".pyi": "python",
   ".rs": "rust",
@@ -174,12 +180,14 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".cxx": "cpp",
   ".h": "cpp",
   ".cs": "csharp",
-  ".java": "kotlin",
+  ".java": "java",
   ".html": "html",
   ".htm": "html",
-  ".xml": "html",
+  ".xml": "xml",
+  ".svg": "xml",
   ".css": "css",
   ".json": "json",
+  ".jsonc": "json",
   ".webmanifest": "json",
   ".yaml": "yaml",
   ".yml": "yaml",
@@ -188,10 +196,10 @@ export const TARGET_EXT_MAP: Readonly<Record<string, TargetLanguage>> = Object.f
   ".php": "php",
   ".kt": "kotlin",
   ".kts": "kotlin",
-  ".gradle": "kotlin",
-  ".pro": "shell",
-  ".properties": "shell",
-  ".example": "shell",
+  ".gradle": "text",
+  ".pro": "text",
+  ".properties": "text",
+  ".example": "text",
   ".sh": "shell",
   ".bash": "shell",
   ".zsh": "shell",
@@ -234,6 +242,8 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".cpp";
     case "csharp":
       return ".cs";
+    case "java":
+      return ".java";
     case "kotlin":
       return ".kt";
     case "php":
@@ -242,6 +252,8 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".twig";
     case "html":
       return ".html";
+    case "xml":
+      return ".xml";
     case "css":
       return ".css";
     case "json":
@@ -258,6 +270,8 @@ export function getExtensionForTarget(target: TargetLanguage): string {
       return ".md";
     case "aipl":
       return ".aipl";
+    case "text":
+      return ".txt";
   }
 }
 export function deriveTargetFilename(

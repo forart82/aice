@@ -564,8 +564,11 @@ pub fn cast_val(x: i64) -> i64 {
       );
       expect(fn).toBeDefined();
       const letY = (fn!.body as any).statements[0] as any;
-      expect(letY.init.kind).toBe("IdentifierExpr");
-      expect(letY.init.name).toBe("x");
+      expect(letY.init.kind).toBe("CallExpr");
+      expect(letY.init.callee.name).toBe("as");
+      expect(letY.init.args[0].kind).toBe("IdentifierExpr");
+      expect(letY.init.args[0].name).toBe("x");
+      expect(letY.init.args[1].name).toBe("usize");
     });
 
     it("decompiles Rust static mut as VarDecl with isMut: true", () => {

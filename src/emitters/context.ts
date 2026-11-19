@@ -13,11 +13,13 @@ export type TargetLanguage =
   | "tsx"
   | "python"
   | "html"
+  | "xml"
   | "css"
   | "rust"
   | "go"
   | "cpp"
   | "csharp"
+  | "java"
   | "json"
   | "yaml"
   | "twig"
@@ -27,7 +29,8 @@ export type TargetLanguage =
   | "powershell"
   | "batch"
   | "markdown"
-  | "aipl";
+  | "aipl"
+  | "text";
 export interface EmitterOptions {
   target?: TargetLanguage;
   indent?: string;
@@ -150,34 +153,10 @@ export class EmitterContext {
  * Detects target language from an AICE file path (e.g. foo.ts.aice -> typescript).
  */
 export function detectTargetFromPath(filePath: string): TargetLanguage {
-  const lower = filePath.toLowerCase().replace(/\.aice$/, "");
-  if (lower.endsWith(".tsx") || lower.endsWith(".jsx")) return "tsx";
-  if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs"))
-    return "javascript";
-  if (lower.endsWith(".py") || lower.endsWith(".pyi")) return "python";
-  if (lower.endsWith(".rs")) return "rust";
-  if (lower.endsWith(".go")) return "go";
-  if (
-    lower.endsWith(".cpp") ||
-    lower.endsWith(".cc") ||
-    lower.endsWith(".cxx") ||
-    lower.endsWith(".hpp") ||
-    lower.endsWith(".h")
-  )
-    return "cpp";
-  if (lower.endsWith(".cs")) return "csharp";
-  if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "kotlin";
-  if (lower.endsWith(".php")) return "php";
-  if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "twig";
-  if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
-  if (lower.endsWith(".css")) return "css";
-  if (lower.endsWith(".json") || lower.endsWith(".jsonc")) return "json";
-  if (lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".cff")) return "yaml";
-  if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "shell";
-  if (lower.endsWith(".ps1")) return "powershell";
-  if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "batch";
-  if (lower.endsWith(".md") || lower.endsWith(".markdown")) return "markdown";
-  if (lower.endsWith(".aipl")) return "aipl";
+  const detected = detectTargetFromPathOrContent(filePath);
+  if (detected !== "passthrough") {
+    return detected;
+  }
   return "typescript";
 }
 
@@ -212,13 +191,23 @@ export function detectTargetFromPathOrContent(
   )
     return "cpp";
   if (lower.endsWith(".cs")) return "csharp";
+  if (lower.endsWith(".java")) return "java";
   if (lower.endsWith(".kt") || lower.endsWith(".kts")) return "kotlin";
   if (lower.endsWith(".php")) return "php";
   if (lower.endsWith(".twig") || lower.endsWith(".html.twig")) return "twig";
   if (lower.endsWith(".html") || lower.endsWith(".htm")) return "html";
+  if (lower.endsWith(".xml") || lower.endsWith(".svg")) return "xml";
   if (lower.endsWith(".css")) return "css";
-  if (lower.endsWith(".json") || lower.endsWith(".jsonc")) return "json";
+  if (lower.endsWith(".json") || lower.endsWith(".jsonc") || lower.endsWith(".webmanifest"))
+    return "json";
   if (lower.endsWith(".yaml") || lower.endsWith(".yml") || lower.endsWith(".cff")) return "yaml";
+  if (
+    lower.endsWith(".gradle") ||
+    lower.endsWith(".pro") ||
+    lower.endsWith(".properties") ||
+    lower.endsWith(".example")
+  )
+    return "text";
   if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return "shell";
   if (lower.endsWith(".ps1")) return "powershell";
   if (lower.endsWith(".cmd") || lower.endsWith(".bat")) return "batch";

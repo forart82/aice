@@ -21,7 +21,6 @@ import type {
   ClassDecl,
   Expr,
   FunctionDecl,
-  IdentifierExpr,
   IfStmt,
   ImportDecl,
   MatchCase,
@@ -137,6 +136,8 @@ export type PhpTokenKind =
   | "COLON"
   | "QUESTION"
   | "BACKSLASH"
+  | "AT"
+  | "ELLIPSIS"
   | "COMMENT"
   | "DOC_COMMENT"
   | "EOF";
@@ -225,6 +226,28 @@ class PhpLexer {
         continue;
       }
 
+      // PHP 8 attribute `#[...]` — consume as comment/metadata rather than failing on `#`
+      if (ch === "#" && this.src[this.pos + 1] === "[") {
+        const startLine = this.line;
+        const startCol = this.col;
+        let cur = this.pos + 2;
+        let depth = 1;
+        while (cur < this.src.length && depth > 0) {
+          if (this.src[cur] === "[") depth++;
+          else if (this.src[cur] === "]") depth--;
+          cur++;
+        }
+        const attrText = this.src.slice(this.pos, cur);
+        this.advanceChars(attrText);
+        tokens.push({
+          kind: "COMMENT",
+          value: attrText,
+          line: startLine,
+          col: startCol,
+        });
+        continue;
+      }
+
       if (this.src.startsWith("//", this.pos) || ch === "#") {
         const startLine = this.line;
         const startCol = this.col;
@@ -239,6 +262,55 @@ class PhpLexer {
           col: startCol,
         });
         continue;
+      }
+
+      // PHP heredoc / nowdoc `<<<EOT\n...\nEOT`
+      if (this.src.startsWith("<<<", this.pos)) {
+        const headerMatch = this.src
+          .slice(this.pos + 3)
+          .match(
+            /^[ \t]*(?:([A-Za-z_\x7f-\xff][A-Za-z0-9_\x7f-\xff]*)|'([A-Za-z_\x7f-\xff][A-Za-z0-9_\x7f-\xff]*)'|"([A-Za-z_\x7f-\xff][A-Za-z0-9_\x7f-\xff]*)")[ \t]*\r?\n/,
+          );
+        if (headerMatch) {
+          const startLine = this.line;
+          const startCol = this.col;
+          const label = headerMatch[1] ?? headerMatch[2] ?? headerMatch[3] ?? "";
+          const bodyStart = this.pos + 3 + headerMatch[0].length;
+          let scanPos = bodyStart;
+          let closeStart = -1;
+          let closeEnd = -1;
+          while (scanPos <= this.src.length) {
+            const nlIdx = this.src.indexOf("\n", scanPos);
+            const lineEnd = nlIdx < 0 ? this.src.length : nlIdx;
+            const lineText = this.src.slice(scanPos, lineEnd).replace(/\r$/, "");
+            const trimmedStart = lineText.replace(/^[ \t]*/, "");
+            if (
+              trimmedStart.startsWith(label) &&
+              (trimmedStart.length === label.length ||
+                !/[A-Za-z0-9_\x7f-\xff]/.test(trimmedStart[label.length]!))
+            ) {
+              closeStart = scanPos;
+              closeEnd = scanPos + (lineText.length - trimmedStart.length) + label.length;
+              break;
+            }
+            if (nlIdx < 0) break;
+            scanPos = nlIdx + 1;
+          }
+          if (closeEnd < 0) {
+            throw new Error(
+              `Unterminated PHP heredoc/nowdoc '<<<${label}' at line ${startLine}:${startCol}`,
+            );
+          }
+          const rawContent = this.src.slice(bodyStart, closeStart).replace(/\r?\n$/, "");
+          this.advanceChars(this.src.slice(this.pos, closeEnd));
+          tokens.push({
+            kind: "STRING",
+            value: rawContent,
+            line: startLine,
+            col: startCol,
+          });
+          continue;
+        }
       }
 
       // Variables ($name)
@@ -357,6 +429,11 @@ class PhpLexer {
         continue;
       }
 
+      if (this.src.startsWith("...", this.pos)) {
+        tokens.push(this.consumeOp("ELLIPSIS", 3));
+        continue;
+      }
+
       // Single char punctuation
       const singlePunctMap: Record<string, PhpTokenKind> = {
         "{": "LBRACE",
@@ -384,6 +461,7 @@ class PhpLexer {
         "^": "CARET",
         "~": "TILDE",
         "\\": "BACKSLASH",
+        "@": "AT",
       };
 
       if (singlePunctMap[ch]) {
@@ -397,8 +475,14 @@ class PhpLexer {
         continue;
       }
 
-      // Unknown character, skip
-      this.advance();
+      if (ch === "\uFEFF" && this.pos === 0) {
+        this.advance();
+        continue;
+      }
+
+      throw new Error(
+        `Unexpected character '${ch}' in PHP source at line ${this.line}:${this.col}`,
+      );
     }
 
     tokens.push({ kind: "EOF", value: "", line: this.line, col: this.col });
@@ -605,6 +689,31 @@ export class PhpDecompiler {
       this.collectLeadingTrivia();
       if (this.check("EOF") || this.check("CLOSE_TAG")) break;
 
+      if (this.check("SEMICOLON")) {
+        this.advance();
+        continue;
+      }
+
+      if (this.check("DECLARE")) {
+        this.advance();
+        if (this.check("LPAREN")) {
+          this.advance();
+          while (!this.check("RPAREN") && !this.check("EOF")) this.advance();
+          if (this.check("RPAREN")) this.advance();
+        }
+        if (this.check("SEMICOLON")) this.advance();
+        continue;
+      }
+
+      if (this.check("NAMESPACE")) {
+        this.advance();
+        while (!this.check("SEMICOLON") && !this.check("LBRACE") && !this.check("EOF")) {
+          this.advance();
+        }
+        if (this.check("SEMICOLON")) this.advance();
+        continue;
+      }
+
       if (this.check("USE")) {
         items.push(this.parseUseStatement());
         continue;
@@ -617,6 +726,10 @@ export class PhpDecompiler {
         items.push(this.parseInterfaceDecl());
         continue;
       }
+      if (this.check("TRAIT")) {
+        items.push(this.parseInterfaceDecl());
+        continue;
+      }
       if (this.check("ENUM")) {
         items.push(this.parseEnumDecl());
         continue;
@@ -626,10 +739,66 @@ export class PhpDecompiler {
         continue;
       }
 
-      // Unexpected token, skip to avoid infinite loop
-      this.advance();
-    }
+      // Top-level const declaration: `const NAME = expr;`
+      if (this.check("IDENTIFIER") && this.current().value.toLowerCase() === "const") {
+        this.advance();
+        const constName = this.consume("IDENTIFIER").value;
+        this.consume("ASSIGN");
+        const val = this.parseExpr();
+        if (this.check("SEMICOLON")) this.advance();
+        items.push({
+          kind: "ConstDecl",
+          name: constName,
+          isExported: true,
+          value: val,
+          span: emptySpan(this.filePath),
+        });
+        continue;
+      }
 
+      // Top-level require / require_once / include / include_once
+      if (
+        this.check("IDENTIFIER") &&
+        /^(?:require|require_once|include|include_once)$/i.test(this.current().value)
+      ) {
+        this.advance();
+        const incExpr = this.parseExpr();
+        if (this.check("SEMICOLON")) this.advance();
+        const sourcePath =
+          incExpr.kind === "LiteralExpr" && typeof incExpr.value === "string"
+            ? incExpr.value
+            : "unknown";
+        items.push({
+          kind: "ImportDecl",
+          source: sourcePath,
+          specifiers: [{ name: "*", isWildcard: true, span: emptySpan(this.filePath) }],
+          span: emptySpan(this.filePath),
+        });
+        continue;
+      }
+
+      // Top-level executable statement
+      if (
+        this.check("VARIABLE") ||
+        this.check("IF") ||
+        this.check("WHILE") ||
+        this.check("FOR") ||
+        this.check("FOREACH") ||
+        this.check("TRY") ||
+        this.check("RETURN") ||
+        this.check("THROW") ||
+        this.check("IDENTIFIER") ||
+        this.check("AT")
+      ) {
+        this.parseStatement();
+        continue;
+      }
+
+      const unexpectedTok = this.current();
+      throw new Error(
+        `Unexpected top-level token '${unexpectedTok.value || unexpectedTok.kind}' (${unexpectedTok.kind}) in PHP source at ${this.filePath}:${unexpectedTok.line}:${unexpectedTok.col}`,
+      );
+    }
     const baseName =
       this.filePath
         .split(/[/\\]/)
@@ -1495,7 +1664,7 @@ export class PhpDecompiler {
         this.advance();
         pattern = { kind: "WildcardPattern", span: emptySpan(this.filePath) };
       } else {
-        const patExpr = this.parsePrimaryExpr();
+        const patExpr = this.parsePostfixExpr();
         if (patExpr.kind === "LiteralExpr") {
           pattern = { kind: "LiteralPattern", value: patExpr, span: emptySpan(this.filePath) };
         } else if (patExpr.kind === "IdentifierExpr") {
@@ -1505,7 +1674,8 @@ export class PhpDecompiler {
             span: emptySpan(this.filePath),
           };
         } else if (patExpr.kind === "MemberAccessExpr") {
-          const qualified = `${(patExpr.object as IdentifierExpr).name}.${patExpr.property}`;
+          const objName = patExpr.object.kind === "IdentifierExpr" ? patExpr.object.name : "";
+          const qualified = objName ? `${objName}.${patExpr.property}` : patExpr.property;
           pattern = { kind: "IdentifierPattern", name: qualified, span: emptySpan(this.filePath) };
         } else {
           pattern = { kind: "WildcardPattern", span: emptySpan(this.filePath) };
@@ -1899,9 +2069,21 @@ export class PhpDecompiler {
       this.consume("RPAREN");
       return expr;
     }
+    // Error-control unary `@expr`
+    if (this.check("AT")) {
+      this.advance();
+      return this.parsePrimaryExpr();
+    }
 
-    // Identifiers: true, false, null, self, class names
-    if (this.check("IDENTIFIER")) {
+    // Identifiers & contextual keywords: true, false, null, self, static, parent, class names
+    if (
+      this.check("IDENTIFIER") ||
+      this.check("STATIC") ||
+      this.check("DEFAULT") ||
+      this.check("MATCH") ||
+      this.check("CASE") ||
+      this.check("READONLY")
+    ) {
       const name = this.advance().value;
       if (name === "true") {
         return {
@@ -1937,17 +2119,11 @@ export class PhpDecompiler {
       };
     }
 
-    // Fallback: advance and return null literal
-    this.advance();
-    return {
-      kind: "LiteralExpr",
-      literalKind: "nil",
-      value: null,
-      rawValue: "null",
-      span: emptySpan(this.filePath),
-    };
+    const unexpectedTok = this.current();
+    throw new Error(
+      `Unexpected token '${unexpectedTok.value || unexpectedTok.kind}' (${unexpectedTok.kind}) in PHP expression at ${this.filePath}:${unexpectedTok.line}:${unexpectedTok.col}`,
+    );
   }
-
   private parseArgList(): Expr[] {
     const args: Expr[] = [];
     while (!this.check("RPAREN") && !this.check("EOF")) {

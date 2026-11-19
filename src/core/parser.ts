@@ -1587,22 +1587,21 @@ export class Parser {
       this.advance();
       let name = tok.value;
       let endSpan = tok.span;
-
-      while (this.check("DOT")) {
-        this.advance(); // consume '.'
+      while (this.check("DOT") || this.check("COLON_COLON")) {
+        const sep = this.check("COLON_COLON") ? "::" : ".";
+        this.advance(); // consume '.' or '::'
         const nextTok = this.current();
         if (nextTok.kind === "IDENT" || this.isIdentOrKeyword(nextTok)) {
           this.advance();
-          name += `.${nextTok.value}`;
+          name += `${sep}${nextTok.value}`;
           endSpan = nextTok.span;
         } else {
           throw new ParserError(
-            `Expected identifier after '.' in type expression, got '${nextTok.kind}'`,
+            `Expected identifier after '${sep}' in type expression, got '${nextTok.kind}'`,
             nextTok.span,
           );
         }
       }
-
       const typeArgs: TypeExpr[] = [];
       if (this.check("LBRACKET")) {
         this.advance();
@@ -1937,8 +1936,12 @@ export class Parser {
     if (this.check("EXTENDS")) {
       this.advance();
       extendsName = this.parseContextualIdentOrString("Expected base class name after 'extends'");
+      while (this.check("DOT") || this.check("COLON_COLON")) {
+        const sep = this.check("COLON_COLON") ? "::" : ".";
+        this.advance();
+        extendsName += `${sep}${this.parseContextualIdentOrString(`Expected identifier after '${sep}' in extends clause`)}`;
+      }
     }
-
     const implementsList: string[] = [];
     if (this.check("IMPLEMENTS")) {
       this.advance();
@@ -3950,6 +3953,7 @@ export class Parser {
     // 3. Member Access: expr.prop, expr::prop, or expr?.prop
     if (tok.kind === "DOT" || tok.kind === "COLON_COLON" || tok.kind === "QUESTION_DOT") {
       const isSafeNav = tok.kind === "QUESTION_DOT";
+      const isScopeAccess = tok.kind === "COLON_COLON";
       this.advance();
       const propName = this.parseContextualIdentOrString("Expected property identifier after '.'");
       return {
@@ -3957,6 +3961,7 @@ export class Parser {
         object: left,
         property: propName,
         isSafeNav,
+        ...(isScopeAccess ? { isScopeAccess: true } : {}),
         span: mergeSpans(left.span, this.previous().span),
       };
     }

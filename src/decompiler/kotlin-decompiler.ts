@@ -148,6 +148,7 @@ export type KotlinTokenKind =
   | "OR_OR"
   | "BANG"
   | "QUESTION"
+  | "AT"
   | "DOC_COMMENT"
   | "LINE_COMMENT"
   | "BLOCK_COMMENT"
@@ -480,6 +481,7 @@ export class KotlinLexer {
         "%": "PERCENT",
         "!": "BANG",
         "?": "QUESTION",
+        "@": "AT",
       };
 
       if (singleOps[ch]) {
@@ -499,8 +501,14 @@ export class KotlinLexer {
         continue;
       }
 
-      // Unknown character fallback
-      tokens.push(this.consumeOp("EOF", 1));
+      if (ch === "\uFEFF" && this.pos === 0) {
+        this.advance();
+        continue;
+      }
+
+      throw new Error(
+        `Unexpected character '${ch}' in Kotlin source at line ${this.line}:${this.col}`,
+      );
     }
 
     tokens.push({
@@ -617,11 +625,16 @@ export class KotlinLexer {
   }
 
   private isIdentStart(ch: string): boolean {
-    return (ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_";
+    return (
+      (ch >= "a" && ch <= "z") ||
+      (ch >= "A" && ch <= "Z") ||
+      ch === "_" ||
+      /[\p{L}\p{Nl}]/u.test(ch)
+    );
   }
 
   private isIdentChar(ch: string): boolean {
-    return this.isIdentStart(ch) || this.isDigit(ch);
+    return this.isIdentStart(ch) || this.isDigit(ch) || /[\p{Nd}\p{Mn}\p{Mc}]/u.test(ch);
   }
 
   private readNumber(): KotlinToken {
@@ -773,6 +786,24 @@ export class KotlinDecompiler {
       this.collectLeadingTrivia();
       if (this.check("EOF")) break;
 
+      if (this.check("AT")) {
+        this.advance();
+        if (this.check("IDENTIFIER")) this.advance();
+        if (this.check("COLON")) {
+          this.advance();
+          if (this.check("IDENTIFIER")) this.advance();
+        }
+        if (this.check("LPAREN")) {
+          this.advance();
+          let depth = 1;
+          while (!this.check("EOF") && depth > 0) {
+            if (this.check("LPAREN")) depth++;
+            else if (this.check("RPAREN")) depth--;
+            this.advance();
+          }
+        }
+        continue;
+      }
       if (this.check("IMPORT")) {
         items.push(this.parseImport());
         continue;
@@ -2110,12 +2141,39 @@ export class KotlinDecompiler {
       };
     }
 
-    if (tok.kind === "IDENTIFIER" || tok.kind === "THIS" || tok.kind === "SUPER") {
+    if (
+      tok.kind === "IDENTIFIER" ||
+      tok.kind === "THIS" ||
+      tok.kind === "SUPER" ||
+      tok.kind === "DATA" ||
+      tok.kind === "SEALED" ||
+      tok.kind === "OPEN" ||
+      tok.kind === "INTERNAL" ||
+      tok.kind === "ABSTRACT" ||
+      tok.kind === "OVERRIDE" ||
+      tok.kind === "SUSPEND" ||
+      tok.kind === "BY" ||
+      tok.kind === "INIT" ||
+      tok.kind === "COMPANION" ||
+      tok.kind === "CONSTRUCTOR" ||
+      tok.kind === "ENUM" ||
+      tok.kind === "CONST"
+    ) {
       this.advance();
       return {
         kind: "IdentifierExpr",
         name: tok.value,
         span: this.makeSpan(tok.offset, tok.endOffset),
+      };
+    }
+
+    if (tok.kind === "DOUBLE_COLON") {
+      this.advance();
+      const refTok = this.advance();
+      return {
+        kind: "IdentifierExpr",
+        name: `::${refTok.value}`,
+        span: this.makeSpan(tok.offset, refTok.endOffset),
       };
     }
 
@@ -2142,15 +2200,10 @@ export class KotlinDecompiler {
       };
     }
 
-    // Fallback
-    this.advance();
-    return {
-      kind: "IdentifierExpr",
-      name: tok.value || "unknown",
-      span: emptySpan(this.filePath),
-    };
+    throw new Error(
+      `Unexpected token '${tok.value || tok.kind}' (${tok.kind}) in Kotlin expression at ${this.filePath}:${tok.line}:${tok.col}`,
+    );
   }
-
   private parseStringTemplate(
     raw: string,
     startOffset: number,

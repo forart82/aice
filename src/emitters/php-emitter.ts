@@ -776,13 +776,14 @@ export class PhpEmitter {
       const arrow = mem.isSafeNav ? "?->" : "->";
       // Check if static method call Class::method()
       if (
-        mem.object.kind === "IdentifierExpr" &&
-        (this.classNames.has(mem.object.name) ||
-          this.enumNames.has(mem.object.name) ||
-          mem.object.name === "self" ||
-          mem.object.name === "parent")
+        mem.isScopeAccess ||
+        (mem.object.kind === "IdentifierExpr" &&
+          (this.classNames.has(mem.object.name) ||
+            this.enumNames.has(mem.object.name) ||
+            mem.object.name === "self" ||
+            mem.object.name === "parent"))
       ) {
-        return `${mem.object.name}::${mem.property}(${args})`;
+        return `${objStr}::${mem.property}(${args})`;
       }
       return `${objStr}${arrow}${mem.property}(${args})`;
     }
@@ -805,6 +806,11 @@ export class PhpEmitter {
 
   private emitMemberAccessExpr(mem: MemberAccessExpr): string {
     const arrow = mem.isSafeNav ? "?->" : "->";
+    const objStr = this.emitExpr(mem.object);
+
+    if (mem.isScopeAccess) {
+      return `${objStr}::${mem.property}`;
+    }
 
     if (mem.object.kind === "IdentifierExpr") {
       const objName = mem.object.name;
@@ -820,7 +826,6 @@ export class PhpEmitter {
       }
     }
 
-    const objStr = this.emitExpr(mem.object);
     return `${objStr}${arrow}${mem.property}`;
   }
 

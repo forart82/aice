@@ -36,36 +36,156 @@ export class CppDecompiler {
     this.trivia = new CstTriviaTable();
   }
 
-  private replaceScopeResolution(s: string): string {
-    let res = "";
-    let inStr = false;
-    let qChar = "";
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if (c === '"' || c === "'") {
-        let bs = 0;
-        let k = i - 1;
-        while (k >= 0 && s[k] === "\\") {
-          bs++;
-          k--;
+  private isCppDigitSeparator(s: string, quoteIdx: number): boolean {
+    const prev = quoteIdx > 0 ? s[quoteIdx - 1] : "";
+    const next = s[quoteIdx + 1] ?? "";
+    if (!/[0-9a-fA-F]/.test(prev) || !/[0-9a-fA-F]/.test(next)) {
+      return false;
+    }
+    let k = quoteIdx - 1;
+    while (k >= 0 && /[0-9a-fA-F_'.]/.test(s[k]!)) {
+      k--;
+    }
+    if (
+      k >= 1 &&
+      (s[k] === "x" || s[k] === "X" || s[k] === "b" || s[k] === "B") &&
+      s[k - 1] === "0" &&
+      (k - 1 === 0 || !/[A-Za-z0-9_]/.test(s[k - 2]!))
+    ) {
+      return true;
+    }
+    const firstChar = s[k + 1] ?? "";
+    return /[0-9]/.test(firstChar) && (k < 0 || !/[A-Za-z0-9_]/.test(s[k]!));
+  }
+
+  private scanCppRawStringEnd(s: string, rIdx: number): number {
+    if (s[rIdx] !== "R" || s[rIdx + 1] !== '"') return -1;
+    const validPrefix =
+      rIdx === 0 ||
+      !/[A-Za-z0-9_]/.test(s[rIdx - 1]!) ||
+      ((s[rIdx - 1] === "L" || s[rIdx - 1] === "u" || s[rIdx - 1] === "U") &&
+        (rIdx - 1 === 0 || !/[A-Za-z0-9_]/.test(s[rIdx - 2]!))) ||
+      (rIdx >= 2 &&
+        s[rIdx - 2] === "u" &&
+        s[rIdx - 1] === "8" &&
+        (rIdx - 2 === 0 || !/[A-Za-z0-9_]/.test(s[rIdx - 3]!)));
+    if (!validPrefix) return -1;
+    const openParen = s.indexOf("(", rIdx + 2);
+    if (openParen < 0 || openParen - (rIdx + 2) > 16) return -1;
+    const delim = s.slice(rIdx + 2, openParen);
+    if (/[\s)\\]/.test(delim)) return -1;
+    const closeSeq = `)${delim}"`;
+    const closeIdx = s.indexOf(closeSeq, openParen + 1);
+    return closeIdx < 0 ? s.length : closeIdx + closeSeq.length;
+  }
+
+  private scanCppQuotedEnd(s: string, startIdx: number): number {
+    const c = s[startIdx];
+    if (c === "R" && s[startIdx + 1] === '"') {
+      return this.scanCppRawStringEnd(s, startIdx);
+    }
+    if (c === "'") {
+      if (this.isCppDigitSeparator(s, startIdx)) return -1;
+      let j = startIdx + 1;
+      while (j < s.length) {
+        if (s[j] === "\\" && j + 1 < s.length) {
+          j += 2;
+          continue;
         }
-        if (bs % 2 === 0) {
-          if (!inStr) {
-            inStr = true;
-            qChar = c;
-          } else if (qChar === c) {
-            inStr = false;
+        if (s[j] === "'") return j + 1;
+        j++;
+      }
+      return s.length;
+    }
+    if (c === '"') {
+      let j = startIdx + 1;
+      while (j < s.length) {
+        if (s[j] === "\\" && j + 1 < s.length) {
+          j += 2;
+          continue;
+        }
+        if (s[j] === '"') return j + 1;
+        j++;
+      }
+      return s.length;
+    }
+    return -1;
+  }
+
+  private stripTemplateArgsOutsideStrings(s: string): string {
+    let out = "";
+    let i = 0;
+    while (i < s.length) {
+      const quotedEnd = this.scanCppQuotedEnd(s, i);
+      if (quotedEnd > i) {
+        out += s.slice(i, quotedEnd);
+        i = quotedEnd;
+        continue;
+      }
+      if (s[i] === "<" && i > 0 && /[A-Za-z0-9_]/.test(s[i - 1]!)) {
+        let depth = 1;
+        let j = i + 1;
+        let validTemplate = true;
+        while (j < s.length && depth > 0) {
+          const qEnd = this.scanCppQuotedEnd(s, j);
+          if (qEnd > j) {
+            validTemplate = false;
+            break;
+          }
+          const ch = s[j]!;
+          if (ch === "<") depth++;
+          else if (ch === ">") depth--;
+          else if (!/[A-Za-z0-9_:*&\s,[\]]/.test(ch)) {
+            validTemplate = false;
+            break;
+          }
+          j++;
+        }
+        if (validTemplate && depth === 0) {
+          const after = s.slice(j).trimStart();
+          if (after.startsWith("(") || after.startsWith("::") || after.startsWith(".")) {
+            i = j;
+            continue;
           }
         }
       }
-      if (!inStr && s.slice(i, i + 2) === "::") {
-        res += ".";
-        i++;
+      out += s[i];
+      i++;
+    }
+    return out;
+  }
+
+  private stripNumericSuffixesOutsideStrings(s: string): string {
+    let out = "";
+    let i = 0;
+    while (i < s.length) {
+      const quotedEnd = this.scanCppQuotedEnd(s, i);
+      if (quotedEnd > i) {
+        out += s.slice(i, quotedEnd);
+        i = quotedEnd;
         continue;
       }
-      res += c;
+      if (/[0-9]/.test(s[i]!) && (i === 0 || !/[A-Za-z0-9_]/.test(s[i - 1]!))) {
+        const rest = s.slice(i);
+        const floatMatch = rest.match(
+          /^([0-9][0-9']*\.[0-9][0-9']*(?:[eE][+-]?[0-9']+)?)[fFdDlL]\b/,
+        );
+        if (floatMatch) {
+          out += floatMatch[1]!.replace(/'/g, "");
+          i += floatMatch[0].length;
+          continue;
+        }
+        const intMatch = rest.match(/^(0[xXbB][0-9a-fA-F']+|[0-9][0-9']*)(?:ull|ll|ul|u|l)\b/i);
+        if (intMatch) {
+          out += intMatch[1]!.replace(/'/g, "");
+          i += intMatch[0].length;
+          continue;
+        }
+      }
+      out += s[i];
+      i++;
     }
-    return res;
+    return out;
   }
 
   private extractBalancedParen(
@@ -73,29 +193,14 @@ export class CppDecompiler {
     openIdx: number,
   ): { content: string; endIndex: number } | null {
     let depth = 0;
-    let inString = false;
-    let quoteChar = "";
-
-    for (let i = openIdx; i < str.length; i++) {
-      const c = str[i];
-      if (c === '"' || c === "'") {
-        let bsCount = 0;
-        let k = i - 1;
-        while (k >= openIdx && str[k] === "\\") {
-          bsCount++;
-          k--;
-        }
-        if (bsCount % 2 === 0) {
-          if (!inString) {
-            inString = true;
-            quoteChar = c;
-          } else if (quoteChar === c) {
-            inString = false;
-          }
-        }
+    let i = openIdx;
+    while (i < str.length) {
+      const quotedEnd = this.scanCppQuotedEnd(str, i);
+      if (quotedEnd > i) {
+        i = quotedEnd;
+        continue;
       }
-      if (inString) continue;
-
+      const c = str[i];
       if (c === "(") depth++;
       else if (c === ")") {
         depth--;
@@ -103,79 +208,75 @@ export class CppDecompiler {
           return { content: str.slice(openIdx + 1, i), endIndex: i };
         }
       }
+      i++;
     }
     return null;
   }
 
   private findMatchingOpenParen(s: string): number {
     if (!s.endsWith(")")) return -1;
-    let depth = 0;
-    let inStr = false;
-    let qChar = "";
-    for (let i = s.length - 1; i >= 0; i--) {
-      const c = s[i];
-      if (c === '"' || c === "'") {
-        let bs = 0;
-        let k = i - 1;
-        while (k >= 0 && s[k] === "\\") {
-          bs++;
-          k--;
-        }
-        if (bs % 2 === 0) {
-          if (!inStr) {
-            inStr = true;
-            qChar = c;
-          } else if (qChar === c) {
-            inStr = false;
-          }
+    const parenStack: number[] = [];
+    let i = 0;
+    while (i < s.length) {
+      const quotedEnd = this.scanCppQuotedEnd(s, i);
+      if (quotedEnd > i) {
+        i = quotedEnd;
+        continue;
+      }
+      if (s[i] === "(") {
+        parenStack.push(i);
+      } else if (s[i] === ")") {
+        const openIdx = parenStack.pop();
+        if (i === s.length - 1) {
+          return openIdx ?? -1;
         }
       }
-      if (inStr) continue;
-      if (c === ")") depth++;
-      else if (c === "(") {
-        depth--;
-        if (depth === 0) return i;
-      }
+      i++;
     }
     return -1;
   }
 
-  private findLastMemberDot(s: string): { dotIdx: number } | null {
+  private findLastMemberAccess(
+    s: string,
+  ): { idx: number; sep: "." | "::" | "->"; sepLen: number } | null {
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
-    let inStr = false;
-    let qChar = "";
-    for (let j = s.length - 1; j >= 0; j--) {
-      const c = s[j];
-      if (c === '"' || c === "'") {
-        let bs = 0;
-        let k = j - 1;
-        while (k >= 0 && s[k] === "\\") {
-          bs++;
-          k--;
-        }
-        if (bs % 2 === 0) {
-          if (!inStr) {
-            inStr = true;
-            qChar = c;
-          } else if (qChar === c) {
-            inStr = false;
+    let lastMatch: { idx: number; sep: "." | "::" | "->"; sepLen: number } | null = null;
+    let i = 0;
+    while (i < s.length) {
+      const quotedEnd = this.scanCppQuotedEnd(s, i);
+      if (quotedEnd > i) {
+        i = quotedEnd;
+        continue;
+      }
+      const c = s[i];
+      if (c === "(") parenDepth++;
+      else if (c === ")") parenDepth--;
+      else if (c === "[") bracketDepth++;
+      else if (c === "]") bracketDepth--;
+      else if (c === "{") braceDepth++;
+      else if (c === "}") braceDepth--;
+      else if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+        if (c === ":" && s[i + 1] === ":") {
+          if (i > 0) {
+            lastMatch = { idx: i, sep: "::", sepLen: 2 };
           }
+          i += 2;
+          continue;
+        }
+        if (c === "-" && s[i + 1] === ">") {
+          lastMatch = { idx: i, sep: "->", sepLen: 2 };
+          i += 2;
+          continue;
+        }
+        if (c === ".") {
+          lastMatch = { idx: i, sep: ".", sepLen: 1 };
         }
       }
-      if (inStr) continue;
-      if (c === ")") parenDepth++;
-      else if (c === "(") parenDepth--;
-      else if (c === "]") bracketDepth++;
-      else if (c === "[") bracketDepth--;
-      else if (c === "}") braceDepth++;
-      else if (c === "{") braceDepth--;
-      if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0 && c === ".") {
-        return { dotIdx: j };
-      }
+      i++;
     }
-    return null;
+    return lastMatch;
   }
 
   private findHeaderOpenBraceIndex(line: string): number {
@@ -240,14 +341,9 @@ export class CppDecompiler {
         if (line.slice(j, j + 2) === "//") break;
 
         const char = line[j];
-        if (char === '"' || char === "'") {
-          const q = char;
-          j++;
-          while (j < line.length && line[j] !== q) {
-            if (line[j] === "\\" && j + 1 < line.length) j++;
-            j++;
-          }
-          j++;
+        const quotedEnd = this.scanCppQuotedEnd(line, j);
+        if (quotedEnd > j) {
+          j = quotedEnd;
           continue;
         }
 
@@ -293,30 +389,45 @@ export class CppDecompiler {
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
-    let inString = false;
-    for (let i = 0; i < argsStr.length; i++) {
-      const c = argsStr[i];
-      if (c === '"') {
-        inString = !inString;
-        cur += c;
+    let angleDepth = 0;
+    let i = 0;
+    while (i < argsStr.length) {
+      const quotedEnd = this.scanCppQuotedEnd(argsStr, i);
+      if (quotedEnd > i) {
+        cur += argsStr.slice(i, quotedEnd);
+        i = quotedEnd;
         continue;
       }
-      if (inString) {
-        cur += c;
-        continue;
-      }
+      const c = argsStr[i]!;
       if (c === "(") parenDepth++;
       else if (c === ")") parenDepth--;
       else if (c === "[") bracketDepth++;
       else if (c === "]") bracketDepth--;
       else if (c === "{") braceDepth++;
       else if (c === "}") braceDepth--;
-      if (c === "," && parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
+      else if (
+        c === "<" &&
+        argsStr[i + 1] !== "<" &&
+        argsStr[i + 1] !== "=" &&
+        /[A-Za-z0-9_:]/.test(argsStr[i - 1] ?? "")
+      ) {
+        angleDepth++;
+      } else if (c === ">" && angleDepth > 0) {
+        angleDepth--;
+      }
+      if (
+        c === "," &&
+        parenDepth === 0 &&
+        bracketDepth === 0 &&
+        braceDepth === 0 &&
+        angleDepth === 0
+      ) {
         if (cur.trim()) args.push(cur.trim());
         cur = "";
       } else {
         cur += c;
       }
+      i++;
     }
     if (cur.trim()) args.push(cur.trim());
     return args;
@@ -338,10 +449,10 @@ export class CppDecompiler {
 
     const genericMatch = clean.match(/^([a-zA-Z0-9_:]+)<([\s\S]+)>$/);
     if (genericMatch) {
-      const baseName = genericMatch[1].replace(/::/g, ".");
+      const baseName = genericMatch[1];
       const argsStr = genericMatch[2].trim();
       const typeArgs = argsStr ? this.splitArgs(argsStr).map((a) => this.parseCppType(a)) : [];
-      if (baseName === "std.vector" || baseName === "vector") {
+      if (baseName === "std::vector" || baseName === "std.vector" || baseName === "vector") {
         return {
           kind: "ArrayType",
           elementType: typeArgs[0] ?? {
@@ -353,10 +464,13 @@ export class CppDecompiler {
         };
       }
       if (
+        baseName === "std::optional" ||
         baseName === "std.optional" ||
         baseName === "optional" ||
+        baseName === "std::unique_ptr" ||
         baseName === "std.unique_ptr" ||
         baseName === "unique_ptr" ||
+        baseName === "std::shared_ptr" ||
         baseName === "std.shared_ptr" ||
         baseName === "shared_ptr"
       ) {
@@ -408,7 +522,7 @@ export class CppDecompiler {
 
     return {
       kind: "NamedType",
-      name: clean.replace(/::/g, "."),
+      name: clean,
       typeArgs: [],
       span: emptySpan(this.filePath),
     };
@@ -418,16 +532,16 @@ export class CppDecompiler {
     let parenDepth = 0;
     let braceDepth = 0;
     let bracketDepth = 0;
-    let inString = false;
     let questionCount = 0;
     let colonCount = 0;
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if (c === '"' && (i === 0 || s[i - 1] !== "\\")) {
-        inString = !inString;
+    let i = 0;
+    while (i < s.length) {
+      const quotedEnd = this.scanCppQuotedEnd(s, i);
+      if (quotedEnd > i) {
+        i = quotedEnd;
         continue;
       }
-      if (inString) continue;
+      const c = s[i];
       if (c === "(") parenDepth++;
       else if (c === ")") parenDepth--;
       else if (c === "{") braceDepth++;
@@ -441,6 +555,7 @@ export class CppDecompiler {
           colonCount++;
         }
       }
+      i++;
     }
     if (parenDepth > 0 || bracketDepth > 0 || braceDepth > 0) return false;
     if (questionCount > colonCount) return false;
@@ -452,33 +567,36 @@ export class CppDecompiler {
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
-    let inString = false;
     let questionIdx = -1;
-
-    for (let i = 0; i < s.length; i++) {
-      const c = s[i];
-      if ((c === '"' || c === "'") && (i === 0 || s[i - 1] !== "\\")) {
-        inString = !inString;
+    let i = 0;
+    while (i < s.length) {
+      const quotedEnd = this.scanCppQuotedEnd(s, i);
+      if (quotedEnd > i) {
+        i = quotedEnd;
         continue;
       }
-      if (inString) continue;
-
+      const c = s[i];
       if (c === "(") parenDepth++;
       else if (c === ")") parenDepth--;
       else if (c === "[") bracketDepth++;
       else if (c === "]") bracketDepth--;
       else if (c === "{") braceDepth++;
       else if (c === "}") braceDepth--;
-
       if (parenDepth === 0 && bracketDepth === 0 && braceDepth === 0) {
         if (c === "?" && s[i + 1] !== "?" && s[i + 1] !== "." && (i === 0 || s[i - 1] !== "?")) {
           if (questionIdx === -1) {
             questionIdx = i;
           }
-        } else if (c === ":" && questionIdx !== -1) {
+        } else if (
+          c === ":" &&
+          questionIdx !== -1 &&
+          s[i + 1] !== ":" &&
+          (i === 0 || s[i - 1] !== ":")
+        ) {
           return { questionIdx, colonIdx: i };
         }
       }
+      i++;
     }
     return null;
   }
@@ -486,11 +604,46 @@ export class CppDecompiler {
   public parseCppExpr(exprStr: string): Expr {
     let s = exprStr.trim();
     if (!s) {
+      throw new Error(`Empty C++ expression in ${this.filePath}`);
+    }
+
+    // Raw string literal: R"delim(...)delim" (with optional u8/u/U/L prefix)
+    const rawStrPrefixMatch = s.match(/^(?:u8|u|U|L)?R"/);
+    if (rawStrPrefixMatch) {
+      const rPos = rawStrPrefixMatch[0].length - 2;
+      if (this.scanCppRawStringEnd(s, rPos) === s.length) {
+        const openParen = s.indexOf("(", rPos + 2);
+        const delim = s.slice(rPos + 2, openParen);
+        const rawInner = s.slice(openParen + 1, s.length - (delim.length + 2));
+        return {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: rawInner,
+          rawValue: JSON.stringify(rawInner),
+          span: emptySpan(this.filePath),
+        };
+      }
+    }
+
+    // Standard string literal (return early before any rewrites touch string contents)
+    if (s.startsWith('"') && this.scanCppQuotedEnd(s, 0) === s.length) {
       return {
         kind: "LiteralExpr",
-        literalKind: "nil",
-        value: null,
-        rawValue: "nil",
+        literalKind: "string",
+        value: s.slice(1, -1),
+        rawValue: s,
+        span: emptySpan(this.filePath),
+      };
+    }
+
+    // Character literal: 'a', '\n', u8'a', L'a'
+    const charLitMatch = s.match(/^(?:u8|u|U|L)?'((?:\\.|[^'\\])+)'$/);
+    if (charLitMatch) {
+      return {
+        kind: "LiteralExpr",
+        literalKind: "string",
+        value: charLitMatch[1]!,
+        rawValue: JSON.stringify(charLitMatch[1]!),
         span: emptySpan(this.filePath),
       };
     }
@@ -510,9 +663,8 @@ export class CppDecompiler {
       if (!parenRes) break;
       s = s.slice(0, startIdx) + parenRes.content + s.slice(parenRes.endIndex + 1);
     }
-    // Strip template parameters on function calls or types: make_unique<T>(...) or limits<T>::
-    s = s.replace(/<[a-zA-Z0-9_:*&\s,]+>\s*(?=\(|::|\.)/g, "");
-    s = s.replace(/<[a-zA-Z0-9_:*&\s,]+>\s*\(/g, "(");
+    // Strip template parameters safely outside strings: make_unique<T>(...) or limits<T>::
+    s = this.stripTemplateArgsOutsideStrings(s);
     // Lambda expression: [&]() { ... } or [](...) { ... }
     const lambdaMatch = s.match(
       /^\[[^\]]*\]\s*(?:\(([^)]*)\))?\s*(?:->\s*[a-zA-Z0-9_:<>*&]+\s*)?\{([\s\S]*)\}$/,
@@ -533,31 +685,26 @@ export class CppDecompiler {
         span: emptySpan(this.filePath),
       };
     }
-    // Replace TypeName{args} with TypeName(args)
-    while (/([a-zA-Z0-9_.]+)\s*\{([^{}]*)\}/.test(s)) {
-      s = s.replace(/([a-zA-Z0-9_.]+)\s*\{([^{}]*)\}/g, "$1($2)");
+    // Replace TypeName{args} with TypeName(args) (only when whole expr is not a quoted string)
+    if (!s.startsWith('"') && !s.startsWith('R"')) {
+      while (/([a-zA-Z0-9_.:]+)\s*\{([^{}]*)\}/.test(s)) {
+        s = s.replace(/([a-zA-Z0-9_.:]+)\s*\{([^{}]*)\}/g, "$1($2)");
+      }
     }
-    // Strip number suffixes
-    s = s.replace(/\b(\d+(?:\.\d+)?)[fFdD]\b/g, "$1");
-    s = s.replace(/\b(\d+)(?:ull|ll|ul|u|l)\b/gi, "$1");
-    // Replace scope resolution :: outside of strings
-    s = this.replaceScopeResolution(s);
-    // Replace arrow ->
-    s = s.replace(/->/g, ".");
-    // Strip dereference * on identifiers
-    s = s.replace(/(?<=[(,;\s])\*([a-zA-Z0-9_]+)/g, "$1");
-    // Strip leading * dereference and & address-of
+    // Strip number suffixes & C++14 digit separators outside strings
+    s = this.stripNumericSuffixesOutsideStrings(s);
+    // Strip dereference * on identifiers outside strings
     if (s.startsWith("*") && s.length > 1 && !s.slice(1).startsWith("=")) {
       s = s.slice(1).trim();
     }
     if (s.startsWith("&") && s.length > 1 && !s.slice(1).startsWith("=")) {
       s = s.slice(1).trim();
     }
-    s = s.replace(/^this\./, "");
+    s = s.replace(/^this(?:->|\.)/, "");
 
     // Strip std::string(...) / std.string(...) / string(...) string constructors
-    while (/(?:std\.string|std::string|\bstring)\s*\(/.test(s)) {
-      const match = s.match(/(?:std\.string|std::string|\bstring)\s*\(/);
+    while (/(?:std::string|std\.string|\bstring)\s*\(/.test(s)) {
+      const match = s.match(/(?:std::string|std\.string|\bstring)\s*\(/);
       if (!match || match.index === undefined) break;
       const startIdx = match.index;
       const openParenIdx = startIdx + match[0].length - 1;
@@ -572,41 +719,40 @@ export class CppDecompiler {
     }
 
     // Built-in C++ stream idiom: std::cout << a << b << std::endl -> print(a, b)
-    if (/^(?:std\.)?cout\s*<</.test(s)) {
+    if (/^(?:std(?:::|\.))?cout\s*<</.test(s)) {
       const streamParts: string[] = [];
       let curPart = "";
       let pDepth = 0;
       let bDepth = 0;
-      let inStr = false;
-      let qChar = "";
-      for (let idx = 0; idx < s.length; idx++) {
-        const ch = s[idx];
-        if ((ch === '"' || ch === "'") && (idx === 0 || s[idx - 1] !== "\\")) {
-          if (!inStr) {
-            inStr = true;
-            qChar = ch;
-          } else if (ch === qChar) {
-            inStr = false;
-          }
+      let idx = 0;
+      while (idx < s.length) {
+        const quotedEnd = this.scanCppQuotedEnd(s, idx);
+        if (quotedEnd > idx) {
+          curPart += s.slice(idx, quotedEnd);
+          idx = quotedEnd;
+          continue;
         }
-        if (!inStr) {
-          if (ch === "(") pDepth++;
-          else if (ch === ")") pDepth--;
-          else if (ch === "[") bDepth++;
-          else if (ch === "]") bDepth--;
-          else if (pDepth === 0 && bDepth === 0 && ch === "<" && s[idx + 1] === "<") {
-            streamParts.push(curPart.trim());
-            curPart = "";
-            idx++;
-            continue;
-          }
+        const ch = s[idx];
+        if (ch === "(") pDepth++;
+        else if (ch === ")") pDepth--;
+        else if (ch === "[") bDepth++;
+        else if (ch === "]") bDepth--;
+        else if (pDepth === 0 && bDepth === 0 && ch === "<" && s[idx + 1] === "<") {
+          streamParts.push(curPart.trim());
+          curPart = "";
+          idx += 2;
+          continue;
         }
         curPart += ch;
+        idx++;
       }
       if (curPart.trim()) streamParts.push(curPart.trim());
       const printArgs = streamParts
         .slice(1)
-        .filter((part) => part !== "std.endl" && part !== "endl" && part !== '"\\n"');
+        .filter(
+          (part) =>
+            part !== "std::endl" && part !== "std.endl" && part !== "endl" && part !== '"\\n"',
+        );
       return {
         kind: "CallExpr",
         callee: { kind: "IdentifierExpr", name: "print", span: emptySpan(this.filePath) },
@@ -615,20 +761,14 @@ export class CppDecompiler {
       };
     }
 
-    // String literal
-    if (/^"(?:\\.|[^"\\])*"$/.test(s)) {
-      return {
-        kind: "LiteralExpr",
-        literalKind: "string",
-        value: s.slice(1, -1),
-        rawValue: s,
-        span: emptySpan(this.filePath),
-      };
-    }
-
-    // Number literal
-    const cleanNum = s.replace(/(?:ULL|LL|UL|ull|ll|ul|f|F|d|D|m|M|L|l|U|u)$/, "");
-    if (/^-?[0-9]+(\.[0-9]+)?$/.test(cleanNum) || /^0x[0-9a-fA-F]+$/i.test(cleanNum)) {
+    // Number literal (including C++14 digit separators like 1'000'000, 0xFF'FF, 0b1010'0101)
+    const noSepNum = s.replace(/'/g, "");
+    const cleanNum = noSepNum.replace(/(?:ULL|LL|UL|ull|ll|ul|f|F|d|D|m|M|L|l|U|u)$/, "");
+    if (
+      /^-?[0-9]+(\.[0-9]+)?(?:[eE][+-]?[0-9]+)?$/.test(cleanNum) ||
+      /^0[xX][0-9a-fA-F]+$/.test(cleanNum) ||
+      /^0[bB][01]+$/.test(cleanNum)
+    ) {
       return {
         kind: "LiteralExpr",
         literalKind: "number",
@@ -731,11 +871,11 @@ export class CppDecompiler {
       }
     }
 
-    // Member access
-    const dotRes = this.findLastMemberDot(s);
-    if (dotRes && dotRes.dotIdx > 0 && dotRes.dotIdx < s.length - 1) {
-      const objStr = s.slice(0, dotRes.dotIdx).trim();
-      const propStr = s.slice(dotRes.dotIdx + 1).trim();
+    // Member / scope access: obj.prop, obj->prop, ns::member
+    const memberRes = this.findLastMemberAccess(s);
+    if (memberRes && memberRes.idx > 0 && memberRes.idx < s.length - memberRes.sepLen) {
+      const objStr = s.slice(0, memberRes.idx).trim();
+      const propStr = s.slice(memberRes.idx + memberRes.sepLen).trim();
       if (/^[a-zA-Z0-9_]+$/.test(propStr) && objStr.length > 0) {
         return {
           kind: "MemberAccessExpr",
@@ -743,13 +883,14 @@ export class CppDecompiler {
           property: propStr,
           isSafeNav: false,
           isOptional: false,
+          ...(memberRes.sep === "::" ? { isScopeAccess: true } : {}),
           span: emptySpan(this.filePath),
         };
       }
     }
 
     // Array index
-    const indexMatch = s.match(/^([a-zA-Z0-9_.]+)\[(.+)\]$/);
+    const indexMatch = s.match(/^([a-zA-Z0-9_.:]+)\[(.+)\]$/);
     if (indexMatch) {
       return {
         kind: "IndexExpr",
@@ -770,43 +911,51 @@ export class CppDecompiler {
     let parenDepth = 0;
     let bracketDepth = 0;
     let braceDepth = 0;
-    let inString = false;
-    for (let k = expr.length - 1; k > expr.length - op.length; k--) {
-      const c = expr[k];
-      if (c === ")") parenDepth++;
-      else if (c === "(") parenDepth--;
-      else if (c === "]") bracketDepth++;
-      else if (c === "[") bracketDepth--;
-      else if (c === "}") braceDepth++;
-      else if (c === "{") braceDepth--;
-    }
-    for (let i = expr.length - op.length; i >= 0; i--) {
-      const char = expr[i];
-      if (char === '"') inString = !inString;
-      if (inString) continue;
-      if (char === ")") parenDepth++;
-      else if (char === "(") parenDepth--;
-      else if (char === "]") bracketDepth++;
-      else if (char === "[") bracketDepth--;
-      else if (char === "}") braceDepth++;
-      else if (char === "{") braceDepth--;
-
-      if (
+    let lastIdx = -1;
+    let i = 0;
+    while (i < expr.length) {
+      const quotedEnd = this.scanCppQuotedEnd(expr, i);
+      if (quotedEnd > i) {
+        i = quotedEnd;
+        continue;
+      }
+      const ch = expr[i];
+      if (ch === "(") parenDepth++;
+      else if (ch === ")") parenDepth--;
+      else if (ch === "[") bracketDepth++;
+      else if (ch === "]") bracketDepth--;
+      else if (ch === "{") braceDepth++;
+      else if (ch === "}") braceDepth--;
+      else if (
         parenDepth === 0 &&
         bracketDepth === 0 &&
         braceDepth === 0 &&
         expr.slice(i, i + op.length) === op
       ) {
-        if (op === "*" || op === "&") {
-          if (i === 0) continue;
+        let valid = true;
+        if ((op === "*" || op === "&") && i === 0) valid = false;
+        if (op === "-" && expr[i + 1] === ">") valid = false;
+        if (op === ">" && expr[i - 1] === "-") valid = false;
+        if (
+          (op === "<" || op === ">") &&
+          (expr[i - 1] === op || expr[i + 1] === op || expr[i + 1] === "=")
+        ) {
+          valid = false;
         }
-        if ((op === "<" || op === ">") && (expr[i - 1] === op || expr[i + 1] === op)) {
-          continue;
+        if (op === "-") {
+          let p = i - 1;
+          while (p >= 0 && /\s/.test(expr[p]!)) p--;
+          if (p < 0 || /[+\-*/%(,=[?:&|!<>]/.test(expr[p]!)) {
+            valid = false;
+          }
         }
-        return i;
+        if (valid) {
+          lastIdx = i;
+        }
       }
+      i++;
     }
-    return -1;
+    return lastIdx;
   }
 
   private parseCppParams(paramsRaw: string): ParamDecl[] {
@@ -1516,7 +1665,7 @@ export class CppDecompiler {
             kind: "CallExpr",
             callee: {
               kind: "IdentifierExpr",
-              name: typeStr.replace(/::/g, ".").replace(/<.*>/, ""),
+              name: this.stripTemplateArgsOutsideStrings(typeStr),
               span: emptySpan(this.filePath),
             },
             args: this.splitArgs(argsStr).map((a) => this.parseCppExpr(a)),
@@ -1918,7 +2067,7 @@ export class CppDecompiler {
       );
       if (classMatch && !trimmed.endsWith(");") && !trimmed.includes("(")) {
         const className = classMatch[1];
-        const baseClass = classMatch[4] ? classMatch[4].replace(/::/g, ".") : undefined;
+        const baseClass = classMatch[4] ? classMatch[4] : undefined;
         const { bodyLines, nextIdx } = this.collectBracedBlock(lines, i);
         i = nextIdx;
         const parsedClass = this.parseClassMembers(className, baseClass, bodyLines);
@@ -1928,8 +2077,6 @@ export class CppDecompiler {
         items.push(parsedClass);
         continue;
       }
-
-      // constexpr / const
       const constMatch = trimmed.match(
         /^(constexpr|const)\s+([a-zA-Z0-9_:<>*&]+)\s+([a-zA-Z0-9_]+)\s*=\s*(.+?);/,
       );

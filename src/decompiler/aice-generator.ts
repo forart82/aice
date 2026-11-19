@@ -1116,7 +1116,7 @@ export class AiceGenerator {
         return `${calleeStr}${opt}(${args})`;
       }
       case "MemberAccessExpr": {
-        const dot = expr.isSafeNav ? "?." : ".";
+        const dot = expr.isSafeNav ? "?." : expr.isScopeAccess ? "::" : ".";
         const needsParen =
           expr.object.kind === "BinaryExpr" ||
           expr.object.kind === "ConditionalExpr" ||

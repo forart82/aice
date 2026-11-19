@@ -212,8 +212,7 @@ export interface ContextResult {
 }
 
 const ZERO_ENVELOPE_EXT_RE =
-  /\.(?:jsonc?|ya?ml|cff|md|markdown|css|html?|twig|sh|bash|zsh|ps1|cmd|bat)$/i;
-
+  /\.(?:jsonc?|webmanifest|ya?ml|cff|md|markdown|css|html?|xml|svg|twig|sh|bash|zsh|ps1|cmd|bat|gradle|pro|properties|example)$/i;
 function countContextLines(source: string): number {
   if (source.length === 0) return 0;
   const trimmedEnd = source.endsWith("\r\n")
@@ -1559,7 +1558,12 @@ export function extractImportsFromFile(filePath: string, preReadContent?: string
       return extractAiplImports(content);
     }
     const detected = detectTargetFromPathOrContent(filePath, content);
-    if (detected === "passthrough") {
+    if (
+      detected === "passthrough" ||
+      detected === "xml" ||
+      detected === "java" ||
+      detected === "text"
+    ) {
       return [];
     }
     if (filePath.endsWith(".aice")) {
@@ -2756,7 +2760,12 @@ export async function generateWorkspaceContext(
         !(effectiveWsRawNative && !idiomsActive && !requestedSelectors.includes("*"))
       ) {
         const detected = detectTargetFromPathOrContent(f, rawFileContent);
-        if (detected !== "passthrough") {
+        if (
+          detected !== "passthrough" &&
+          detected !== "xml" &&
+          detected !== "java" &&
+          detected !== "text"
+        ) {
           try {
             const targetLang = detected;
             const decomp = withSuppressedTelemetry(() =>
@@ -5040,7 +5049,12 @@ export function extractSymbolFromAiceSource(
 
   if (!filePath.endsWith(".aice")) {
     const detected = detectTargetFromPathOrContent(filePath, rawFileSource);
-    if (detected === "passthrough") {
+    if (
+      detected === "passthrough" ||
+      detected === "java" ||
+      detected === "xml" ||
+      detected === "text"
+    ) {
       if (trimmedSel.toLowerCase() === "imports" || trimmedSel.toLowerCase() === "import") {
         const passthroughSyms = extractPassthroughStructuralSymbols(rawFileSource, filePath, 1);
         const impSym = passthroughSyms.find((s) => s.kind === "import");
@@ -5156,7 +5170,12 @@ export function extractSymbolFromAiceSource(
   let mod: Module | undefined = preParsedMod;
   if (!mod && !filePath.endsWith(".aice") && aiceSource === rawFileSource) {
     const detected = detectTargetFromPathOrContent(filePath, rawFileSource);
-    if (detected !== "passthrough") {
+    if (
+      detected !== "passthrough" &&
+      detected !== "xml" &&
+      detected !== "java" &&
+      detected !== "text"
+    ) {
       try {
         const decomp = withSuppressedTelemetry(() =>
           decompile(rawFileSource, detected, { filePath }),
@@ -5821,7 +5840,7 @@ export async function generateContext(
 
   const isLargeFileSymbolQuery = hasNonWildcardSymbol && rawFileContent.length > 50_000;
   const targetOrPassthrough = detectTargetFromPathOrContent(fullTargetPath, rawFileContent);
-  const isPassthrough = targetOrPassthrough === "passthrough";
+  const isPassthrough = targetOrPassthrough === "passthrough" || targetOrPassthrough === "text";
   const isZeroEnvelopeExt = isPassthrough || ZERO_ENVELOPE_EXT_RE.test(fullTargetPath);
   const isBareSmallFile =
     Boolean(options.zeroEnvelopeBareSmallFiles) &&

@@ -206,8 +206,15 @@ export class CSharpDecompiler {
         const { bodyLines, nextIdx } = this.collectBracedBlock(rawLines, i);
         i = nextIdx;
 
-        const parsedClass = this.parseClassMembers(className, baseClass, implementsList, bodyLines);
-        items.push(parsedClass);
+        const nestedItems: ModuleItem[] = [];
+        const parsedClass = this.parseClassMembers(
+          className,
+          baseClass,
+          implementsList,
+          bodyLines,
+          nestedItems,
+        );
+        items.push(parsedClass, ...nestedItems);
         continue;
       }
 
@@ -559,6 +566,7 @@ export class CSharpDecompiler {
     baseClass: string | undefined,
     implementsList: string[] | undefined,
     lines: string[],
+    extraItems: ModuleItem[] = [],
   ): ClassDecl {
     const properties: PropertyDecl[] = [];
     const methods: MethodDecl[] = [];
@@ -607,16 +615,60 @@ export class CSharpDecompiler {
         continue;
       }
 
-      // Check for nested classes/structs and skip them
-      const nestedClassMatch = trimmed.match(
-        /^(?:public|internal|private|protected)?\s*(?:sealed|static|partial|abstract|\s)*\s*(?:class|struct)\s+([a-zA-Z0-9_]+)/,
+      // Preserve nested class / struct / interface / enum / record declarations instead of skipping
+      const nestedTypeMatch = trimmed.match(
+        /^(?:public|internal|private|protected)?\s*(?:new|sealed|static|partial|abstract|readonly|ref|\s)*\s*(class|struct|interface|enum|record(?:\s+class|\s+struct)?)\s+([a-zA-Z0-9_]+)(?:\s*:\s*([^{]+))?\s*\{?/,
       );
-      if (nestedClassMatch) {
-        const { nextIdx } = this.collectBracedBlock(lines, i);
+      if (nestedTypeMatch) {
+        const nestedKind = nestedTypeMatch[1]!;
+        const nestedName = nestedTypeMatch[2]!;
+        const qualifiedName = `${className}.${nestedName}`;
+        const nestedHeritage = nestedTypeMatch[3]?.trim();
+        const { bodyLines: nestedBody, nextIdx } = this.collectBracedBlock(lines, i);
         i = nextIdx;
+        if (nestedKind === "enum") {
+          const variants = nestedBody
+            .join("\n")
+            .split(",")
+            .map((v) => v.replace(/\/\/.*$/gm, "").trim())
+            .filter(Boolean)
+            .map((v) => ({
+              name: v.split("=")[0]!.trim(),
+              span: emptySpan(this.filePath),
+            }))
+            .filter((v) => Boolean(v.name));
+          this.attachTrivia(`type:${qualifiedName}`, memberTrivia);
+          memberTrivia = [];
+          extraItems.push({
+            kind: "TypeDecl",
+            isEnum: true,
+            name: qualifiedName,
+            typeParams: [],
+            variants,
+            span: emptySpan(this.filePath),
+          });
+        } else {
+          const nestedBase = nestedHeritage ? nestedHeritage.split(",")[0]!.trim() : undefined;
+          const nestedImpls =
+            nestedHeritage && nestedHeritage.includes(",")
+              ? nestedHeritage
+                  .split(",")
+                  .slice(1)
+                  .map((s) => s.trim())
+              : undefined;
+          this.attachTrivia(`class:${qualifiedName}`, memberTrivia);
+          memberTrivia = [];
+          const nestedClass = this.parseClassMembers(
+            qualifiedName,
+            nestedBase,
+            nestedImpls,
+            nestedBody,
+            extraItems,
+          );
+          extraItems.push(nestedClass);
+        }
         continue;
       }
-
       // Join multi-line member signature if needed
       let fullLine = trimmed;
       let lineIdx = i;
@@ -2197,16 +2249,34 @@ export class CSharpDecompiler {
         span: emptySpan(this.filePath),
       };
     }
-
-    // Strip C# out / ref parameter modifiers: out int x -> x, out SfxClip[] set -> set, ref x -> x
-    s = s.replace(/^(?:out|ref)\s+(?:[a-zA-Z0-9_<>[\]?]+\s+)?/, "").trim();
-
-    // Strip C# named arguments: godMode: true -> true
-    const namedArgMatch = s.match(/^([a-zA-Z0-9_]+)\s*:\s*(.+)$/);
-    if (namedArgMatch && !this.findTernaryIndices(s)) {
-      s = namedArgMatch[2].trim();
+    // Preserve C# out / ref / in parameter modifiers instead of silently stripping them
+    const refModMatch = s.match(/^(out|ref|in)\s+(?:(?:var|[a-zA-Z0-9_<>[\]?]+)\s+)?(.+)$/);
+    if (refModMatch) {
+      const mod = refModMatch[1]!;
+      const innerExprStr = refModMatch[2]!.trim();
+      return {
+        kind: "CallExpr",
+        callee: { kind: "IdentifierExpr", name: mod, span: emptySpan(this.filePath) },
+        args: [this.parseCSharpExpr(innerExprStr)],
+        span: emptySpan(this.filePath),
+      };
     }
 
+    // Preserve C# named arguments (`godMode: true`) instead of silently dropping labels
+    const namedArgMatch = s.match(/^([a-zA-Z_][a-zA-Z0-9_]*)\s*:\s*(.+)$/);
+    if (namedArgMatch && !this.findTernaryIndices(s)) {
+      return {
+        kind: "AssignExpr",
+        target: {
+          kind: "IdentifierExpr",
+          name: namedArgMatch[1]!,
+          span: emptySpan(this.filePath),
+        },
+        op: "=",
+        value: this.parseCSharpExpr(namedArgMatch[2]!.trim()),
+        span: emptySpan(this.filePath),
+      };
+    }
     // Strip redundant outer parentheses if balanced across entire expr
     while (s.startsWith("(") && s.endsWith(")")) {
       const parenRes = this.extractBalancedParen(s, 0);
@@ -2554,12 +2624,78 @@ export class CSharpDecompiler {
       return objExpr;
     }
 
-    // Identifier fallback
-    return {
-      kind: "IdentifierExpr",
-      name: s,
-      span: emptySpan(this.filePath),
-    };
+    // await expression
+    if (/^await\s+/.test(s)) {
+      return {
+        kind: "AwaitExpr",
+        operand: this.parseCSharpExpr(s.slice(6).trim()),
+        span: emptySpan(this.filePath),
+      };
+    }
+
+    // Unary -, +, ~
+    if ((s.startsWith("-") || s.startsWith("+") || s.startsWith("~")) && s.length > 1) {
+      return {
+        kind: "UnaryExpr",
+        operator: s[0] as "-" | "+" | "~",
+        operand: this.parseCSharpExpr(s.slice(1).trim()),
+        span: emptySpan(this.filePath),
+      };
+    }
+
+    // Null-forgiving postfix `expr!`
+    if (s.endsWith("!") && s.length > 1 && !s.endsWith("!=")) {
+      return this.parseCSharpExpr(s.slice(0, -1).trim());
+    }
+
+    // Implicit/explicit array initializer `new[] { a, b }` or `new T[] { a, b }`
+    const arrInitMatch = s.match(/^new(?:\s+[a-zA-Z0-9_<>?[\].]+)?\[\s*\]\s*\{([\s\S]*)\}$/);
+    if (arrInitMatch) {
+      const inner = arrInitMatch[1]!.trim();
+      const elements = inner ? this.splitArgs(inner).map((e) => this.parseCSharpExpr(e)) : [];
+      return {
+        kind: "ArrayLiteralExpr",
+        elements,
+        span: emptySpan(this.filePath),
+      };
+    }
+
+    // Type test `expr is Type` / safe cast `expr as Type`
+    const isMatch = s.match(
+      /^(.+?)\s+is\s+([A-Za-z_][A-Za-z0-9_.<>?[\]]*)(?:\s+([A-Za-z_][A-Za-z0-9_]*))?$/,
+    );
+    if (isMatch) {
+      return {
+        kind: "BinaryExpr",
+        operator: "instanceof",
+        left: this.parseCSharpExpr(isMatch[1]!.trim()),
+        right: { kind: "IdentifierExpr", name: isMatch[2]!, span: emptySpan(this.filePath) },
+        span: emptySpan(this.filePath),
+      };
+    }
+    const asMatch = s.match(/^(.+?)\s+as\s+([A-Za-z_][A-Za-z0-9_.<>?[\]]*)$/);
+    if (asMatch) {
+      return {
+        kind: "CallExpr",
+        callee: { kind: "IdentifierExpr", name: "as", span: emptySpan(this.filePath) },
+        args: [
+          this.parseCSharpExpr(asMatch[1]!.trim()),
+          { kind: "IdentifierExpr", name: asMatch[2]!, span: emptySpan(this.filePath) },
+        ],
+        span: emptySpan(this.filePath),
+      };
+    }
+
+    // Valid C# identifier (including verbatim `@ident`)
+    if (/^@?[A-Za-z_][A-Za-z0-9_]*$/.test(s)) {
+      return {
+        kind: "IdentifierExpr",
+        name: s,
+        span: emptySpan(this.filePath),
+      };
+    }
+
+    throw new Error(`Unsupported or malformed C# expression '${s}' in ${this.filePath}`);
   }
 
   private findTernaryIndices(s: string): { questionIdx: number; colonIdx: number } | null {

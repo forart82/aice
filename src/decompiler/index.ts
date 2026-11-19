@@ -192,7 +192,10 @@ export function decompile(
     target === "powershell" ||
     target === "batch" ||
     target === "markdown" ||
-    target === "aipl"
+    target === "aipl" ||
+    target === "xml" ||
+    target === "java" ||
+    target === "text"
   ) {
     trivia = new CstTriviaTable();
     trivia.setOriginalSource(source);

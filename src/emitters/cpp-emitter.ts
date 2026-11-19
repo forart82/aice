@@ -552,13 +552,15 @@ export class CppEmitter {
             }
             return `std::${expr.callee.property}(${argCodes.join(", ")})`;
           }
+          if (expr.callee.isScopeAccess) {
+            return `${objCode}::${expr.callee.property}(${argCodes.join(", ")})`;
+          }
           const lowered = lowerMethodCall(objCode, expr.callee.property, argCodes, "cpp");
           if (lowered.isLowered) {
             return lowered.code;
           }
           return `${objCode}.${expr.callee.property}(${argCodes.join(", ")})`;
         }
-
         if (expr.callee.kind === "IdentifierExpr") {
           const typeName = expr.callee.name;
           if (typeName === "print") {
@@ -601,6 +603,9 @@ export class CppEmitter {
         const obj = this.emitExpr(expr.object);
         if (obj === "std") {
           return `std::${expr.property}`;
+        }
+        if (expr.isScopeAccess) {
+          return `${obj}::${expr.property}`;
         }
         const lowered = lowerPropertyAccess(obj, expr.property, "cpp");
         if (lowered.isLowered) {

@@ -592,10 +592,15 @@ export class GoDecompiler {
         continue;
       }
 
-      // Unrecognized top-level token, skip
-      this.advance();
-    }
+      if (this.match("SEMICOLON")) {
+        continue;
+      }
 
+      const unexpected = this.peek();
+      throw new Error(
+        `Unexpected top-level token in Go source: ${unexpected.kind} ('${unexpected.value}') at ${this.filePath}:${unexpected.line}:${unexpected.col}`,
+      );
+    }
     const matchedClassConstructors = new Set<string>();
     // Now assemble classes or types from structs and receiverMethods
     for (const [name, structInfo] of structs) {
@@ -1030,6 +1035,72 @@ export class GoDecompiler {
     this.parseSingleConstOrVar(items, false, trivia);
   }
 
+  private defaultZeroExprForGoType(typeAnn?: TypeExpr): Expr {
+    if (!typeAnn) {
+      return {
+        kind: "LiteralExpr",
+        literalKind: "nil",
+        value: null,
+        rawValue: "nil",
+        span: emptySpan(),
+      };
+    }
+    if (typeAnn.kind === "PrimitiveType") {
+      if (
+        typeAnn.primitive === "int" ||
+        typeAnn.primitive === "float" ||
+        typeAnn.primitive === "num" ||
+        typeAnn.primitive === "byte"
+      ) {
+        return {
+          kind: "LiteralExpr",
+          literalKind: "number",
+          value: 0,
+          rawValue: "0",
+          span: emptySpan(),
+        };
+      }
+      if (typeAnn.primitive === "str") {
+        return {
+          kind: "LiteralExpr",
+          literalKind: "string",
+          value: "",
+          rawValue: '""',
+          span: emptySpan(),
+        };
+      }
+      if (typeAnn.primitive === "bool") {
+        return {
+          kind: "LiteralExpr",
+          literalKind: "boolean",
+          value: false,
+          rawValue: "false",
+          span: emptySpan(),
+        };
+      }
+    }
+    if (
+      typeAnn.kind === "NamedType" &&
+      typeAnn.name !== "error" &&
+      typeAnn.name !== "any" &&
+      !typeAnn.name.startsWith("interface")
+    ) {
+      return {
+        kind: "CallExpr",
+        callee: { kind: "IdentifierExpr", name: typeAnn.name, span: emptySpan() },
+        args: [],
+        span: emptySpan(),
+      };
+    }
+    return {
+      kind: "LiteralExpr",
+      literalKind: "nil",
+      value: null,
+      rawValue: "nil",
+      span: emptySpan(),
+    };
+  }
+
   private parseSingleConstOrVar(items: ModuleItem[], isConst: boolean, trivia: TriviaItem[]): void {
     const name = this.consume("IDENTIFIER", "Expected constant/variable name").value;
     const isExported = /^[A-Z]/.test(name);
@@ -1039,13 +1110,7 @@ export class GoDecompiler {
       typeAnnotation = this.parseTypeExpr();
     }
 
-    let value: Expr = {
-      kind: "LiteralExpr",
-      literalKind: "nil",
-      value: null,
-      rawValue: "nil",
-      span: emptySpan(),
-    };
+    let value: Expr = this.defaultZeroExprForGoType(typeAnnotation);
     if (this.match("ASSIGN")) {
       value = this.parseExpr();
     }
@@ -1324,13 +1389,7 @@ export class GoDecompiler {
       if (!this.check("ASSIGN")) {
         typeAnn = this.parseTypeExpr();
       }
-      let val: Expr = {
-        kind: "LiteralExpr",
-        literalKind: "nil",
-        value: null,
-        rawValue: "nil",
-        span: emptySpan(),
-      };
+      let val: Expr = this.defaultZeroExprForGoType(typeAnn);
       if (this.match("ASSIGN")) {
         val = this.parseExpr();
       }
@@ -1622,10 +1681,11 @@ export class GoDecompiler {
       }
       if (expr.kind === "BinaryExpr" && (expr as any).operator === ",") {
         // tuple binding: found, err := expr
-        // Lookahead to see if next is if err != nil
+        // Lookahead to see if next is a pure `if err != nil { return ..., err }` propagation
         const bin = expr as any;
         const lhs = bin.left && bin.left.kind === "IdentifierExpr" ? bin.left.name : "found";
-        if (this.checkIfErrNotNilFollows()) {
+        const rhs = bin.right && bin.right.kind === "IdentifierExpr" ? bin.right.name : "err";
+        if (rhs === "err" && this.checkIfErrNotNilFollows()) {
           return {
             kind: "LetBinding",
             name: lhs,
@@ -1636,8 +1696,8 @@ export class GoDecompiler {
           };
         }
         return {
-          kind: "LetBinding",
-          name: lhs,
+          kind: "DestructureBinding",
+          names: [lhs, rhs],
           isMut: true,
           typeAnnotation: null,
           init: val,
@@ -1702,7 +1762,10 @@ export class GoDecompiler {
 
   private checkIfErrNotNilFollows(): boolean {
     const saved = this.cur;
-    while (this.cur < this.tokens.length && this.tokens[this.cur].kind === "SEMICOLON") {
+    while (
+      this.cur < this.tokens.length &&
+      (this.tokens[this.cur].kind === "SEMICOLON" || this.tokens[this.cur].kind === "COMMENT")
+    ) {
       this.cur++;
     }
     if (this.cur < this.tokens.length && this.tokens[this.cur].kind === "IF") {
@@ -1710,28 +1773,67 @@ export class GoDecompiler {
       if (
         this.cur < this.tokens.length &&
         this.tokens[this.cur].kind === "IDENTIFIER" &&
-        this.tokens[this.cur].value === "err"
+        this.tokens[this.cur].value === "err" &&
+        this.tokens[this.cur + 1]?.kind === "NEQ" &&
+        this.tokens[this.cur + 2]?.kind === "IDENTIFIER" &&
+        this.tokens[this.cur + 2]?.value === "nil" &&
+        this.tokens[this.cur + 3]?.kind === "LBRACE"
       ) {
-        this.cur++;
-        if (this.cur < this.tokens.length && this.tokens[this.cur].kind === "NEQ") {
-          this.cur++;
-          if (
-            this.cur < this.tokens.length &&
-            this.tokens[this.cur].kind === "IDENTIFIER" &&
-            this.tokens[this.cur].value === "nil"
-          ) {
-            // Yes! Skip the entire if err != nil { return ..., err } block!
-            this.cur++;
-            if (this.cur < this.tokens.length && this.tokens[this.cur].kind === "LBRACE") {
-              let depth = 1;
-              this.cur++;
-              while (this.cur < this.tokens.length && depth > 0) {
-                if (this.tokens[this.cur].kind === "LBRACE") depth++;
-                else if (this.tokens[this.cur].kind === "RBRACE") depth--;
-                this.cur++;
-              }
-              return true;
-            }
+        const bodyStart = this.cur + 4;
+        let scan = bodyStart;
+        let depth = 1;
+        while (scan < this.tokens.length && depth > 0) {
+          if (this.tokens[scan].kind === "LBRACE") depth++;
+          else if (this.tokens[scan].kind === "RBRACE") depth--;
+          scan++;
+        }
+        if (depth !== 0) {
+          this.cur = saved;
+          return false;
+        }
+        const closeBraceIdx = scan - 1;
+        // Reject if followed by `else`
+        let afterClose = scan;
+        while (
+          afterClose < this.tokens.length &&
+          (this.tokens[afterClose].kind === "SEMICOLON" ||
+            this.tokens[afterClose].kind === "COMMENT")
+        ) {
+          afterClose++;
+        }
+        if (this.tokens[afterClose]?.kind === "ELSE") {
+          this.cur = saved;
+          return false;
+        }
+        // Only strip if the body is STRICTLY a single pure `return ..., err` with zero side effects
+        const bodyToks = this.tokens
+          .slice(bodyStart, closeBraceIdx)
+          .filter((t) => t.kind !== "SEMICOLON" && t.kind !== "COMMENT");
+        if (
+          bodyToks.length >= 2 &&
+          bodyToks[0]?.kind === "RETURN" &&
+          bodyToks[bodyToks.length - 1]?.kind === "IDENTIFIER" &&
+          bodyToks[bodyToks.length - 1]?.value === "err"
+        ) {
+          // Ensure no additional statements, no calls `(`, no assignments, no custom wrapping
+          const retArgs = bodyToks.slice(1);
+          const isPureZeroPropagation = retArgs.every(
+            (t) =>
+              t.kind === "COMMA" ||
+              t.kind === "NUMBER" ||
+              t.kind === "STRING" ||
+              t.kind === "LBRACE" ||
+              t.kind === "RBRACE" ||
+              t.kind === "AMP" ||
+              t.kind === "IDENTIFIER",
+          );
+          // Disallow multiple return statements or non-comma separated tokens before err
+          const hasExtraReturn = retArgs.some((t) => t.kind === "RETURN");
+          const prevBeforeErr = retArgs.length >= 2 ? retArgs[retArgs.length - 2] : undefined;
+          const errIsStandaloneArg = !prevBeforeErr || prevBeforeErr.kind === "COMMA";
+          if (isPureZeroPropagation && !hasExtraReturn && errIsStandaloneArg) {
+            this.cur = scan;
+            return true;
           }
         }
       }
@@ -1739,7 +1841,6 @@ export class GoDecompiler {
     this.cur = saved;
     return false;
   }
-
   // Pratt / Precedence Climbing Expression Parser
   private parseExpr(minPrec = 1): Expr {
     let left = this.parsePrefix();

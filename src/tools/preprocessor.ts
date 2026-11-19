@@ -390,6 +390,121 @@ function scanJsTsTemplateExprClose(
   return j;
 }
 
+function isCppDigitSeparator(source: string, quoteIdx: number): boolean {
+  const prev = quoteIdx > 0 ? source[quoteIdx - 1] : "";
+  const next = source[quoteIdx + 1] ?? "";
+  if (!/[0-9a-fA-F]/.test(prev) || !/[0-9a-fA-F]/.test(next)) {
+    return false;
+  }
+  let k = quoteIdx - 1;
+  while (k >= 0 && /[0-9a-fA-F_'.]/.test(source[k]!)) {
+    k--;
+  }
+  if (
+    k >= 1 &&
+    (source[k] === "x" || source[k] === "X" || source[k] === "b" || source[k] === "B") &&
+    source[k - 1] === "0" &&
+    (k - 1 === 0 || !/[A-Za-z0-9_]/.test(source[k - 2]!))
+  ) {
+    return true;
+  }
+  const firstChar = source[k + 1] ?? "";
+  return /[0-9]/.test(firstChar) && (k < 0 || !/[A-Za-z0-9_]/.test(source[k]!));
+}
+
+function isSingleLogicalCharContent(inner: string): boolean {
+  if (inner.length === 0) return false;
+  if (inner[0] === "\\") {
+    if (inner.length === 2) return true;
+    if (/^\\x[0-9a-fA-F]{2}$/.test(inner)) return true;
+    if (/^\\u[0-9a-fA-F]{4}$/.test(inner)) return true;
+    if (/^\\U[0-9a-fA-F]{8}$/.test(inner)) return true;
+    if (/^\\u\{[0-9a-fA-F_]{1,6}\}$/.test(inner)) return true;
+    if (/^\\[0-7]{1,3}$/.test(inner)) return true;
+    return false;
+  }
+  return Array.from(inner).length === 1;
+}
+
+function scanInterpolatedBraceExprEnd(
+  source: string,
+  exprStart: number,
+  targetLang: "csharp" | "kotlin",
+): { endIdx: number; closed: boolean } {
+  const len = source.length;
+  let j = exprStart;
+  let braceDepth = 1;
+  while (j < len && braceDepth > 0) {
+    const c = source[j];
+    const nx = source[j + 1];
+    if (c === "/" && nx === "/") {
+      j += 2;
+      while (j < len && source[j] !== "\n" && source[j] !== "\r") j++;
+      continue;
+    }
+    if (c === "/" && nx === "*") {
+      if (targetLang === "kotlin") {
+        let cDepth = 1;
+        j += 2;
+        while (j < len && cDepth > 0) {
+          if (source[j] === "/" && source[j + 1] === "*") {
+            cDepth++;
+            j += 2;
+          } else if (source[j] === "*" && source[j + 1] === "/") {
+            cDepth--;
+            j += 2;
+          } else {
+            j++;
+          }
+        }
+        continue;
+      }
+      const closeCmt = source.indexOf("*/", j + 2);
+      if (closeCmt < 0) return { endIdx: len, closed: false };
+      j = closeCmt + 2;
+      continue;
+    }
+    if (targetLang === "csharp" && c === "@" && nx === '"') {
+      j += 2;
+      while (j < len) {
+        if (source[j] === '"') {
+          if (source[j + 1] === '"') {
+            j += 2;
+            continue;
+          }
+          j++;
+          break;
+        }
+        j++;
+      }
+      continue;
+    }
+    if (c === '"' || c === "'") {
+      const q = c;
+      j++;
+      while (j < len && source[j] !== q && source[j] !== "\n" && source[j] !== "\r") {
+        if (source[j] === "\\" && j + 1 < len) j += 2;
+        else j++;
+      }
+      if (j < len && source[j] === q) j++;
+      continue;
+    }
+    if (c === "{") {
+      braceDepth++;
+      j++;
+      continue;
+    }
+    if (c === "}") {
+      braceDepth--;
+      if (braceDepth === 0) return { endIdx: j, closed: true };
+      j++;
+      continue;
+    }
+    j++;
+  }
+  return { endIdx: j, closed: false };
+}
+
 /**
  * Lexically masks comments, strings, raw strings, and template literals so that
  * hybrid shorthand lowering and syntax checks only inspect real code tokens.
@@ -418,16 +533,17 @@ export function maskSourceLexically(
     targetLang !== "python" &&
     targetLang !== "yaml" &&
     targetLang !== "html" &&
+    targetLang !== "xml" &&
     targetLang !== "markdown" &&
     targetLang !== "shell" &&
     targetLang !== "powershell" &&
     targetLang !== "batch" &&
-    targetLang !== "twig";
+    targetLang !== "twig" &&
+    targetLang !== "text";
 
   let out = "";
   let i = 0;
   const len = source.length;
-
   while (i < len) {
     const ch = source[i];
     const next = source[i + 1];
@@ -532,8 +648,37 @@ export function maskSourceLexically(
       continue;
     }
 
-    // 3. C-style block comment `/* ... */`
+    // 3. C-style block comment `/* ... */` (nested for Rust & Kotlin)
     if (supportsCStyleComments && ch === "/" && next === "*") {
+      if (targetLang === "rust" || targetLang === "kotlin") {
+        let depth = 1;
+        let j = i + 2;
+        while (j < len && depth > 0) {
+          if (source[j] === "/" && source[j + 1] === "*") {
+            depth++;
+            j += 2;
+            continue;
+          }
+          if (source[j] === "*" && source[j + 1] === "/") {
+            depth--;
+            j += 2;
+            continue;
+          }
+          j++;
+        }
+        if (depth > 0) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: "Unterminated block comment '/*'",
+          });
+          out += addMask(source.slice(i), "cmt");
+          break;
+        }
+        out += addMask(source.slice(i, j), "cmt");
+        i = j;
+        continue;
+      }
       const closeIdx = source.indexOf("*/", i + 2);
       if (closeIdx < 0) {
         const pos = getLineAndCol(source, i);
@@ -548,7 +693,6 @@ export function maskSourceLexically(
       i = closeIdx + 2;
       continue;
     }
-
     // 4. C-style line comment `// ...` (not in CSS where unquoted url(https://...) may appear)
     if (supportsCStyleComments && targetLang !== "css" && ch === "/" && next === "/") {
       let end = i + 2;
@@ -576,13 +720,56 @@ export function maskSourceLexically(
       }
     }
 
-    // 6. Rust raw string literal `r#*"..."#*` or `br#*"..."#*`
+    // 5b. PHP heredoc / nowdoc (`<<<EOT ... EOT;`, `<<<'EOT' ... EOT;`, `<<<"EOT" ... EOT;`)
+    if (targetLang === "php" && ch === "<" && next === "<" && source[i + 2] === "<") {
+      const heredocHeader = source
+        .slice(i + 3)
+        .match(
+          /^[ \t]*(?:([A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)|'([A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)'|"([A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*)")[ \t]*\r?\n/,
+        );
+      if (heredocHeader) {
+        const label = heredocHeader[1] ?? heredocHeader[2] ?? heredocHeader[3] ?? "";
+        let scanPos = i + 3 + heredocHeader[0].length;
+        let closeEnd = -1;
+        while (scanPos <= len) {
+          const nlIdx = source.indexOf("\n", scanPos);
+          const lineEnd = nlIdx < 0 ? len : nlIdx;
+          const lineText = source.slice(scanPos, lineEnd).replace(/\r$/, "");
+          const trimmedStart = lineText.replace(/^[ \t]*/, "");
+          if (
+            trimmedStart.startsWith(label) &&
+            (trimmedStart.length === label.length ||
+              !/[A-Za-z0-9_\x80-\xff]/.test(trimmedStart[label.length]!))
+          ) {
+            const labelOffset = lineText.length - trimmedStart.length + label.length;
+            closeEnd = scanPos + labelOffset;
+            break;
+          }
+          if (nlIdx < 0) break;
+          scanPos = nlIdx + 1;
+        }
+        if (closeEnd < 0) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: `Unterminated PHP heredoc/nowdoc '<<<${label}'`,
+          });
+          out += addMask(source.slice(i), "str");
+          break;
+        }
+        out += addMask(source.slice(i, closeEnd), "str");
+        i = closeEnd;
+        continue;
+      }
+    }
+
+    // 6. Rust raw string literal `r#*"..."#*`, `br#*"..."#*`, `cr#*"..."#*`
     if (
       targetLang === "rust" &&
-      (ch === "r" || (ch === "b" && next === "r")) &&
+      (ch === "r" || ((ch === "b" || ch === "c") && next === "r")) &&
       (i === 0 || !/[A-Za-z0-9_]/.test(source[i - 1]))
     ) {
-      const rStart = ch === "b" ? i + 2 : i + 1;
+      const rStart = ch === "b" || ch === "c" ? i + 2 : i + 1;
       let hashes = 0;
       while (rStart + hashes < len && source[rStart + hashes] === "#") {
         hashes++;
@@ -606,72 +793,201 @@ export function maskSourceLexically(
       }
     }
 
-    // 7. C++ raw string literal `R"delim(...)delim"`
-    if (
-      targetLang === "cpp" &&
-      ch === "R" &&
-      next === '"' &&
-      (i === 0 || !/[A-Za-z0-9_]/.test(source[i - 1]))
-    ) {
-      const openParen = source.indexOf("(", i + 2);
-      if (openParen >= 0 && openParen - (i + 2) <= 16) {
-        const delim = source.slice(i + 2, openParen);
-        if (!/[\s)\\]/.test(delim)) {
-          const closeSeq = `)${delim}"`;
-          const closeIdx = source.indexOf(closeSeq, openParen + 1);
+    // 7. C++ raw string literal `R"delim(...)delim"` (with optional `u8`/`u`/`U`/`L` prefix)
+    if (targetLang === "cpp" && ch === "R" && next === '"') {
+      const hasValidRawPrefix =
+        i === 0 ||
+        !/[A-Za-z0-9_]/.test(source[i - 1]!) ||
+        ((source[i - 1] === "L" || source[i - 1] === "u" || source[i - 1] === "U") &&
+          (i - 1 === 0 || !/[A-Za-z0-9_]/.test(source[i - 2]!))) ||
+        (i >= 2 &&
+          source[i - 2] === "u" &&
+          source[i - 1] === "8" &&
+          (i - 2 === 0 || !/[A-Za-z0-9_]/.test(source[i - 3]!)));
+      if (hasValidRawPrefix) {
+        const openParen = source.indexOf("(", i + 2);
+        if (openParen >= 0 && openParen - (i + 2) <= 16) {
+          const delim = source.slice(i + 2, openParen);
+          if (!/[\s)\\]/.test(delim)) {
+            const closeSeq = `)${delim}"`;
+            const closeIdx = source.indexOf(closeSeq, openParen + 1);
+            if (closeIdx < 0) {
+              const pos = getLineAndCol(source, i);
+              unterminatedDiagnostics.push({
+                ...pos,
+                message: "Unterminated C++ raw string literal",
+              });
+              out += addMask(source.slice(i), "str");
+              break;
+            }
+            out += addMask(source.slice(i, closeIdx + closeSeq.length), "str");
+            i = closeIdx + closeSeq.length;
+            continue;
+          }
+        }
+      }
+    }
+
+    // 8. C# verbatim & interpolated strings (`@"..."`, `$@"..."`, `@$"..."`, `$"..."`, `$"""..."""`)
+    if (targetLang === "csharp") {
+      // 8a. C# interpolated raw string (`$"""..."""`, `$$"""..."""`, etc.)
+      if (ch === "$") {
+        let dollarCount = 1;
+        while (i + dollarCount < len && source[i + dollarCount] === "$") {
+          dollarCount++;
+        }
+        const afterDollars = i + dollarCount;
+        if (
+          source[afterDollars] === '"' &&
+          source[afterDollars + 1] === '"' &&
+          source[afterDollars + 2] === '"'
+        ) {
+          let openQuotes = 3;
+          while (afterDollars + openQuotes < len && source[afterDollars + openQuotes] === '"') {
+            openQuotes++;
+          }
+          if (openQuotes === 6) {
+            out += addMask(source.slice(i, afterDollars + 6), "str");
+            i = afterDollars + 6;
+            continue;
+          }
+          const csDelim = '"'.repeat(openQuotes);
+          const closeIdx = source.indexOf(csDelim, afterDollars + openQuotes);
           if (closeIdx < 0) {
             const pos = getLineAndCol(source, i);
             unterminatedDiagnostics.push({
               ...pos,
-              message: "Unterminated C++ raw string literal",
+              message: `Unterminated C# raw string literal ${csDelim}`,
             });
             out += addMask(source.slice(i), "str");
             break;
           }
-          out += addMask(source.slice(i, closeIdx + closeSeq.length), "str");
-          i = closeIdx + closeSeq.length;
+          let endIdx = closeIdx + openQuotes;
+          while (endIdx < len && source[endIdx] === '"' && endIdx - closeIdx < openQuotes + 2) {
+            endIdx++;
+          }
+          out += addMask(source.slice(i, endIdx), "str");
+          i = endIdx;
           continue;
         }
       }
-    }
 
-    // 8. C# verbatim string `@"..."`, `$@"..."`, `@$"..."`
-    if (
-      targetLang === "csharp" &&
-      ((ch === "@" && next === '"') ||
+      // 8b. C# verbatim string `@"..."`, `$@"..."`, `@$"..."`
+      if (
+        (ch === "@" && next === '"') ||
         (ch === "$" && next === "@" && source[i + 2] === '"') ||
-        (ch === "@" && next === "$" && source[i + 2] === '"'))
-    ) {
-      const prefixLen = ch === "@" && next === '"' ? 2 : 3;
-      let j = i + prefixLen;
-      let closed = false;
-      while (j < len) {
-        if (source[j] === '"') {
-          if (source[j + 1] === '"') {
+        (ch === "@" && next === "$" && source[i + 2] === '"')
+      ) {
+        const isInterpolated = ch === "$" || next === "$";
+        const prefixLen = ch === "@" && next === '"' ? 2 : 3;
+        let j = i + prefixLen;
+        let closed = false;
+        let hadInterpError = false;
+        while (j < len) {
+          if (isInterpolated && source[j] === "{") {
+            if (source[j + 1] === "{") {
+              j += 2;
+              continue;
+            }
+            const exprScan = scanInterpolatedBraceExprEnd(source, j + 1, "csharp");
+            if (!exprScan.closed) {
+              const pos = getLineAndCol(source, j);
+              unterminatedDiagnostics.push({
+                ...pos,
+                message: "Unterminated interpolation '{' in C# verbatim string literal",
+              });
+              hadInterpError = true;
+              j = len;
+              break;
+            }
+            j = exprScan.endIdx + 1;
+            continue;
+          }
+          if (source[j] === '"') {
+            if (source[j + 1] === '"') {
+              j += 2;
+              continue;
+            }
+            j++;
+            closed = true;
+            break;
+          }
+          j++;
+        }
+        if (!closed && !hadInterpError) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: "Unterminated C# verbatim string literal",
+          });
+        }
+        out += addMask(source.slice(i, j), "str");
+        i = j;
+        continue;
+      }
+
+      // 8c. C# regular interpolated string `$"..."`
+      if (ch === "$" && next === '"') {
+        let j = i + 2;
+        let closed = false;
+        let hadInterpError = false;
+        while (j < len) {
+          const sc = source[j];
+          if (sc === "\\" && j + 1 < len) {
             j += 2;
             continue;
           }
+          if (sc === "{") {
+            if (source[j + 1] === "{") {
+              j += 2;
+              continue;
+            }
+            const exprScan = scanInterpolatedBraceExprEnd(source, j + 1, "csharp");
+            if (!exprScan.closed) {
+              const pos = getLineAndCol(source, j);
+              unterminatedDiagnostics.push({
+                ...pos,
+                message: "Unterminated interpolation '{' in C# interpolated string literal",
+              });
+              hadInterpError = true;
+              j = len;
+              break;
+            }
+            j = exprScan.endIdx + 1;
+            continue;
+          }
+          if (sc === '"') {
+            j++;
+            closed = true;
+            break;
+          }
+          if (sc === "\n" || sc === "\r") {
+            break;
+          }
           j++;
-          closed = true;
-          break;
         }
-        j++;
+        if (!closed && !hadInterpError) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: "Unterminated C# interpolated string literal",
+          });
+        }
+        out += addMask(source.slice(i, j), "str");
+        i = j;
+        continue;
       }
-      if (!closed) {
-        const pos = getLineAndCol(source, i);
-        unterminatedDiagnostics.push({
-          ...pos,
-          message: "Unterminated C# verbatim string literal",
-        });
-      }
-      out += addMask(source.slice(i, j), "str");
-      i = j;
-      continue;
     }
 
-    // 9. Triple-quoted strings `"""..."""` or `'''...'''` (Python, Kotlin, C#)
+    // 9. Triple-quoted strings `"""..."""` or `'''...'''` (Python, Kotlin, C#, Java)
     if (
-      (ch === '"' && next === '"' && source[i + 2] === '"') ||
+      ((targetLang === "python" ||
+        targetLang === "kotlin" ||
+        targetLang === "csharp" ||
+        targetLang === "java") &&
+        ch === '"' &&
+        next === '"' &&
+        source[i + 2] === '"') ||
       (targetLang === "python" && ch === "'" && next === "'" && source[i + 2] === "'")
     ) {
       const delim = ch.repeat(3);
@@ -752,7 +1068,10 @@ export function maskSourceLexically(
         const pos = getLineAndCol(source, i);
         unterminatedDiagnostics.push({
           ...pos,
-          message: `Unterminated triple-quoted string literal ${delim}`,
+          message:
+            targetLang === "java"
+              ? `Unterminated Java text block ${delim}`
+              : `Unterminated triple-quoted string literal ${delim}`,
         });
         out += addMask(source.slice(i), "str");
         break;
@@ -861,34 +1180,103 @@ export function maskSourceLexically(
       }
     }
 
-    // 12. Single-quote disambiguation for Rust lifetimes (`'a`, `'static`) & C++ digit separators (`1'000`)
+    // 12. Single-quote disambiguation for C++14 digit separators, Rust lifetimes, and char/rune literals
     if (ch === "'") {
-      if (
-        targetLang === "cpp" &&
-        i > 0 &&
-        /[0-9a-fA-F]/.test(source[i - 1]) &&
-        /[0-9a-fA-F]/.test(next ?? "")
-      ) {
+      if (targetLang === "cpp" && isCppDigitSeparator(source, i)) {
         out += ch;
         i++;
         continue;
       }
       if (targetLang === "rust") {
+        if (next === "'") {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: "Empty character literal ''",
+          });
+          out += addMask("''", "str");
+          i += 2;
+          continue;
+        }
         const charLitMatch = source
           .slice(i)
-          .match(/^'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]+\}|.)|[^'\\\r\n])'/);
+          .match(/^'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F_]{1,6}\}|.)|[^'\\\r\n])'/);
         if (charLitMatch) {
           out += addMask(charLitMatch[0], "str");
           i += charLitMatch[0].length;
           continue;
         }
-        // Rust lifetime `'a` or `'static` or `'_`
+        // Invalid multi-character literal like 'ab' (lifetime immediately followed by ')
+        const multiCharMatch = source.slice(i).match(/^'[A-Za-z_][A-Za-z0-9_]+'/);
+        if (multiCharMatch) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: `Invalid multi-character literal ${multiCharMatch[0]}`,
+          });
+          out += addMask(multiCharMatch[0], "str");
+          i += multiCharMatch[0].length;
+          continue;
+        }
+        // Rust lifetime `'a`, `'static`, `'_`, or loop label `'outer`
         const lifetimeMatch = source.slice(i).match(/^'[A-Za-z_][A-Za-z0-9_]*/);
         if (lifetimeMatch) {
           out += lifetimeMatch[0];
           i += lifetimeMatch[0].length;
           continue;
         }
+      }
+      if (
+        targetLang === "go" ||
+        targetLang === "cpp" ||
+        targetLang === "csharp" ||
+        targetLang === "kotlin" ||
+        targetLang === "java"
+      ) {
+        const litKind = targetLang === "go" ? "rune" : "character";
+        let j = i + 1;
+        let closed = false;
+        while (j < len) {
+          const sc = source[j];
+          if (sc === "\\" && j + 1 < len) {
+            j += 2;
+            continue;
+          }
+          if (sc === "'") {
+            j++;
+            closed = true;
+            break;
+          }
+          if (sc === "\n" || sc === "\r") {
+            break;
+          }
+          j++;
+        }
+        if (!closed) {
+          const pos = getLineAndCol(source, i);
+          unterminatedDiagnostics.push({
+            ...pos,
+            message: `Unterminated ${litKind} literal '`,
+          });
+        } else {
+          const inner = source.slice(i + 1, j - 1);
+          if (inner.length === 0) {
+            const pos = getLineAndCol(source, i);
+            unterminatedDiagnostics.push({
+              ...pos,
+              message: `Empty ${litKind} literal ''`,
+            });
+          } else if (targetLang !== "cpp" && !isSingleLogicalCharContent(inner)) {
+            const pos = getLineAndCol(source, i);
+            unterminatedDiagnostics.push({
+              ...pos,
+              message: `Invalid multi-character ${litKind} literal '${inner}'`,
+            });
+          }
+        }
+        out += addMask(source.slice(i, j), "str");
+        i = j;
+        continue;
       }
       // In TSX/JSX, an apostrophe inside JSX text (`<div>Don't</div>`) has no matching `'` on the line
       if (targetLang === "tsx") {
@@ -913,6 +1301,54 @@ export function maskSourceLexically(
       }
     }
 
+    // 12b. Kotlin interpolated double-quoted string `"hello ${map["key"]}"`
+    if (targetLang === "kotlin" && ch === '"') {
+      let j = i + 1;
+      let closed = false;
+      let hadInterpError = false;
+      while (j < len) {
+        const sc = source[j];
+        if (sc === "\\" && j + 1 < len) {
+          j += 2;
+          continue;
+        }
+        if (sc === "$" && source[j + 1] === "{") {
+          const exprScan = scanInterpolatedBraceExprEnd(source, j + 2, "kotlin");
+          if (!exprScan.closed) {
+            const pos = getLineAndCol(source, j);
+            unterminatedDiagnostics.push({
+              ...pos,
+              message: "Unterminated interpolation '${' in Kotlin string literal",
+            });
+            hadInterpError = true;
+            j = len;
+            break;
+          }
+          j = exprScan.endIdx + 1;
+          continue;
+        }
+        if (sc === '"') {
+          j++;
+          closed = true;
+          break;
+        }
+        if (sc === "\n" || sc === "\r") {
+          break;
+        }
+        j++;
+      }
+      if (!closed && !hadInterpError) {
+        const pos = getLineAndCol(source, i);
+        unterminatedDiagnostics.push({
+          ...pos,
+          message: 'Unterminated string literal "',
+        });
+      }
+      out += addMask(source.slice(i, j), "str");
+      i = j;
+      continue;
+    }
+
     // 13. Standard double-quoted or single-quoted string literal
     if (ch === '"' || ch === "'") {
       const quote = ch;
@@ -927,7 +1363,11 @@ export function maskSourceLexically(
       while (j < len) {
         const sc = source[j];
         if (sc === "\\" && j + 1 < len) {
-          j += 2;
+          if (source[j + 1] === "\r" && source[j + 2] === "\n") {
+            j += 3;
+          } else {
+            j += 2;
+          }
           continue;
         }
         if (sc === quote) {
@@ -2030,7 +2470,9 @@ export const PREPROCESSORS_BY_LANG: Readonly<
     lowerHybridLineForTarget(line, "csharp", atClassMemberLevel, options),
   css: (line) => preprocessBareCssLossless(line),
   html: (line) => line,
+  xml: (line) => line,
   twig: (line) => line,
+  java: (line) => line,
   json: (line) => line,
   yaml: (line) => line,
   shell: (line) => line,
@@ -2038,6 +2480,7 @@ export const PREPROCESSORS_BY_LANG: Readonly<
   batch: (line) => line,
   markdown: (line) => line,
   aipl: (line) => line,
+  text: (line) => line,
 };
 
 export function preprocessHybridAndIdiomsLossless(

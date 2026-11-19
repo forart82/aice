@@ -204,9 +204,11 @@ function checkLeakedAiceMarkers(
   const isCodeLang =
     targetLang !== "css" &&
     targetLang !== "html" &&
+    targetLang !== "xml" &&
     targetLang !== "twig" &&
     targetLang !== "json" &&
-    targetLang !== "yaml";
+    targetLang !== "yaml" &&
+    targetLang !== "text";
 
   if (isCodeLang) {
     const sigilRe =
@@ -255,12 +257,12 @@ function checkLeakedAiceMarkers(
     }
   }
 
-  // 4. Target-specific leaked AICE keywords
   if (
     targetLang === "python" ||
     targetLang === "go" ||
     targetLang === "cpp" ||
     targetLang === "csharp" ||
+    targetLang === "java" ||
     targetLang === "kotlin" ||
     targetLang === "php"
   ) {
@@ -555,6 +557,299 @@ export function checkUnfencedHunkCorruption(
   return diags;
 }
 
+function checkStructuralTruncationArtifacts(
+  maskedCode: string,
+  originalCode: string,
+  maskLengths: number[] = [],
+): SyntaxDiagnosticItem[] {
+  const diags: SyntaxDiagnosticItem[] = [];
+  const lines = maskedCode.split(/\r?\n/);
+  let offset = 0;
+  let strayHunkOpenOffset = -1;
+  let strayHunkHasSep = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i] ?? "";
+    const trimmed = line.trim();
+
+    // 1. Git merge conflict markers outside strings/comments
+    if (/^(?:<{7}(?:\s|$)|={7}$|>{7}(?:\s|$))/.test(line)) {
+      const pos = getOriginalLineAndColFromMaskedOffset(
+        maskedCode,
+        offset,
+        maskLengths,
+        originalCode,
+      );
+      diags.push({
+        ...pos,
+        message: `Unresolved merge conflict marker '${trimmed.slice(0, 7)}' detected`,
+      });
+    }
+
+    // 2. Leaked AICE multi-block splice header (`=== path/to/file.ext ===` or `=== file:L1-L5 ===`)
+    if (
+      /^={3}\s+\S+(?::\S+)?\s+={3}$/.test(trimmed) &&
+      /[./\\:]/.test(trimmed.slice(3, -3).trim())
+    ) {
+      const pos = getOriginalLineAndColFromMaskedOffset(
+        maskedCode,
+        offset,
+        maskLengths,
+        originalCode,
+      );
+      diags.push({
+        ...pos,
+        message: `Leaked AICE splice header '${trimmed}' in native output`,
+      });
+    }
+
+    // 3. Leaked multiline `<<< / === / >>>` hunk fences outside strings/comments/heredocs
+    if (/^[ \t]*<{3,6}[ \t]*$/.test(line)) {
+      strayHunkOpenOffset = offset;
+      strayHunkHasSep = false;
+    } else if (strayHunkOpenOffset >= 0 && /^[ \t]*={3,6}[ \t]*$/.test(line)) {
+      strayHunkHasSep = true;
+    } else if (strayHunkOpenOffset >= 0 && strayHunkHasSep && /^[ \t]*>{3,6}[ \t]*$/.test(line)) {
+      const pos = getOriginalLineAndColFromMaskedOffset(
+        maskedCode,
+        strayHunkOpenOffset,
+        maskLengths,
+        originalCode,
+      );
+      diags.push({
+        ...pos,
+        message: "Unparsed '<<< / === / >>>' hunk markers leaked into native code",
+      });
+      strayHunkOpenOffset = -1;
+      strayHunkHasSep = false;
+    }
+
+    offset += line.length + 1;
+  }
+
+  return diags;
+}
+
+export function validateXmlWellFormedness(code: string): SyntaxDiagnosticItem[] {
+  const items: SyntaxDiagnosticItem[] = [];
+  const len = code.length;
+  let i = code.startsWith("\uFEFF") ? 1 : 0;
+  const tagStack: Array<{ name: string; line: number; column: number }> = [];
+
+  while (i < len) {
+    const lt = code.indexOf("<", i);
+    if (lt < 0) break;
+    i = lt;
+
+    // 1. XML comment `<!-- ... -->`
+    if (code.startsWith("<!--", i)) {
+      const closeIdx = code.indexOf("-->", i + 4);
+      if (closeIdx < 0) {
+        items.push({
+          ...getLineAndCol(code, i),
+          message: "Unterminated XML comment '<!--'",
+        });
+        break;
+      }
+      i = closeIdx + 3;
+      continue;
+    }
+
+    // 2. CDATA section `<![CDATA[ ... ]]>`
+    if (code.startsWith("<![CDATA[", i)) {
+      const closeIdx = code.indexOf("]]>", i + 9);
+      if (closeIdx < 0) {
+        items.push({
+          ...getLineAndCol(code, i),
+          message: "Unterminated XML CDATA section '<![CDATA['",
+        });
+        break;
+      }
+      i = closeIdx + 3;
+      continue;
+    }
+
+    // 3. Processing instruction `<?...?>`
+    if (code.startsWith("<?", i)) {
+      const closeIdx = code.indexOf("?>", i + 2);
+      if (closeIdx < 0) {
+        items.push({
+          ...getLineAndCol(code, i),
+          message: "Unterminated XML processing instruction '<?'",
+        });
+        break;
+      }
+      i = closeIdx + 2;
+      continue;
+    }
+
+    // 4. DOCTYPE or markup declaration `<!DOCTYPE ...>` / `<!ENTITY ...>`
+    if (code.startsWith("<!", i)) {
+      let j = i + 2;
+      let bracketDepth = 0;
+      let quote: string | null = null;
+      let closed = false;
+      while (j < len) {
+        const c = code[j];
+        if (quote) {
+          if (c === quote) quote = null;
+          j++;
+          continue;
+        }
+        if (c === '"' || c === "'") {
+          quote = c;
+          j++;
+          continue;
+        }
+        if (c === "[") {
+          bracketDepth++;
+        } else if (c === "]") {
+          bracketDepth = Math.max(0, bracketDepth - 1);
+        } else if (c === ">" && bracketDepth === 0) {
+          closed = true;
+          j++;
+          break;
+        }
+        j++;
+      }
+      if (!closed) {
+        items.push({
+          ...getLineAndCol(code, i),
+          message: "Unterminated XML declaration '<!'",
+        });
+        break;
+      }
+      i = j;
+      continue;
+    }
+
+    // 5. Closing tag `</name>`
+    if (code[i + 1] === "/") {
+      const nameMatch = code.slice(i + 2).match(/^([A-Za-z_:][A-Za-z0-9_.:-]*)\s*>/);
+      if (!nameMatch) {
+        items.push({
+          ...getLineAndCol(code, i),
+          message: "Malformed or unterminated XML closing tag '</...'",
+        });
+        const nextGt = code.indexOf(">", i + 2);
+        if (nextGt < 0) break;
+        i = nextGt + 1;
+        continue;
+      }
+      const closeName = nameMatch[1]!;
+      const closePos = getLineAndCol(code, i);
+      if (tagStack.length === 0) {
+        items.push({
+          ...closePos,
+          message: `Unexpected XML closing tag '</${closeName}>' with no matching opening tag`,
+        });
+      } else {
+        const top = tagStack[tagStack.length - 1]!;
+        if (top.name === closeName) {
+          tagStack.pop();
+        } else {
+          items.push({
+            ...closePos,
+            message: `Mismatched XML closing tag '</${closeName}>': expected '</${top.name}>' (opened at line ${top.line})`,
+          });
+          let matchIdx = -1;
+          for (let s = tagStack.length - 2; s >= 0; s--) {
+            if (tagStack[s]!.name === closeName) {
+              matchIdx = s;
+              break;
+            }
+          }
+          if (matchIdx >= 0) {
+            tagStack.length = matchIdx;
+          }
+        }
+      }
+      i += 2 + nameMatch[0].length;
+      continue;
+    }
+
+    // 6. Opening or self-closing tag `<name ...>` / `<name .../>`
+    const openMatch = code.slice(i + 1).match(/^([A-Za-z_:][A-Za-z0-9_.:-]*)(?=[\s/>]|$)/);
+    if (!openMatch) {
+      items.push({
+        ...getLineAndCol(code, i),
+        message: "Malformed XML tag or unescaped '<' character",
+      });
+      i++;
+      continue;
+    }
+    const tagName = openMatch[1]!;
+    const tagPos = getLineAndCol(code, i);
+    let j = i + 1 + tagName.length;
+    let quote: string | null = null;
+    let closed = false;
+    let selfClosing = false;
+    while (j < len) {
+      const c = code[j];
+      if (quote) {
+        if (c === quote) quote = null;
+        j++;
+        continue;
+      }
+      if (c === '"' || c === "'") {
+        quote = c;
+        j++;
+        continue;
+      }
+      if (c === "<") {
+        items.push({
+          ...tagPos,
+          message: `Unterminated XML tag '<${tagName}>' (missing '>')`,
+        });
+        break;
+      }
+      if (c === ">") {
+        let prev = j - 1;
+        while (prev > i && (code[prev] === " " || code[prev] === "\t")) prev--;
+        selfClosing = code[prev] === "/";
+        closed = true;
+        j++;
+        break;
+      }
+      j++;
+    }
+    if (quote) {
+      items.push({
+        ...tagPos,
+        message: `Unterminated attribute quote ${quote} in XML tag '<${tagName}>'`,
+      });
+      break;
+    }
+    if (!closed) {
+      if (j >= len) {
+        items.push({
+          ...tagPos,
+          message: `Unterminated XML tag '<${tagName}>' (missing '>')`,
+        });
+        break;
+      }
+      i = j;
+      continue;
+    }
+    if (!selfClosing) {
+      tagStack.push({ name: tagName, line: tagPos.line, column: tagPos.column });
+    }
+    i = j;
+  }
+
+  for (const unclosed of tagStack) {
+    items.push({
+      line: unclosed.line,
+      column: unclosed.column,
+      message: `Unclosed XML tag '<${unclosed.name}>' (expected '</${unclosed.name}>')`,
+    });
+  }
+
+  items.push(...checkUnfencedHunkCorruption(code, false));
+  items.push(...checkStructuralTruncationArtifacts(code, code));
+  return items;
+}
+
 export function validateNativeSyntax(
   code: string,
   rawTargetLang: TargetLanguage,
@@ -566,11 +861,17 @@ export function validateNativeSyntax(
   }
 
   let targetLang: TargetLanguage = rawTargetLang;
-  let passthroughMode: false | "java" | "text" = false;
+  let passthroughMode: false | "java" | "xml" | "text" = false;
   const lowerFp = filePath.toLowerCase();
   if (filePath && filePath !== "<memory>") {
-    if (lowerFp.endsWith(".webmanifest")) {
+    if (lowerFp.endsWith(".webmanifest") || lowerFp.endsWith(".jsonc")) {
       targetLang = "json";
+    } else if (lowerFp.endsWith(".java")) {
+      targetLang = "java";
+      passthroughMode = "java";
+    } else if (lowerFp.endsWith(".xml") || lowerFp.endsWith(".svg")) {
+      targetLang = "xml";
+      passthroughMode = "xml";
     } else if (
       targetLang === "typescript" &&
       !lowerFp.endsWith(".ts") &&
@@ -578,14 +879,17 @@ export function validateNativeSyntax(
       !lowerFp.endsWith(".cts")
     ) {
       const detected = detectTargetFromPathOrContent(filePath, code);
-      if (detected !== "passthrough") {
-        targetLang = detected;
-      } else if (lowerFp.endsWith(".java")) {
-        passthroughMode = "java";
-      } else {
+      if (detected === "text" || detected === "passthrough") {
         passthroughMode = "text";
+      } else {
+        targetLang = detected;
       }
     }
+  }
+  if (!passthroughMode) {
+    if (targetLang === "java") passthroughMode = "java";
+    else if (targetLang === "xml") passthroughMode = "xml";
+    else if (targetLang === "text") passthroughMode = "text";
   }
 
   const idiomKey =
@@ -618,13 +922,31 @@ export function validateNativeSyntax(
     return finish();
   }
 
-  if (passthroughMode === "java") {
-    const maskRes = maskSourceLexically(code, "kotlin", activeIdioms);
-    items.push(...maskRes.unterminatedDiagnostics);
-    items.push(...checkBalancedDelimiters(maskRes.maskedCode, code, maskRes.maskLengths));
-    items.push(...checkUnfencedHunkCorruption(code, false));
+  if (passthroughMode === "xml") {
+    items.push(...validateXmlWellFormedness(code));
     return finish();
   }
+
+  if (passthroughMode === "java") {
+    const maskRes = maskSourceLexically(code, "java", activeIdioms);
+    items.push(...maskRes.unterminatedDiagnostics);
+    items.push(...checkBalancedDelimiters(maskRes.maskedCode, code, maskRes.maskLengths));
+    items.push(
+      ...checkLeakedAiceMarkers(
+        maskRes.maskedCode,
+        code,
+        "java",
+        activeIdioms,
+        maskRes.maskLengths,
+      ),
+    );
+    items.push(...checkUnfencedHunkCorruption(code, false));
+    items.push(
+      ...checkStructuralTruncationArtifacts(maskRes.maskedCode, code, maskRes.maskLengths),
+    );
+    return finish();
+  }
+
   if (targetLang === "json") {
     const base = path.basename(filePath).toLowerCase();
     const allowComments =
@@ -1051,6 +1373,7 @@ export function validateNativeSyntax(
     ),
   );
   items.push(...checkUnfencedHunkCorruption(code, false));
+  items.push(...checkStructuralTruncationArtifacts(maskRes.maskedCode, code, maskRes.maskLengths));
 
   if (targetLang === "python" && items.length === 0 && code.trim().length > 0) {
     try {
@@ -1097,7 +1420,7 @@ export function formatNativeSyntaxDiagnosticsMarkdown(
   let targetLang: TargetLanguage;
   try {
     const detected = detectTargetFromPathOrContent(filePath, source);
-    if (detected === "passthrough") return undefined;
+    if (detected === "passthrough" || detected === "text") return undefined;
     targetLang = detected;
   } catch {
     return undefined;

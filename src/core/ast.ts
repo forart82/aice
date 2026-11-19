@@ -509,9 +509,9 @@ export interface MemberAccessExpr {
   property: string;
   isSafeNav: boolean;
   isOptional?: boolean;
+  isScopeAccess?: boolean;
   span: Span;
 }
-
 export interface IndexExpr {
   kind: "IndexExpr";
   object: Expr;

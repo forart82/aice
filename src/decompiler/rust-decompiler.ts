@@ -662,6 +662,18 @@ export class RustDecompiler {
         }
       }
 
+      if (this.match("SEMICOLON")) {
+        continue;
+      }
+
+      // Skip optional `unsafe` / `default` qualifier before fn/impl/trait/extern
+      if (
+        this.check("IDENTIFIER") &&
+        (this.peek().value === "unsafe" || this.peek().value === "default")
+      ) {
+        this.advance();
+      }
+
       if (this.check("USE")) {
         this.parseUse(items);
         continue;
@@ -688,6 +700,11 @@ export class RustDecompiler {
       }
 
       if (this.check("CONST") || this.check("STATIC")) {
+        if (this.check("CONST") && this.tokens[this.cur + 1]?.kind === "FN") {
+          this.advance();
+          this.parseFn(items, isExported);
+          continue;
+        }
         this.parseConstOrStatic(items, isExported);
         continue;
       }
@@ -697,10 +714,114 @@ export class RustDecompiler {
         continue;
       }
 
-      // Unrecognized top-level token, skip
-      this.advance();
-    }
+      // Rust `trait Name { ... }` -> record as interface/type declaration
+      if (this.check("IDENTIFIER") && this.peek().value === "trait") {
+        this.advance();
+        const traitName = this.consume("IDENTIFIER", "Expected trait name").value;
+        const typeParams: string[] = [];
+        if (this.match("LT")) {
+          let gDepth = 1;
+          while (!this.isAtEnd() && gDepth > 0) {
+            if (this.check("LT")) gDepth++;
+            else if (this.check("GT")) gDepth--;
+            else if (gDepth === 1 && this.check("IDENTIFIER")) typeParams.push(this.peek().value);
+            this.advance();
+          }
+        }
+        while (!this.check("LBRACE") && !this.check("SEMICOLON") && !this.isAtEnd()) {
+          this.advance();
+        }
+        if (this.match("LBRACE")) {
+          let depth = 1;
+          while (!this.isAtEnd() && depth > 0) {
+            if (this.check("LBRACE")) depth++;
+            else if (this.check("RBRACE")) depth--;
+            this.advance();
+          }
+        } else {
+          this.match("SEMICOLON");
+        }
+        items.push({
+          kind: "TypeDecl",
+          isEnum: false,
+          name: traitName,
+          typeParams,
+          fields: [],
+          span: emptySpan(),
+        });
+        continue;
+      }
 
+      // Rust `mod name;` or `mod name { ... }`
+      if (this.check("IDENTIFIER") && this.peek().value === "mod") {
+        this.advance();
+        if (this.check("IDENTIFIER")) this.advance();
+        if (this.match("LBRACE")) {
+          let depth = 1;
+          while (!this.isAtEnd() && depth > 0) {
+            if (this.check("LBRACE")) depth++;
+            else if (this.check("RBRACE")) depth--;
+            this.advance();
+          }
+        } else {
+          this.match("SEMICOLON");
+        }
+        continue;
+      }
+
+      // Rust `extern crate ...;`, `extern "C" fn ...`, or `extern "C" { ... }`
+      if (this.check("IDENTIFIER") && this.peek().value === "extern") {
+        this.advance();
+        if (this.check("STRING")) this.advance();
+        if (this.check("FN") || this.check("ASYNC")) {
+          this.parseFn(items, isExported);
+          continue;
+        }
+        if (this.check("IDENTIFIER") && this.peek().value === "crate") {
+          while (!this.check("SEMICOLON") && !this.isAtEnd()) this.advance();
+          this.match("SEMICOLON");
+          continue;
+        }
+        if (this.match("LBRACE")) {
+          let depth = 1;
+          while (!this.isAtEnd() && depth > 0) {
+            if (this.check("LBRACE")) depth++;
+            else if (this.check("RBRACE")) depth--;
+            this.advance();
+          }
+          continue;
+        }
+      }
+
+      // Rust `macro_rules! name { ... }` or top-level macro invocation `foo!(...)` / `foo! { ... }`
+      if (this.check("IDENTIFIER") && this.tokens[this.cur + 1]?.kind === "BANG") {
+        const isMacroRules = this.peek().value === "macro_rules";
+        this.advance(); // ident
+        this.advance(); // !
+        if (isMacroRules && this.check("IDENTIFIER")) {
+          this.advance();
+        }
+        if (this.check("LBRACE") || this.check("LPAREN") || this.check("LBRACKET")) {
+          const openKind = this.peek().kind;
+          const closeKind =
+            openKind === "LBRACE" ? "RBRACE" : openKind === "LPAREN" ? "RPAREN" : "RBRACKET";
+          this.advance();
+          let depth = 1;
+          while (!this.isAtEnd() && depth > 0) {
+            if (this.check(openKind)) depth++;
+            else if (this.check(closeKind)) depth--;
+            this.advance();
+          }
+          this.match("SEMICOLON");
+          continue;
+        }
+      }
+
+      const unexpected = this.peek();
+      throw new Error(
+        `Unexpected top-level token in Rust source: ${unexpected.kind} ('${unexpected.value}') at ${this.filePath}:${unexpected.line}:${unexpected.col}`,
+      );
+    }
     // Assemble structs into ClassDecl (if receiver methods exist) or TypeDecl (if plain record/DTO)
     for (const [name, structInfo] of structs) {
       const methods = implMethods.get(name) ?? [];
@@ -1930,7 +2051,7 @@ export class RustDecompiler {
         }
       }
 
-      // Check for path qualifier: Enum::Variant or Struct::new or std::cmp::min
+      // Check for path qualifier: A::B::C, Enum::Variant, Struct::new, std::cmp::min/max
       if (this.match("DOUBLE_COLON")) {
         const segments: string[] = [tok.value];
         segments.push(this.consume("IDENTIFIER", "Expected member name after ::").value);
@@ -1938,29 +2059,39 @@ export class RustDecompiler {
           segments.push(this.consume("IDENTIFIER", "Expected member name after ::").value);
         }
         const fullPath = segments.join("::");
-        const last = segments[segments.length - 1];
-        if (fullPath === "std::cmp::min" || last === "min") {
+        if (fullPath === "std::cmp::min") {
           return { kind: "IdentifierExpr", name: "min", span: emptySpan() };
         }
-        if (fullPath === "std::cmp::max" || last === "max") {
+        if (fullPath === "std::cmp::max") {
           return { kind: "IdentifierExpr", name: "max", span: emptySpan() };
         }
-        if (last === "new") {
+        if (segments.length === 2 && segments[1] === "new") {
           // Struct::new(...) -> constructor call
           return {
             kind: "IdentifierExpr",
-            name: segments[segments.length - 2] ?? tok.value,
+            name: segments[0]!,
             span: emptySpan(),
           };
         }
-        return {
+        let pathExpr: Expr = {
           kind: "IdentifierExpr",
-          name: last,
+          name: segments[0]!,
           span: emptySpan(),
         };
+        for (let sIdx = 1; sIdx < segments.length; sIdx++) {
+          pathExpr = {
+            kind: "MemberAccessExpr",
+            object: pathExpr,
+            property: segments[sIdx]!,
+            isSafeNav: false,
+            isScopeAccess: true,
+            span: emptySpan(),
+          };
+        }
+        return pathExpr;
       }
 
-      // Struct literal: StructName { field: val, ... }
+      // Struct literal: StructName { field: val, ..spread }
       if (!this.inControlHeader && this.check("LBRACE") && /^[A-Z]/.test(tok.value)) {
         this.advance(); // consume '{'
         const props: { key?: string; value: Expr; isSpread?: boolean }[] = [];
@@ -1990,10 +2121,29 @@ export class RustDecompiler {
           if (!this.match("COMMA")) break;
         }
         this.consume("RBRACE", "Expected '}' closing struct literal");
+        if (props.some((p) => p.isSpread)) {
+          return {
+            kind: "CallExpr",
+            callee: { kind: "IdentifierExpr", name: tok.value, span: emptySpan() },
+            args: [
+              {
+                kind: "RecordLiteralExpr",
+                properties: props.map((p) => ({
+                  ...(p.key !== undefined ? { key: p.key } : {}),
+                  value: p.value,
+                  ...(p.isSpread ? { isSpread: true } : {}),
+                  span: emptySpan(),
+                })),
+                span: emptySpan(),
+              },
+            ],
+            span: emptySpan(),
+          };
+        }
         return {
           kind: "CallExpr",
           callee: { kind: "IdentifierExpr", name: tok.value, span: emptySpan() },
-          args: props.filter((p) => !p.isSpread).map((p) => p.value),
+          args: props.map((p) => p.value),
           span: emptySpan(),
         };
       }
@@ -2045,14 +2195,36 @@ export class RustDecompiler {
   }
 
   private parseInfix(left: Expr, prec: number): Expr {
-    // Cast: expr as Type
+    // Cast: expr as Type — preserve type cast explicitly as `as(expr, Type)`
     if (this.check("AS")) {
       this.advance();
+      const typeStart = this.cur;
       this.parseTypeExpr();
-      return left;
+      const rawTypeStr = this.tokens
+        .slice(typeStart, this.cur)
+        .filter((t) => t.kind !== "COMMENT")
+        .map((t) => t.value)
+        .join(" ")
+        .replace(/\s*::\s*/g, "::")
+        .replace(/\s*<\s*/g, "<")
+        .replace(/\s*>\s*/g, ">")
+        .trim();
+      const typeArg: Expr = /^[A-Za-z_][A-Za-z0-9_]*$/.test(rawTypeStr)
+        ? { kind: "IdentifierExpr", name: rawTypeStr, span: emptySpan() }
+        : {
+            kind: "LiteralExpr",
+            literalKind: "string",
+            value: rawTypeStr,
+            rawValue: JSON.stringify(rawTypeStr),
+            span: emptySpan(),
+          };
+      return {
+        kind: "CallExpr",
+        callee: { kind: "IdentifierExpr", name: "as", span: emptySpan() },
+        args: [left, typeArg],
+        span: emptySpan(),
+      };
     }
-
-    // Postfix ? operator
     if (this.match("QUESTION")) {
       return { kind: "PostfixTryExpr", operand: left, span: emptySpan() };
     }

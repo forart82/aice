@@ -718,7 +718,10 @@ function compileAiceOrHybridToNative(
     targetLang === "shell" ||
     targetLang === "powershell" ||
     targetLang === "batch" ||
-    targetLang === "aipl"
+    targetLang === "aipl" ||
+    targetLang === "xml" ||
+    targetLang === "java" ||
+    targetLang === "text"
   ) {
     const out = cleanedCode.endsWith("\n") ? cleanedCode : `${cleanedCode}\n`;
     const check = validateNativeSyntax(out, targetLang, fullPath, activeIdioms);
@@ -1367,15 +1370,19 @@ export async function createFile(
   const checkPath = fullPath.replace(/\.aice$/, "");
   const ext = path.extname(checkPath).toLowerCase();
   const isWebmanifest = ext === ".webmanifest";
+  const detectedCheck = detectTargetFromPathOrContent(checkPath);
 
   const isFirstClassEmitterTarget =
-    isWebmanifest || detectTargetFromPathOrContent(checkPath) !== "passthrough";
+    isWebmanifest || (detectedCheck !== "passthrough" && detectedCheck !== "text");
 
   const isPassthroughManifest =
     !options.targetLanguage && !fullPath.endsWith(".aice") && !isFirstClassEmitterTarget;
 
   const isScriptOrMarkdownOrPassthrough =
     isPassthroughManifest ||
+    detectedCheck === "xml" ||
+    detectedCheck === "java" ||
+    detectedCheck === "text" ||
     ext === ".md" ||
     ext === ".markdown" ||
     ext === ".sh" ||
@@ -1730,6 +1737,9 @@ export function parseMultiFileCreateStream(rawStream: string): BatchCreateItem[]
     const canHaveIdioms =
       sec.filePath.endsWith(".aice") ||
       (detected !== "passthrough" &&
+        detected !== "xml" &&
+        detected !== "java" &&
+        detected !== "text" &&
         ext !== ".json" &&
         ext !== ".yaml" &&
         ext !== ".yml" &&

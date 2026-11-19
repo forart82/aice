@@ -105,11 +105,13 @@ export type PythonTokenKind =
   | "STRING"
   | "FSTRING"
   | "AT"
+  | "AT_EQUAL"
   | "ARROW"
   | "WALRUS"
   | "COLON"
   | "COMMA"
   | "DOT"
+  | "ELLIPSIS"
   | "SEMICOLON"
   | "LPAREN"
   | "RPAREN"
@@ -491,9 +493,14 @@ export class PythonLexer {
         continue;
       }
 
-      // Unknown character, skip
-      this.pos++;
-      this.column++;
+      if (ch === "\uFEFF" && this.pos === 0) {
+        this.pos++;
+        continue;
+      }
+
+      throw new Error(
+        `Unexpected character '${ch}' in Python source at ${this.filePath}:${this.line}:${this.column}`,
+      );
     }
 
     if (tokens.length > 0 && tokens[tokens.length - 1].kind !== "NEWLINE") {
@@ -671,13 +678,12 @@ export class PythonLexer {
   }
 
   private isIdentStart(ch?: string): boolean {
-    return !!ch && ((ch >= "a" && ch <= "z") || (ch >= "A" && ch <= "Z") || ch === "_");
+    return !!ch && (ch === "_" || /[a-zA-Z]/.test(ch) || /[\p{L}\p{Nl}]/u.test(ch));
   }
 
   private isIdentPart(ch?: string): boolean {
-    return this.isIdentStart(ch) || this.isDigit(ch);
+    return this.isIdentStart(ch) || this.isDigit(ch) || (!!ch && /[\p{Nd}\p{Mn}\p{Mc}]/u.test(ch));
   }
-
   private lexNumber(): PythonToken {
     const startLine = this.line;
     const startCol = this.column;
@@ -763,13 +769,14 @@ export class PythonLexer {
     const startLine = this.line;
     const startCol = this.column;
     const startOffset = this.pos;
-
+    if (three === "...") return this.makeOp("ELLIPSIS", 3, startLine, startCol, startOffset);
     if (three === "//=")
       return this.makeOp("SLASH_SLASH_EQUAL", 3, startLine, startCol, startOffset);
     if (three === "**=") return this.makeOp("STAR_STAR_EQUAL", 3, startLine, startCol, startOffset);
     if (three === "<<=") return this.makeOp("LSHIFT_EQUAL", 3, startLine, startCol, startOffset);
     if (three === ">>=") return this.makeOp("RSHIFT_EQUAL", 3, startLine, startCol, startOffset);
 
+    if (two === "@=") return this.makeOp("AT_EQUAL", 2, startLine, startCol, startOffset);
     if (two === "->") return this.makeOp("ARROW", 2, startLine, startCol, startOffset);
     if (two === ":=") return this.makeOp("WALRUS", 2, startLine, startCol, startOffset);
     if (two === "==") return this.makeOp("EQ_EQUAL", 2, startLine, startCol, startOffset);
@@ -1002,8 +1009,58 @@ export class PythonDecompiler {
       return this.parseFunctionDecl(decorators);
     }
 
-    // Top-level variable assignment
-    if (this.check("IDENTIFIER")) {
+    // Explicit no-op top-level statements
+    if (this.check("PASS") || this.check("ELLIPSIS") || this.check("SEMICOLON")) {
+      this.advance();
+      return null;
+    }
+
+    // PEP 695 type alias: `type Alias = Expr`
+    if (
+      this.check("IDENTIFIER") &&
+      this.current().value === "type" &&
+      this.peek().kind === "IDENTIFIER"
+    ) {
+      const startSpan = this.advance().span;
+      const aliasName = this.consume("IDENTIFIER").value;
+      const typeParams: string[] = [];
+      if (this.check("LBRACKET")) {
+        this.advance();
+        while (!this.check("RBRACKET") && !this.check("EOF")) {
+          if (this.check("IDENTIFIER")) typeParams.push(this.advance().value);
+          else this.advance();
+          if (this.check("COMMA")) this.advance();
+        }
+        this.consume("RBRACKET");
+      }
+      if (this.check("EQUAL")) {
+        this.advance();
+        const aliasType = this.parseTypeExpr();
+        this.attachTrivia(`type:${aliasName}`);
+        return {
+          kind: "TypeDecl",
+          isEnum: false,
+          name: aliasName,
+          typeParams,
+          aliasType,
+          span: makeSpan(
+            this.filePath,
+            startSpan.start.line,
+            startSpan.start.column,
+            startSpan.start.offset,
+            aliasType.span.end.line,
+            aliasType.span.end.column,
+            aliasType.span.end.offset,
+          ),
+        };
+      }
+    }
+
+    // Top-level variable assignment or type-annotated variable
+    if (
+      this.check("IDENTIFIER") &&
+      (this.peek().kind === "EQUAL" || this.peek().kind === "COLON")
+    ) {
       const startSpan = this.current().span;
       const identName = this.advance().value;
 
@@ -1035,13 +1092,65 @@ export class PythonDecompiler {
           ),
         };
       }
+
+      if (typeAnnotation) {
+        this.attachTrivia(`var:${identName}`);
+        return {
+          kind: "VarDecl",
+          name: identName,
+          isExported: true,
+          isMut: true,
+          typeAnnotation,
+          value: {
+            kind: "LiteralExpr",
+            literalKind: "nil",
+            value: null,
+            rawValue: "nil",
+            span: typeAnnotation.span,
+          },
+          span: makeSpan(
+            this.filePath,
+            startSpan.start.line,
+            startSpan.start.column,
+            startSpan.start.offset,
+            typeAnnotation.span.end.line,
+            typeAnnotation.span.end.column,
+            typeAnnotation.span.end.offset,
+          ),
+        };
+      }
     }
 
-    // Skip unhandled token to avoid infinite loop
-    this.advance();
-    return null;
-  }
+    // Parse full top-level statements cleanly instead of silently dropping individual tokens
+    if (
+      this.check("IF") ||
+      this.check("FOR") ||
+      this.check("WHILE") ||
+      this.check("TRY") ||
+      this.check("MATCH") ||
+      this.check("RAISE") ||
+      this.check("IDENTIFIER") ||
+      this.check("LPAREN") ||
+      this.check("LBRACKET") ||
+      this.check("LBRACE") ||
+      this.check("STRING") ||
+      this.check("FSTRING") ||
+      this.check("NUMBER") ||
+      this.check("AWAIT") ||
+      this.check("NOT") ||
+      this.check("MINUS") ||
+      this.check("PLUS") ||
+      this.check("TILDE")
+    ) {
+      this.parseStatement();
+      return null;
+    }
 
+    const unexpectedTok = this.current();
+    throw new Error(
+      `Unexpected top-level token '${unexpectedTok.value || unexpectedTok.kind}' (${unexpectedTok.kind}) in Python source at ${this.filePath}:${unexpectedTok.span.start.line}:${unexpectedTok.span.start.column}`,
+    );
+  }
   private parseDottedName(): string {
     let name = this.consume("IDENTIFIER").value;
     while (this.check("DOT")) {
@@ -1640,12 +1749,16 @@ export class PythonDecompiler {
     if (this.check("TRY")) {
       return this.parseTryStmt();
     }
-
-    if (this.check("MATCH")) {
+    if (
+      this.check("MATCH") &&
+      !this.isAssignOp(this.peek().kind) &&
+      this.peek().kind !== "COLON" &&
+      this.peek().kind !== "DOT" &&
+      this.peek().kind !== "LPAREN" &&
+      this.peek().kind !== "LBRACKET"
+    ) {
       return this.parseMatchStmt();
     }
-
-    // Assignment or expression statement
     const expr = this.parseExpr();
 
     let typeAnnotation: TypeExpr | null = null;
@@ -2503,10 +2616,12 @@ export class PythonDecompiler {
       };
     }
 
-    // Dict literal: {"key": value}
+    // Dict literal: {"key": value} or set literal: {a, b}
     if (this.check("LBRACE")) {
       const startSpan = this.advance().span;
       const properties: { key?: string; value: Expr; isSpread?: boolean; span: Span }[] = [];
+      const setElements: Expr[] = [];
+      let isSet = false;
       while (!this.check("RBRACE") && !this.check("EOF")) {
         if (this.check("STAR_STAR")) {
           this.advance();
@@ -2518,49 +2633,63 @@ export class PythonDecompiler {
           });
         } else {
           const keyExpr = this.parseExpr();
-          this.consume("COLON");
-          const valExpr = this.parseExpr();
-          let keyStr: string;
-          if (keyExpr.kind === "LiteralExpr" && typeof keyExpr.value === "string") {
-            keyStr = keyExpr.value;
-          } else if (keyExpr.kind === "LiteralExpr" && typeof keyExpr.value === "number") {
-            keyStr = String(keyExpr.value);
-            if (!keyStr.includes(".")) keyStr += ".0";
-          } else if (keyExpr.kind === "IdentifierExpr") {
-            keyStr = keyExpr.name;
+          if (isSet || (!this.check("COLON") && properties.length === 0)) {
+            isSet = true;
+            setElements.push(keyExpr);
           } else {
-            keyStr = "key";
+            this.consume("COLON");
+            const valExpr = this.parseExpr();
+            let keyStr: string;
+            if (keyExpr.kind === "LiteralExpr" && typeof keyExpr.value === "string") {
+              keyStr = keyExpr.value;
+            } else if (keyExpr.kind === "LiteralExpr" && typeof keyExpr.value === "number") {
+              keyStr = String(keyExpr.value);
+              if (!keyStr.includes(".")) keyStr += ".0";
+            } else if (keyExpr.kind === "IdentifierExpr") {
+              keyStr = keyExpr.name;
+            } else {
+              keyStr = "key";
+            }
+            properties.push({
+              key: keyStr,
+              value: valExpr,
+              span: makeSpan(
+                this.filePath,
+                keyExpr.span.start.line,
+                keyExpr.span.start.column,
+                keyExpr.span.start.offset,
+                valExpr.span.end.line,
+                valExpr.span.end.column,
+                valExpr.span.end.offset,
+              ),
+            });
           }
-          properties.push({
-            key: keyStr,
-            value: valExpr,
-            span: makeSpan(
-              this.filePath,
-              keyExpr.span.start.line,
-              keyExpr.span.start.column,
-              keyExpr.span.start.offset,
-              valExpr.span.end.line,
-              valExpr.span.end.column,
-              valExpr.span.end.offset,
-            ),
-          });
         }
         if (this.check("COMMA")) this.advance();
         else break;
       }
       const endSpan = this.consume("RBRACE").span;
+      const braceSpan = makeSpan(
+        this.filePath,
+        startSpan.start.line,
+        startSpan.start.column,
+        startSpan.start.offset,
+        endSpan.end.line,
+        endSpan.end.column,
+        endSpan.end.offset,
+      );
+      if (isSet) {
+        return {
+          kind: "CallExpr",
+          callee: { kind: "IdentifierExpr", name: "set", span: startSpan },
+          args: [{ kind: "ArrayLiteralExpr", elements: setElements, span: braceSpan }],
+          span: braceSpan,
+        };
+      }
       return {
         kind: "RecordLiteralExpr",
         properties,
-        span: makeSpan(
-          this.filePath,
-          startSpan.start.line,
-          startSpan.start.column,
-          startSpan.start.offset,
-          endSpan.end.line,
-          endSpan.end.column,
-          endSpan.end.offset,
-        ),
+        span: braceSpan,
       };
     }
 
@@ -2618,18 +2747,79 @@ export class PythonDecompiler {
       );
       return first;
     }
+    // Ellipsis literal (`...`)
+    if (this.check("ELLIPSIS")) {
+      const tok = this.advance();
+      return {
+        kind: "IdentifierExpr",
+        name: "Ellipsis",
+        span: tok.span,
+      };
+    }
 
-    // Fallback
-    const fallbackTok = this.advance();
-    return {
-      kind: "LiteralExpr",
-      literalKind: "nil",
-      value: null,
-      rawValue: "nil",
-      span: fallbackTok.span,
-    };
+    // Lambda expression: `lambda x, y=1: expr`
+    if (this.check("LAMBDA")) {
+      const startSpan = this.advance().span;
+      const params: ParamDecl[] = [];
+      while (!this.check("COLON") && !this.check("EOF")) {
+        let isRest = false;
+        if (this.check("STAR")) {
+          this.advance();
+          isRest = true;
+        } else if (this.check("STAR_STAR")) {
+          this.advance();
+          isRest = true;
+        }
+        const pTok = this.consume("IDENTIFIER", "Expected lambda parameter name");
+        let defaultValue: Expr | undefined;
+        if (this.check("EQUAL")) {
+          this.advance();
+          defaultValue = this.parseExpr();
+        }
+        params.push({
+          name: pTok.value,
+          typeAnnotation: null,
+          ...(defaultValue ? { defaultValue } : {}),
+          ...(isRest ? { isRest: true } : {}),
+          span: pTok.span,
+        });
+        if (this.check("COMMA")) this.advance();
+        else break;
+      }
+      this.consume("COLON", "Expected ':' after lambda parameters");
+      const bodyExpr = this.parseExpr();
+      return {
+        kind: "ClosureExpr",
+        params,
+        returnType: null,
+        body: bodyExpr,
+        span: makeSpan(
+          this.filePath,
+          startSpan.start.line,
+          startSpan.start.column,
+          startSpan.start.offset,
+          bodyExpr.span.end.line,
+          bodyExpr.span.end.column,
+          bodyExpr.span.end.offset,
+        ),
+      };
+    }
+
+    // Soft keywords (`match`, `case`) used as identifiers in expressions
+    if (this.check("MATCH") || this.check("CASE")) {
+      const tok = this.advance();
+      return {
+        kind: "IdentifierExpr",
+        name: tok.value,
+        span: tok.span,
+      };
+    }
+
+    const unexpectedTok = this.current();
+    throw new Error(
+      `Unexpected token '${unexpectedTok.value || unexpectedTok.kind}' (${unexpectedTok.kind}) in Python expression at ${this.filePath}:${unexpectedTok.span.start.line}:${unexpectedTok.span.start.column}`,
+    );
   }
-
   private parseLiteralExpr(): LiteralExpr {
     const tok = this.advance();
     if (tok.kind === "TRUE") {
@@ -2775,6 +2965,11 @@ export class PythonDecompiler {
     if (this.check("NONE")) {
       this.advance();
       return { kind: "PrimitiveType", primitive: "void", span: emptySpan(this.filePath) };
+    }
+
+    if (this.check("ELLIPSIS")) {
+      const ellTok = this.advance();
+      return { kind: "NamedType", name: "...", span: ellTok.span };
     }
 
     if (this.check("STRING")) {
