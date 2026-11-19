@@ -2,7 +2,7 @@
 
 # AICE: On-the-Fly AI Context Engine & Surgical Code Splicer
 
-[![Version: 0.9.51](https://img.shields.io/badge/Version-0.9.51-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.52](https://img.shields.io/badge/Version-0.9.52-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -51,7 +51,7 @@ flowchart LR
 | :--- | :--- | :--- |
 | **Leaner Reads Stay Out of History** | **`-43% to -56%`** smaller read payloads | `>120L` Monolith X-Ray outlines, `:sym@keyword` focus slices, `>110L` blank/import elision, and an aligned `9 KB` anti-spill ceiling. |
 | **Nearly Half the Output Tokens** | **`-44% to -47%`** fewer `4x`-priced edit tokens | Multi-file `--stdin` batch streams (`<<< === >>>` or `:Lstart-Lend`) skip repeating unchanged `Target` blocks. |
-| **Zero Wasted Slice & Retry Turns** | **`0`** extra pagination or flag-retry turns | Same-file range coalescing, partial `9 KB` budget fill, and MCP-to-CLI flag normalization settle requests in 1 turn. |
+| **Zero Wasted Slice & Retry Turns** | **`0`** extra pagination or flag-retry turns | Symbol/search hints instead of linear `:L` breadcrumbs, priority 1-turn multi-target batch packing (`aice read f1:sym f2 f3`), and an anti-pagination `AGENTS.md` rule settle reads in 1 turn. |
 | **Longer Sessions Before Compaction** | **`119K`** avg window vs `196K` (`-39%`) | Agents run **~35% longer** before hitting the `200K` compaction wall. |
 | **Zero Broken Disk Writes** | **`0`** broken files written to disk | Pre-write native syntax validation, inclusive `:L` off-by-one guard, and atomic `.tmp` -> `rename` commits. |
 
@@ -121,10 +121,10 @@ aice --version && aice agents status
 
 ### 2. Turn AICE On or Off Per Project
 
-AICE is **opt-in per workspace** via `aice.config.json` and maintains a single compact **`<= 650`-token `AGENTS.md`** instruction card (automatically stripping legacy duplicate `GEMINI.md` / `.agents/rules/aice.md` blocks):
+AICE is **opt-in per workspace** via `aice.config.json` and maintains a single compact **`<= 300`-token `AGENTS.md`** (`v0.9.52`) instruction card with explicit anti-pagination guardrails (automatically stripping legacy duplicate `GEMINI.md` / `.agents/rules/aice.md` blocks):
 
 ```bash
-aice enable ~/dev/my-project    # Writes "enabled": true in aice.config.json + <=650-tok AGENTS.md
+aice enable ~/dev/my-project    # Writes "enabled": true in aice.config.json + <=300-tok AGENTS.md
 aice disable ~/dev/my-project   # Sets "enabled": false and strips AICE blocks cleanly
 aice config ~/dev/my-project    # Inspect active settings (project $idioms are OFF by default)
 ```
@@ -147,12 +147,12 @@ Autonomous agents see **strictly 2 MCP tools** (`aice_read` and `aice_splice`) �
 aice find "*.ts" src
 aice search "validateToken" src -C 5
 
-# 2. Smart 1-turn reads (9 KB cap, 1-based line numbers ready for immediate splicing)
-aice read src/app.ts                         # Bare file inline if <= 9 KB, or auto-outline
+# 2. Smart 1-turn reads (9 KB cap, 1-based line numbers, zero linear :L pagination)
+aice read src/app.ts                         # Bare file inline if <= 9 KB, or auto-outline + batch symbol/search hint
 aice read src/monolith.ts:outline            # >120L Monolith X-Ray with internal landmarks
 aice read src/monolith.ts:bigFn@keyword      # Focus slice inside a giant symbol around @keyword
-aice read src/file.ts:L10-L80,L200-L260      # Multi-range slice (>110L blank/import elision)
-aice read src/a.ts:fnA src/b.ts:L1-L40       # Multi-file stream coalesced in 1 call
+aice read src/file.ts:fnA src/file.ts:fnB    # Batch symbols in 1 call (never walk :L1-L150 -> :L151-L300 across turns)
+aice read src/a.ts:fnA src/big.ts src/b.ts   # 1-turn batch packing: explicit/small targets inline + oversized bare file auto-outlined
 
 # 3. Surgical edits & multi-file --stdin batches (without repeating Target blocks)
 aice splice src/engine.ts -s GameEngine.step -c $'<<<\n  this.tick += 1;\n===\n  this.tick += BONUS;\n>>>'
@@ -177,6 +177,7 @@ EOF
 
 ### 4. Built-In Guardrails & Real Savings Telemetry (`aice gain` & `aice analyze`)
 
+- **Anti-Pagination & 1-Turn Batch Packing (`v0.9.52`)**: Oversized or budget-capped files emit `batch symbols: aice read <file>:<sym1> <file>:<sym2> or aice search <pat> <file>` hints instead of linear `:L1-L140` breadcrumbs; `aice read f1:sym f2 f3` packs explicit selectors and small files first while auto-outlining oversized bare files in **1 turn**; and the `<= 300`-token `AGENTS.md` rule forbids sequential `:L1-L150` -> `:L151-L300` paging across turns.
 - **Zero Broken Disk Writes**: Pre-write native syntax validation, an inclusive `:L` off-by-one guard, whitespace-resilient `<<< === >>>` dedent matching, `±5`-line syntax error context, and atomic `.tmp` -> `rename` commits roll back failed `--stdin` batches cleanly.
 - **Smart Self-Healing Diagnostics**: Missing symbols trigger Levenshtein `Did you mean` hints, invalid regex patterns fall back safely to literal search, and MCP-style flags (`--files-only=true`, `--context-lines=5`) passed to CLI calls normalize automatically.
 - **Honest Signed BPE Accounting**: Tracks `cl100k_base` & `o200k_base` deltas in a `< 250 B/event` numeric ledger (`~/.aice/telemetry/gains.jsonl`, zero raw source stored on disk), isolating `/tmp/*` and `swarm-*` sandboxes automatically.
@@ -210,7 +211,7 @@ aice gain --reset --yes
 | :--- | :--- |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Unified 2-tool engine, `9 KB` CLI/MCP water-filling budgets, `>120L` X-Ray, `:sym@pattern`, `>110L` elision, `>65L` search focus, inclusive `:L` guard, flag normalization & C++20 `--dsl --idioms` walkthrough. |
 | [`docs/AICE_SPEC.md`](docs/AICE_SPEC.md) | Normative AICE EBNF grammar, canonical standard library, refinement calculus, lens theorems & CLI/MCP contract. |
-| [`docs/AI_SYSTEM_PROMPT.md`](docs/AI_SYSTEM_PROMPT.md) | Full LLM system prompt & canonical `<= 650`-token `AGENTS.md` cheat-card specification. |
+| [`docs/AI_SYSTEM_PROMPT.md`](docs/AI_SYSTEM_PROMPT.md) | Full LLM system prompt & canonical `<= 300`-token `AGENTS.md` cheat-card specification. |
 | [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Live 33-session adversarial benchmark (`RW-01`..`RW-11`) + 923-call `aipl_dog` multi-worker production ledger. |
 | [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md) | Deterministic 10-scenario / 15-language offline BPE (`o200k_base`) benchmark breakdown. |
 | [`docs/CST_TRIVIA_SPEC.md`](docs/CST_TRIVIA_SPEC.md) | Bidirectional lens & lossless Concrete Syntax Tree (CST) trivia table specification. |
@@ -224,14 +225,7 @@ aice/
 ├── src/
 │   ├── tools/    # Unified read (9 KB cap, X-Ray, @focus, elision) & resilient splice engine
 │   ├── mcp/      # Strict 2-tool MCP stdio server (aice_read, aice_splice)
-│   ├── rules/    # Single-file <= 650-token AGENTS.md rule SSOT (mandatory-rules.ts)
-│   ├── telemetry/# Signed <250B BPE ledger (aice gain) & session loop auditor (aice analyze)
-│   ├── core/     # Lexer, Pratt parser, AST & CST trivia lens
-│   └── ...       # Decompilers, emitters, opt-in $idioms miner, config & agent setup
-├── assets/       # Banner, logo & aice-workflow.svg
-├── docs/         # Deep-dive specifications & benchmark reports
-└── tests/        # 1,620+ unit & integration tests (npm test)
-```
+│   ├── rules/    # Single-file <= 300-token AGENTS.md rule SSOT (mandatory-rules.ts)
 
 ---
 
@@ -248,7 +242,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version = {0.9.51},
+  version = {0.9.52},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}
