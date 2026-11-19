@@ -1145,18 +1145,71 @@ function formatReadDisplayPath(
 ): string {
   const absFull = path.resolve(fullPath);
   const absRoot = path.resolve(projectRoot);
+  const cwdResolved = path.resolve(process.cwd());
   const rel = path.relative(absRoot, absFull);
+  if (
+    absRoot !== cwdResolved &&
+    absRoot.startsWith(`${cwdResolved}${path.sep}`) &&
+    path.resolve(cwdResolved, rel) !== absFull
+  ) {
+    const rawClean = fallbackRaw?.trim();
+    const isExplicitRootRelativeFallback = Boolean(
+      rawClean &&
+        !path.isAbsolute(rawClean) &&
+        path.resolve(absRoot, rawClean) === absFull &&
+        path.resolve(cwdResolved, rawClean) !== absFull,
+    );
+    if (!isExplicitRootRelativeFallback) {
+      const relCwdFromSub = path.relative(cwdResolved, absFull);
+      if (relCwdFromSub === "") {
+        return ".";
+      }
+      if (!relCwdFromSub.startsWith("..") && !path.isAbsolute(relCwdFromSub)) {
+        return relCwdFromSub.replace(/\\/g, "/");
+      }
+    }
+  }
   if (rel === "") {
     return fallbackRaw?.trim() ? fallbackRaw.trim().replace(/\\/g, "/") : ".";
   }
   if (!rel.startsWith("..") && !path.isAbsolute(rel)) {
     return rel.replace(/\\/g, "/");
   }
-  const relCwd = path.relative(process.cwd(), absFull);
+  const relCwd = path.relative(cwdResolved, absFull);
   if (relCwd && !relCwd.startsWith("..") && !path.isAbsolute(relCwd)) {
     return relCwd.replace(/\\/g, "/");
   }
   return (fallbackRaw ?? absFull).replace(/\\/g, "/");
+}
+
+function normalizeContextResultDisplayPath(
+  res: ContextResult,
+  expectedDisplayPath: string,
+): ContextResult {
+  const oldPath = res.targetPath;
+  if (!oldPath || !expectedDisplayPath || oldPath === expectedDisplayPath) {
+    return res;
+  }
+  if (!expectedDisplayPath.endsWith(`/${oldPath}`)) {
+    return res;
+  }
+  const escapedOld = oldPath.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const headerRe = new RegExp(
+    `^(\\/\\/ (?:=== )?|# AICE Context Pack: )${escapedOld}(?=$|:|\\s+===)`,
+    "gm",
+  );
+  const nextFormatted = res.formattedBundle.replace(headerRe, `$1${expectedDisplayPath}`);
+  const nextContent = res.targetContent.replace(headerRe, `$1${expectedDisplayPath}`);
+  if (nextFormatted === res.formattedBundle && nextContent === res.targetContent) {
+    return { ...res, targetPath: expectedDisplayPath };
+  }
+  return {
+    ...res,
+    targetPath: expectedDisplayPath,
+    targetContent: nextContent,
+    formattedBundle: nextFormatted,
+    tokenCount: estimateTokens(nextFormatted),
+  };
 }
 
 function truncateBundleToMaxTokens(
@@ -1531,18 +1584,20 @@ function extractRepresentativeSymbolHints(opts: {
   if (!resolvedDiskPath && opts.displayPath) {
     const cleanDisp = splitPathAndSelector(opts.displayPath).filePath.trim();
     if (cleanDisp && cleanDisp !== ".") {
-      const cand = opts.projectRoot
-        ? path.resolve(opts.projectRoot, cleanDisp)
-        : path.isAbsolute(cleanDisp)
-          ? cleanDisp
-          : undefined;
-      if (cand && fs.existsSync(cand)) {
-        try {
-          if (fs.statSync(cand).isFile()) {
-            resolvedDiskPath = cand;
+      const candidates = [
+        opts.projectRoot ? path.resolve(opts.projectRoot, cleanDisp) : undefined,
+        path.isAbsolute(cleanDisp) ? cleanDisp : path.resolve(process.cwd(), cleanDisp),
+      ];
+      for (const cand of candidates) {
+        if (cand && fs.existsSync(cand)) {
+          try {
+            if (fs.statSync(cand).isFile()) {
+              resolvedDiskPath = cand;
+              break;
+            }
+          } catch {
+            // ignore stat errors
           }
-        } catch {
-          // ignore stat errors
         }
       }
     }
@@ -4219,10 +4274,17 @@ function buildPureOutlineResult(params: {
     const jsonItems: unknown[] = [];
 
     for (const [rawKey, itemRes] of outlineRes.entries()) {
-      const displayKey = options.projectRoot
-        ? formatReadDisplayPath(itemRes.file, projectRoot, rawKey)
-        : rawKey;
       const autoMeta = autoOutlineByAbsPath.get(path.resolve(itemRes.file));
+      const effectiveOutlineRoot = options.projectRoot
+        ? path.resolve(options.projectRoot)
+        : projectRoot;
+      const displayKey =
+        autoMeta?.displayPath ??
+        formatReadDisplayPath(
+          itemRes.file,
+          effectiveOutlineRoot,
+          options.projectRoot ? rawKey : undefined,
+        );
       const symbolNames = autoMeta
         ? extractRepresentativeSymbolHints({
             symbols: itemRes.symbols,
@@ -4634,10 +4696,10 @@ async function executeContextStream(params: {
     };
     let targetMatched = false;
     try {
-      const res = await withSuppressedTelemetryAsync(() =>
+      const rawRes = await withSuppressedTelemetryAsync(() =>
         generateContext(item.resolved.resolvedPath, contextOpts),
       );
-      results.push(res);
+      results.push(normalizeContextResultDisplayPath(rawRes, item.displayPath));
       matchedTargets.push(item);
       targetMatched = true;
     } catch (targetErr) {
@@ -4659,11 +4721,10 @@ async function executeContextStream(params: {
               symbol: subSel,
               allowPartialSymbolMatch: false,
             };
-            subsetResults.push(
-              await withSuppressedTelemetryAsync(() =>
-                generateContext(item.resolved.resolvedPath, subOpts),
-              ),
+            const subRes = await withSuppressedTelemetryAsync(() =>
+              generateContext(item.resolved.resolvedPath, subOpts),
             );
+            subsetResults.push(normalizeContextResultDisplayPath(subRes, item.displayPath));
           } catch {
             // selector lives in another target file
           }

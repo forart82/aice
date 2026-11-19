@@ -434,4 +434,72 @@ describe("v0.9.52 Read Anti-Pagination, 1-Turn Priority Batch Packing & Zero Sin
       }
     });
   });
+
+  describe("Nested subproject aice.config.json cwd-relative hint resolution", () => {
+    it("preserves cwd-relative prefix (e.g. site/*) when a nested directory has its own aice.config.json so emitted hints execute cleanly from cwd", async () => {
+      const nestedCfgPath = path.join(tmpDir, "site", "aice.config.json");
+      const origCwd = process.cwd();
+      fs.writeFileSync(
+        nestedCfgPath,
+        `${JSON.stringify({ enabled: true, idiomsEnabled: false }, null, 2)}\n`,
+        "utf-8",
+      );
+
+      try {
+        process.chdir(tmpDir);
+
+        // 1. Bare >120L code & symbolless files inside nested subproject keep `site/` prefix
+        const pgRes = await aiceRead("site/playground.js", { surface: "cli" });
+        expect(pgRes.output).toContain(
+          "batch symbols: aice read site/playground.js:escapePlaygroundHtml site/playground.js:renderTokenComparison or aice search <pat> site/playground.js",
+        );
+        expect(pgRes.output).not.toContain("aice read playground.js:");
+
+        const aiplRes = await aiceRead("site/sim.aipl", { surface: "cli" });
+        expect(aiplRes.output).toContain("batch symbols: aice read site/sim.aipl:");
+        expect(aiplRes.output).not.toContain("aice read sim.aipl:");
+
+        const cssRes = await aiceRead("site/styles.css", { surface: "cli" });
+        expect(cssRes.output).toContain("narrow with aice search <pat> site/styles.css");
+        expect(cssRes.output).not.toContain("aice search <pat> styles.css");
+
+        // 2. Explicit :L range overflow inside nested subproject keeps `site/` in both header & budget footer
+        const rangeOverflow = await aiceRead("site/playground.js:L1-L160", {
+          surface: "cli",
+          maxBytes: 2_400,
+        });
+        expect(rangeOverflow.output).toContain("// site/playground.js:");
+        expect(rangeOverflow.output).toMatch(
+          /\(L\d+-L160 remaining\) — narrow with aice search <pat> site\/playground\.js/,
+        );
+
+        // 3. Multi-file auto-outline Map & directory auto-outline keep `site/` prefix
+        const multiSite = await aiceRead(["site/playground.js", "site/styles.css"], {
+          surface: "cli",
+        });
+        expect(multiSite.output).toContain("// Auto-outlined site/playground.js");
+        expect(multiSite.output).toContain("// Auto-outlined site/styles.css");
+
+        // 4. Execute the emitted `batch symbols:` command directly from cwd — must resolve & succeed!
+        const cmdMatch = pgRes.output.match(/batch symbols: aice read ([^\n]+?) or aice search/);
+        expect(cmdMatch).not.toBeNull();
+        const followUpTargets = (cmdMatch?.[1] ?? "").trim().split(/\s+/);
+        const followUpRes = await aiceRead(followUpTargets, { surface: "cli" });
+        expect(followUpRes.output).toContain("escapePlaygroundHtml");
+        expect(followUpRes.output).toContain("renderTokenComparison");
+
+        // 5. Explicit programmatic options.projectRoot pointing to nested `site` still uses `site`-relative paths
+        const explicitSubRootRes = await aiceRead("playground.js", {
+          projectRoot: path.join(tmpDir, "site"),
+          surface: "cli",
+        });
+        expect(explicitSubRootRes.output).toContain(
+          "batch symbols: aice read playground.js:escapePlaygroundHtml playground.js:renderTokenComparison",
+        );
+      } finally {
+        process.chdir(origCwd);
+        fs.rmSync(nestedCfgPath, { force: true });
+      }
+    });
+  });
 });
