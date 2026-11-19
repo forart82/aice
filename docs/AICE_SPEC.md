@@ -2,7 +2,7 @@
 
 > **Status**: Official Normative Specification  
 > **Theoretical Basis**: Intent-Based Intermediate Representation, BPE Token Economics, Asymmetric Lens Calculus, and Side-by-Side Defense-in-Depth Architecture  
-> **Target Runtimes**: TypeScript (ES2022/NodeNext/TSX), Python (3.12+), C++ (C++20), Rust (2021), Go (1.22+), HTML5/CSS3  
+> **Target Runtimes**: TypeScript (ES2022/NodeNext/TSX), JavaScript, Python (3.12+), C++ (C++20), Rust (2021), Go (1.22+), C#, Kotlin, PHP, Java, XML/SVG, HTML5/CSS3, Twig, JSON/YAML, Shell/AIPL & Universal UTF-8 Text Passthrough  
 
 ---
 
@@ -60,7 +60,7 @@ RecordType          ::= "{" (IDENT ":" TypeExpr ("," IDENT ":" TypeExpr)*)? "}"
 ResultType          ::= "Result" "[" TypeExpr "," TypeExpr "]"
 OptionType          ::= TypeExpr "?" | "Option" "[" TypeExpr "]"
 RefinementType      ::= "{" IDENT ":" PrimitiveType "|" Expr "}"
-NamedType           ::= IDENT ("[" TypeExpr ("," TypeExpr)* "]")?
+NamedType           ::= IDENT ("::" IDENT)* ("[" TypeExpr ("," TypeExpr)* "]")?
 
 (* Function Declarations *)
 FunctionDecl        ::= "fn" IDENT "(" ParamList? ")" ("->" TypeExpr)? ":" NEWLINE Block
@@ -106,6 +106,7 @@ Expr                ::= BinaryExpr | UnaryExpr | PostfixExpr | PrimaryExpr
 PostfixExpr         ::= PrimaryExpr "?"                  (* Try unwrap Result/Option *)
                       | PrimaryExpr "(" ArgList? ")"     (* Call or Positional Struct Constructor *)
                       | PrimaryExpr "." IDENT            (* Property Access *)
+                      | PrimaryExpr "::" IDENT           (* Scope Resolution: MemberAccessExpr { isScopeAccess: true } *)
                       | PrimaryExpr "[" Expr "]"         (* Indexing *)
 
 BinaryExpr          ::= Expr BinaryOp Expr
@@ -231,6 +232,15 @@ Updating the AICE AST and emitting target code preserves all semantic edits when
 To guarantee zero friction with existing build pipelines (Vite, Cargo, CMake, TypeScript, pytest, Go, etc.), relative imports, and git history, AICE operates **100% On-the-Fly in RAM** with **zero `.aice` files on disk** behind **strictly two MCP tools** (`aice_read`, `aice_splice`), ergonomic CLI entry points (`aice read`, `aice search`/`grep`, `aice find`/`tree`, `aice splice`/`write`), and a single compact **`<= 650`-token `AGENTS.md`** workspace directive:
 - **`aice read [targets...] [-s <selector>] [--search <pat>] [-C <lines>] [--files] [--dsl] [--full] [--max-tokens <n>] [--deps] [--callers] [--idioms]`** (MCP `aice_read`; CLI discovery shortcuts `aice search` / `grep` and `aice find` / `tree`): Unified Read Engine — emits **exact 1-based disk-numbered native source lines** (`<lineNo>│ <rawDiskLine>`) by default on **both** `:symbol` queries (all lengths `<= 25` & `> 25` lines) and inline bare files (`--dsl` / `dsl: true` opts into AICE shorthand decompilation); enforces **`resolveEffectiveReadBudgets()` / `computeDynamicReadBudget()`** (**`9,216 B` (`9 KB`)** aligned CLI & MCP ceiling, `8,704 B` soft cap, `5,000`-token cap, smallest-first water-filling + **partial `9 KB` budget fill**, with `28,672 B` / `7,000`-token programmatic fallback) and **`computeDynamicSliceSpan()`** (**`6,912 B` (`6.75 KB`)** CLI/MCP slice budget clamped to `80..180` elision-aware lines and snapped to complete top-level AST symbol boundaries; `18,432 B` / `80..650` lines programmatic fallback); supports **`> 120L` Monolith X-Ray landmarks**, **`:sym@pattern` focus slicing**, **`> 110L` blank/divider/import elision**, **same-file space-separated multi-range coalescing**, and **MCP-to-CLI flag normalization**; expands Tier 1 & 2 search hits to `<= 40`-line enclosing AST declarations, **`> 65L` monolith focus sub-windows (`±5L`)**, or `±10` numbered native lines (`-C` / `contextLines` override); and scans workspaces in `< 20ms` (`filesOnly` / `--files` / `aice find`).
 - **`aice splice <file> [-s <symbol>] [-c <code>] [--stdin] [--idioms]`** (MCP `aice_splice`, CLI alias `aice write`): Unified Write Engine — automatically creates greenfield files (missing parent directories, inline `@idiom` / opt-in `--idioms`, AICE DSL compilation), applies surgical AST/CST, whitespace-resilient `<<< === >>>` hunk, and `±2`-line brace-safe `:Lstart-Lend` mutations (protected by the **half-open `[start, end)` `:L` off-by-one guard** and `±5` numbered error context lines) while preserving 100% of surrounding comments and formatting, or performs guarded atomic full-file overwrites (`35%–50%` write output token reduction; `15%–25%` real end-to-end session quota savings).
+
+### 5.1 Universal Text-File Support, Binary Guard, `TargetLanguage` & Pre-Write Validation Guarantees
+
+- **Universal UTF-8 Text Classification & Fail-Closed Binary Guard (`src/config/file-classification.ts`)**: All read/discovery/search/write/splice routes operate uniformly across any valid UTF-8 text file — including `.svg`, `.xml`, `.toml`, `.ini`, `.csv`, `.log`, `.tf`, `.rst`, `.mdx`, extensionless files (`Makefile`, `NOTES`), dotfiles (`.env.local`, `.customrc`), inline SVG/data blobs, and unknown extensions (`.customblob`). Binary extensions (`BINARY_EXTENSIONS`: `.png`, `.wasm`, media, archives, fonts, executables) and NUL-byte / control-stream / invalid-UTF-8 payloads (probed safely across multi-byte UTF-8 boundaries via `isLikelyBinaryBuffer()` / `isLikelyBinaryDiskFile()`) are skipped cleanly on read/search/find and rejected pre-write with lossless `Buffer`-backed transactional rollback in `createBatch`/`spliceBatch`.
+- **`TargetLanguage` SSOT Extensions & `::` Scope Access**: `TargetLanguage` includes `"xml"` (`.xml`, `.svg`), `"java"` (`.java`), and `"text"` (`.gradle`, `.pro`, `.properties`, `.example`, universal text fallback) with 100% agreement across `TARGET_EXT_MAP`, `detectTargetFromPath()`, and `detectTargetFromPathOrContent()`. In the AST (`src/core/ast.ts`) and Pratt expression parser (`src/core/parser/expressions.ts`), `::` scope resolution sets `isScopeAccess: true` on `MemberAccessExpr` (and supports `::`-qualified `NamedType` / `extends`), preserving native paths across Rust (`A::B::C`, `std::cmp::min`), C++ (`std::string`), and PHP (`Enum::Case`).
+- **Strengthened Lexical, Structural & XML/SVG Pre-Write Validation (`src/tools/preprocessor.ts`, `src/tools/syntax-validator.ts`)**:
+  - `maskSourceLexically()` handles nested block comments `/* /* */ */` (Rust, Kotlin), Rust `r#*""#*` raw/byte strings and `'static` lifetimes vs char literals, Go backtick raw strings and rune validation, C++ `R"delim(...)delim"` raw strings and `1'000'000` C++14 digit separators, C# `@""`/`$@""`/`"""` verbatim/raw/interpolated strings, Kotlin `"""` and `${...}`, PHP heredoc/nowdoc (`<<<EOT`), and Java `"""` text blocks with mandatory native `.java` dispatch.
+  - `validateXmlWellFormedness()` performs fast in-process well-formedness verification for `.xml` and `.svg` (comments, CDATA, PIs, DOCTYPE, attributes, tag nesting) and rejects mismatched or unclosed tags pre-write with exact `Line:Col` diagnostics (`Line <line>:<col> - ...`), while valid HTML fragments and Twig templates continue to pass cleanly.
+  - Polyglot decompilers (`src/decompiler/`) reject unknown characters, malformed expressions, and stray top-level tokens explicitly rather than silently dropping nodes or substituting `LiteralExpr(nil)`.
 
 ---
 

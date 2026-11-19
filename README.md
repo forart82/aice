@@ -69,6 +69,8 @@ Measured across **`13` autonomous workers** on real production tasks, priced in 
 | **Real Net End-to-End Quota Saved** | **`+5% to +11%` Net** | **`+17% to +25%` Net** | Honest bottom-line savings on your real LLM quota meter. |
 
 > Controlled cold-start lab benchmarks (`RW-01`..`RW-11`, `11/11` wins) and full production telemetry breakdowns live in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md).
+>
+> **Deterministic Offline Suite (`RW-01`..`RW-10`, 15 languages, `10/10` wins, `Zero .aice Left: true`)**: Tokens `127,011` (Without) → **`73,777` (`-41.9%`, Pure AICE)** → **`35,942` (`-71.7%`, With Idioms)**; Turns `502` → **`206` (`-59.0%`)** → **`154` (`-69.3%`)**; powered by bounded `mtime+ctime+size+ino` LRU caching (`benchmark:offline` `9.2s → 3.3s` `-64%`, `verify:tokenomics` `18.7s → 4.8s` `-75%`, warm caller scans `~15x` faster, warm outlines `~8x` faster).
 
 ---
 
@@ -193,15 +195,22 @@ aice gain --reset --yes
 
 ---
 
-## 🌍 Supported Languages (20 Languages, 33 Extensions)
+## 🌍 Supported Languages & Universal UTF-8 Text Files
 
-| Domain | Languages & Extensions |
+### Structured AST, Decompiler & Pre-Write Syntax-Validated Languages (22+ Languages)
+
+| Domain | Languages & Hardened Capabilities |
 | :--- | :--- |
-| **Web & App** | TypeScript (`.ts`, `.tsx`, `.d.ts`), JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`), PHP (`.php`), Kotlin (`.kt`, `.kts`), C# (`.cs`) |
-| **Systems & Backend** | Python (`.py`, `.pyi`), Go (`.go`), Rust (`.rs`), C++20 (`.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`) |
-| **Markup & Styling** | HTML (`.html`), CSS (`.css`), Twig (`.twig`), Markdown (`.md`, `.markdown`) |
-| **Data & Config** | JSON (`.json`), YAML (`.yaml`, `.yml`) |
+| **Web & App** | TypeScript (`.ts`, `.tsx`, `.d.ts`), JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`), **Java (`.java`)** *(native routing, `"""` text blocks & symbol splicing)*, PHP (`.php`, heredoc/nowdoc, `#[Attr]`), Kotlin (`.kt`, `.kts`, raw `"""`, nested `/* /* */ */`), C# (`.cs`, nested classes, `@""` / `"""` strings) |
+| **Systems & Backend** | Python (`.py`, `.pyi`, zero-import `python3 -S -I` `compile()`), Go (`.go`, backticks, runes), Rust (`.rs`, nested `/* /* */ */`, `'static` lifetimes, `r#"..."#`, `A::B::C`, `..spread`, `as Type`), C++20 (`.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`, `std::` scope, `1'000'000` digit separators, `R"delim(...)delim"`) |
+| **Markup & Styling** | **XML & SVG (`.xml`, `.svg`)** *(fast in-process well-formedness validator with `Line:Col` diagnostics & outlining)*, HTML (`.html`, `.htm`), CSS (`.css`), Twig (`.twig`), Markdown (`.md`, `.markdown`) |
+| **Data & Config** | JSON (`.json`, `.jsonc`, `.webmanifest`), YAML (`.yaml`, `.yml`, `.cff`) |
 | **Shell & Agents** | Shell (`.sh`, `.bash`, `.zsh`), PowerShell (`.ps1`), Batch (`.cmd`, `.bat`), AIPL (`.aipl`) |
+
+### Universal UTF-8 Text-File Support & Binary Guard (`src/config/file-classification.ts`)
+
+- **Any UTF-8 Text File Works Out-of-the-Box**: `aice find`, `aice search`, `aice read`, `aice splice`, and `aice write` (plus MCP `aice_read` / `aice_splice`) support arbitrary & unknown text formats — including `.svg`, `.xml`, `.toml`, `.ini`, `.csv`, `.log`, `.tf`, `.rst`, `.mdx`, extensionless files (`Makefile`, `NOTES`), dotfiles (`.env.local`, `.customrc`), inline SVG/data blobs, and unknown extensions (`.customblob`).
+- **Fail-Closed Binary Guard & Transactional Rollback**: Known binary extensions (`.png`, `.wasm`, images, archives, fonts, executables) and NUL-byte / non-UTF-8 files are skipped cleanly in `find`/`search`/`read` and rejected before disk mutation in `splice`/`write`/MCP, backed by lossless `Buffer` rollback snapshots in `spliceBatch`/`createBatch`.
 
 ---
 
@@ -221,11 +230,36 @@ aice gain --reset --yes
 
 ```text
 aice/
-├── bin/          # CLI entrypoint (read, search/grep, find/tree, splice/write)
+├── bin/
+│   └── aice.ts             # Slim CLI entrypoint & barrel (read, search/grep, find/tree, splice/write)
 ├── src/
-│   ├── tools/    # Unified read (9 KB cap, X-Ray, @focus, elision) & resilient splice engine
-│   ├── mcp/      # Strict 2-tool MCP stdio server (aice_read, aice_splice)
-│   ├── rules/    # Single-file <= 300-token AGENTS.md rule SSOT (mandatory-rules.ts)
+│   ├── cli/                # 7 acyclic CLI command & MCP-to-CLI flag-normalization submodules
+│   ├── config/
+│   │   ├── file-classification.ts # Universal UTF-8 text-file SSOT & binary guard
+│   │   ├── path-resolver.ts       # Project root & universal target path resolution
+│   │   └── project-config.ts      # aice.config.json, TARGET_EXT_MAP & rule sync
+│   ├── cache/
+│   │   ├── lru.ts          # BoundedLruCache, TwoGenBoundedCache, FileStatLruCache (mtime+ctime+size+ino)
+│   │   └── disk-cache.ts   # Optional on-disk compilation cache helpers
+│   ├── core/
+│   │   ├── parser.ts       # Thin parser barrel re-exporting acyclic src/core/parser/ (7 submodules, :: scope)
+│   │   └── lexer.ts / ast.ts / trivia.ts # Indentation lexer, AST nodes & CST trivia
+│   ├── decompiler/         # Hardened polyglot decompilers (TS, Python, Rust, C++, Go, C#, Kotlin, PHP, ...)
+│   ├── emitters/           # Lossless multi-language native emitters & TargetLanguage SSOT
+│   ├── tools/
+│   │   ├── read.ts         # Thin barrel -> src/tools/read/ (6 acyclic discovery/search/budget/engine submodules)
+│   │   ├── context.ts      # Thin barrel -> src/tools/context/ (8 acyclic search/focus/elision/callers submodules)
+│   │   ├── splice.ts       # Thin barrel -> src/tools/splice/ (11 acyclic hunk/stream/span/batch submodules)
+│   │   ├── syntax-validator.ts / preprocessor.ts # Lexical masking, native syntax & XML/SVG well-formedness
+│   │   └── outline.ts / create.ts / diff-patch.ts / fmt.ts / parity-gate.ts
+│   ├── mcp/                # Strict 2-tool MCP stdio server (aice_read, aice_splice)
+│   ├── rules/              # Single-file <= 300-token AGENTS.md rule SSOT (mandatory-rules.ts)
+│   ├── tokenomics/         # Cached exact js-tiktoken BPE (cl100k_base & o200k_base)
+│   └── telemetry/          # Honest signed < 250 B JSONL ledger (aice gain & aice analyze)
+├── benchmarks/             # Live real-agent (RW-01..RW-11) & deterministic offline (RW-01..RW-10) suites
+├── docs/                   # Architecture, EBNF spec, CST trivia, research synthesis & benchmark reports
+└── tests/                  # Unit & integration test suites (barrels/DAGs, universal files, polyglot, MCP, CLI)
+```
 
 ---
 

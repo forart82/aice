@@ -15,7 +15,7 @@
 | **Real Agent LLM Turns** (`PLANNER_RESPONSE`) | 328 turns | **102 turns (-68.9%)** | **108 turns (-67.1%)** | Pure **11/11** \| +Idioms **11/11 (100%)** |
 | **Real Agent Tool Calls** (`tool_calls`) | 346 calls | **72 calls (-79.2%)** | **78 calls (-77.5%)** | Pure **11/11** \| +Idioms **11/11 (100%)** |
 | **Real Agent Wall-Clock Duration** | 1340.3s | **553.9s** | **526.5s** | Pure **11/11** \| +Idioms **11/11 (100%)** |
-| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,011 | **74,015 (-41.7%)** | **36,180 (-71.5%)** | **10/10 (100%)** |
+| **Offline Deterministic Suite Tokens** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 127,011 | **73,777 (-41.9%)** | **35,942 (-71.7%)** | **10/10 (100%)** |
 | **Offline Deterministic Suite Turns** ([BENCHMARKS_OFFLINE.md](./BENCHMARKS_OFFLINE.md)) | 502 turns | **206 turns (-59.0%)** | **154 turns (-69.3%)** | **10/10 (100%)** |
 
 ## 2. Adversarial Cold-Start Methodology & How Real Agent Telemetry Is Measured
@@ -127,17 +127,32 @@ Every run below corresponds to a real agent session whose `transcript.jsonl` log
 
 | ID | Scenario | Offline Token Savings (Pure AICE / +Idioms) | Real Agent Working Token Savings (Pure AICE / +Idioms) | Real Agent API Cost Savings (Pure AICE / +Idioms) | Real Agent Turn Savings (Pure AICE / +Idioms) |
 | :--- | :--- | :---: | :---: | :---: | :---: |
-| **RW-01** | HTML5 Canvas Arcade Snake Window Application (Greenfield from 0) | -44.8% / **-74.1%** | -53.4% / **-79.7%** | -75.0% / **-81.4%** | -75.6% / **-78.0%** |
-| **RW-02** | Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0) | -37.0% / **-69.0%** | -52.5% / **-68.4%** | -56.2% / **-60.6%** | -56.5% / **-56.5%** |
-| **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -43.3% / **-72.2%** | -60.8% / **-75.6%** | -79.6% / **-84.7%** | -77.8% / **-81.5%** |
-| **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -40.1% / **-70.4%** | -64.6% / **-78.7%** | -75.3% / **-78.8%** | -73.0% / **-73.0%** |
-| **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -42.2% / **-70.8%** | -54.3% / **-66.2%** | -50.5% / **-48.2%** | -47.4% / **-36.8%** |
-| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -43.5% / **-72.7%** | -66.8% / **-77.0%** | -71.5% / **-71.7%** | -65.4% / **-61.5%** |
-| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -38.8% / **-70.1%** | -25.6% / **-37.7%** | -51.1% / **-40.0%** | -47.4% / **-26.3%** |
-| **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -39.5% / **-70.4%** | -59.1% / **-78.5%** | -76.5% / **-80.3%** | -78.6% / **-78.6%** |
-| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -41.5% / **-71.4%** | -62.2% / **-73.2%** | -74.2% / **-77.9%** | -73.5% / **-70.6%** |
-| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -42.6% / **-72.0%** | -57.9% / **-70.7%** | -69.3% / **-71.3%** | -60.6% / **-57.6%** |
+| **RW-01** | HTML5 Canvas Arcade Snake Window Application (Greenfield from 0) | -44.9% / **-74.2%** | -53.4% / **-79.7%** | -75.0% / **-81.4%** | -75.6% / **-78.0%** |
+| **RW-02** | Headless Python CLI Task Queue & Telemetry Worker Daemon (Greenfield from 0) | -37.1% / **-69.2%** | -52.5% / **-68.4%** | -56.2% / **-60.6%** | -56.5% / **-56.5%** |
+| **RW-03** | Symfony/PHP + JS + Twig + CSS + HTML + YAML + JSON Storefront Checkout (Bug Fix) | -43.5% / **-72.4%** | -60.8% / **-75.6%** | -79.6% / **-84.7%** | -77.8% / **-81.5%** |
+| **RW-04** | Vite + TypeScript + React TSX + CSS + HTML + JSON + YAML Analytics Dashboard (New Feature) | -40.3% / **-70.6%** | -64.6% / **-78.7%** | -75.3% / **-78.8%** | -73.0% / **-73.0%** |
+| **RW-05** | Go API Gateway + Rust WAL Storage Engine Distributed Ledger Mesh (Update Feature) | -42.4% / **-71.0%** | -54.3% / **-66.2%** | -50.5% / **-48.2%** | -47.4% / **-36.8%** |
+| **RW-06** | C++20 Framebuffer Physics Viewport + TypeScript Inspector Overlay (Bug Fix) | -43.7% / **-72.9%** | -66.8% / **-77.0%** | -71.5% / **-71.7%** | -65.4% / **-61.5%** |
+| **RW-07** | C# .NET Payment Settlement Service + Kotlin Fraud Scoring Engine (New Feature) | -39.0% / **-70.3%** | -25.6% / **-37.7%** | -51.1% / **-40.0%** | -47.4% / **-26.3%** |
+| **RW-08** | Python FastAPI + React TSX + Twig Invoice Studio + CSS + JSON + YAML Billing Portal (Update Feature) | -39.7% / **-70.6%** | -59.1% / **-78.5%** | -76.5% / **-80.3%** | -78.6% / **-78.6%** |
+| **RW-09** | High-Frequency Order Book Matching Engine & Risk Guard Daemon (Bug Fix) | -41.7% / **-71.6%** | -62.2% / **-73.2%** | -74.2% / **-77.9%** | -73.5% / **-70.6%** |
+| **RW-10** | Unified 15-Language Enterprise Cloud Observability & Control Plane (Full-Stack Update Feature) | -42.9% / **-72.2%** | -57.9% / **-70.7%** | -69.3% / **-71.3%** | -60.6% / **-57.6%** |
 | **RW-11** | Hostile 1-File, 0-Idiom Surgical Bug-Fix (`ledger_reconciler.ts` Lone Needle) | *(Live-only adversarial gate)* | **-60.8%** / -58.2% | **-48.9%** / -48.9% | **-50.0%** / -50.0% |
+
+### 5b. Deterministic Offline Benchmark Suite & Engine Performance (`docs/BENCHMARKS_OFFLINE.md`)
+
+In addition to the live adversarial agent suite above, [`docs/BENCHMARKS_OFFLINE.md`](./BENCHMARKS_OFFLINE.md) tracks deterministic exact-BPE (`o200k_base`) tokenomics and runtime throughput across all `10` multi-file scenarios (`RW-01`..`RW-10`, `15/15` languages, `Zero .aice Left: true`):
+
+| Metric | v0.9.52 Baseline | Current Verified Suite | Delta |
+| :--- | :---: | :---: | :---: |
+| **Offline Tokens — Without AICE** | `127,011` | `127,011` | Exact baseline |
+| **Offline Tokens — AICE Without Idioms** | `74,015 (-41.7%)` | **`73,777 (-41.9%)`** | **`-238` tokens** (Read `12,079 → 11,841`, `-20.3%`) |
+| **Offline Tokens — AICE With Idioms** | `36,180 (-71.5%)` | **`35,942 (-71.7%)`** | **`-238` tokens** (Read `8,980 → 8,742`, `-41.1%`) |
+| **Offline Turns (Without / No Idioms / With Idioms)** | `502` / `206 (-59.0%)` / `154 (-69.3%)` | **`502` / `206 (-59.0%)` / `154 (-69.3%)`** | `0` turn amplification (`10/10` wins both modes) |
+| **`npm run benchmark:offline` Wall-Clock** | `9.2s` | **`3.3s`** | **`-64%`** (bounded LRU + stat-keyed caches) |
+| **`npm run verify:tokenomics` Wall-Clock** | `18.7s` | **`4.8s`** | **`-75%`** (cached exact `js-tiktoken` BPE) |
+| **Warm Workspace Caller Scans (`scanWorkspaceCallers`)** | `490.0ms` | **`~30ms`** | **`~15x` faster** |
+| **Warm Structural Outlines (`generateOutline`)** | `4.6ms – 7.7ms` | **`0.5ms – 1.1ms`** | **`~8x` faster** |
 
 ## 6. Architectural Analysis: Why AICE Wins 11/11 Cold-Start, 0-Idiom & Decoy-Minefield Workspaces
 
