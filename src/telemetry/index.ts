@@ -420,14 +420,25 @@ export function isTelemetrySuppressed(): boolean {
 }
 
 /**
- * Resolves the active telemetry JSONL file path, respecting `AICE_TELEMETRY_PATH` and `AICE_HOME`.
+ * Resolves the active telemetry JSONL file path, respecting `AICE_TELEMETRY_PATH`, `AICE_TELEMETRY_DIR`, and `AICE_HOME`.
  */
 export function resolveTelemetryPath(explicitPath?: string): string {
   if (explicitPath) {
-    return path.resolve(explicitPath);
+    const resolvedExplicit = path.resolve(explicitPath);
+    try {
+      if (fs.existsSync(resolvedExplicit) && fs.statSync(resolvedExplicit).isDirectory()) {
+        return path.join(resolvedExplicit, "gains.jsonl");
+      }
+    } catch {
+      // ignore stat errors
+    }
+    return resolvedExplicit;
   }
   if (process.env.AICE_TELEMETRY_PATH) {
     return path.resolve(process.env.AICE_TELEMETRY_PATH);
+  }
+  if (process.env.AICE_TELEMETRY_DIR) {
+    return path.join(path.resolve(process.env.AICE_TELEMETRY_DIR), "gains.jsonl");
   }
   const baseHome = process.env.AICE_HOME
     ? path.resolve(process.env.AICE_HOME)
@@ -442,6 +453,7 @@ export function isTestEnvWithoutExplicitTelemetry(explicitPath?: string): boolea
   if (
     explicitPath ||
     process.env.AICE_TELEMETRY_PATH ||
+    process.env.AICE_TELEMETRY_DIR ||
     process.env.AICE_TELEMETRY_ERRORS_PATH ||
     process.env.AICE_HOME
   ) {
@@ -497,14 +509,19 @@ export function isEphemeralPath(candidatePath: string, resolveRelative = true): 
 /**
  * Detects whether the workspace (`cwd`, `projectRoot`, or `targetPath`) is an ephemeral sandbox
  * (`/tmp`, `/var/tmp`, `os.tmpdir()`, or `swarm-*` worktrees) where global telemetry recording
- * should be suppressed unless an explicit telemetry path or `AICE_HOME` is set.
+ * should be suppressed unless an explicit telemetry path, `AICE_TELEMETRY_DIR`, or `AICE_HOME` is set.
  */
 export function isEphemeralWorkspace(
   cwd: string | Array<string | undefined> = process.cwd(),
   explicitPath?: string,
   ...extraPaths: Array<string | undefined>
 ): boolean {
-  if (explicitPath || process.env.AICE_TELEMETRY_PATH || process.env.AICE_HOME) {
+  if (
+    explicitPath ||
+    process.env.AICE_TELEMETRY_PATH ||
+    process.env.AICE_TELEMETRY_DIR ||
+    process.env.AICE_HOME
+  ) {
     return false;
   }
   const candidates = Array.isArray(cwd) ? [...cwd, ...extraPaths] : [cwd, ...extraPaths];
@@ -2677,6 +2694,7 @@ export function buildGainReport(
   const dropEphemeralErrorRoots =
     !options.telemetryPath &&
     !process.env.AICE_TELEMETRY_PATH &&
+    !process.env.AICE_TELEMETRY_DIR &&
     !process.env.AICE_TELEMETRY_ERRORS_PATH &&
     !process.env.AICE_HOME;
   const errorsByRoot = loadNonBenignErrorEventsByProject(ledgerPath, dropEphemeralErrorRoots);

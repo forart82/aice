@@ -51,9 +51,9 @@ flowchart LR
 | :--- | :--- | :--- |
 | **Leaner Reads Stay Out of History** | **`-43% to -56%`** smaller read payloads | `>120L` Monolith X-Ray outlines, `:sym@keyword` focus slices, `>110L` blank/import elision, and an aligned `9 KB` anti-spill ceiling. |
 | **Nearly Half the Output Tokens** | **`-44% to -47%`** fewer `4x`-priced edit tokens | Multi-file `--stdin` batch streams (`<<< === >>>` or `:Lstart-Lend`) skip repeating unchanged `Target` blocks. |
-| **Zero Wasted Slice & Retry Turns** | **`0`** extra pagination or flag-retry turns | Symbol/search hints instead of linear `:L` breadcrumbs, priority 1-turn multi-target batch packing (`aice read f1:sym f2 f3`), and an anti-pagination `AGENTS.md` rule settle reads in 1 turn. |
+| **Zero Wasted Slice & Retry Turns** | **`0`** extra pagination or flag-retry turns | Symbol/search hints instead of linear `:L` breadcrumbs, priority 1-turn multi-target batch packing (`aice read f1:sym f2 f3`), 1-turn shifted `:L` / hunk splice recovery, and an anti-pagination `AGENTS.md` rule. |
 | **Longer Sessions Before Compaction** | **`119K`** avg window vs `196K` (`-39%`) | Agents run **~35% longer** before hitting the `200K` compaction wall. |
-| **Zero Broken Disk Writes** | **`0`** broken files written to disk | Pre-write native syntax validation, inclusive `:L` off-by-one guard, and atomic `.tmp` -> `rename` commits. |
+| **Zero Broken Disk Writes** | **`0`** broken files written to disk | Pre-write native syntax validation, `±20`-line `:L` & CSS brace disambiguation, 5th-pass whitespace hunk recovery, and atomic `.tmp` -> `rename` commits. |
 
 ### Live Production Scorecard (`923` Real Calls / `633` AI Turns on `aipl_dog`)
 
@@ -177,10 +177,10 @@ EOF
 
 ### 4. Built-In Guardrails & Real Savings Telemetry (`aice gain` & `aice analyze`)
 
-- **Anti-Pagination & 1-Turn Batch Packing (`v0.9.52`)**: Oversized or budget-capped files emit `batch symbols: aice read <file>:<sym1> <file>:<sym2> or aice search <pat> <file>` hints instead of linear `:L1-L140` breadcrumbs; `aice read f1:sym f2 f3` packs explicit selectors and small files first while auto-outlining oversized bare files in **1 turn**; and the `<= 300`-token `AGENTS.md` rule forbids sequential `:L1-L150` -> `:L151-L300` paging across turns.
-- **Zero Broken Disk Writes**: Pre-write native syntax validation, an inclusive `:L` off-by-one guard, whitespace-resilient `<<< === >>>` dedent matching, `±5`-line syntax error context, and atomic `.tmp` -> `rename` commits roll back failed `--stdin` batches cleanly.
+- **Anti-Pagination & 1-Turn Batch Packing (`v0.9.52`)**: Oversized or budget-capped files emit `batch symbols: aice read <file>:<sym1> <file>:<sym2> or aice search <pat> <file>` hints (preserving nested-subproject `cwd`-relative paths) instead of linear `:L1-L140` breadcrumbs; `aice read f1:sym f2 f3` packs explicit selectors and small files first while auto-outlining oversized bare files in **1 turn**; and the `<= 300`-token `AGENTS.md` rule forbids sequential `:L1-L150` -> `:L151-L300` paging across turns.
+- **1-Turn `:Lstart-Lend` & Hunk Splice Recovery (`v0.9.52`)**: Pre-write native syntax validation, inclusive `:L` off-by-one guard, `±20`-line shifted anchor & prefix+suffix envelope `:Lstart-Lend` recovery, CSS off-by-1 brace disambiguation, 5th-pass interior-whitespace `<<< === >>>` hunk matching, actionable retry `Tip:` diagnostics (`±5` numbered lines), and atomic `.tmp` -> `rename` commits settle edits in 1 turn with zero broken disk writes.
 - **Smart Self-Healing Diagnostics**: Missing symbols trigger Levenshtein `Did you mean` hints, invalid regex patterns fall back safely to literal search, and MCP-style flags (`--files-only=true`, `--context-lines=5`) passed to CLI calls normalize automatically.
-- **Honest Signed BPE Accounting**: Tracks `cl100k_base` & `o200k_base` deltas in a `< 250 B/event` numeric ledger (`~/.aice/telemetry/gains.jsonl`, zero raw source stored on disk), isolating `/tmp/*` and `swarm-*` sandboxes automatically.
+- **Honest Signed BPE & Session Accounting (`v0.9.52`)**: Tracks `cl100k_base` & `o200k_base` deltas in a `< 250 B/event` numeric ledger (`~/.aice/telemetry/gains.jsonl`, overrideable via `AICE_TELEMETRY_DIR` / `AICE_TELEMETRY_PATH` / `AICE_HOME`), while `aice analyze` counts `extraReadTurns` strictly on true same-file repeat reads, strips shell redirects (`2>/dev/null`, `2>&1`), and separates post-`&&` non-AICE command failures from AICE errors.
 
 ```bash
 aice gain              # Global summary, Rule Break-Even & <90s Repeat-Read Turn Warnings (alias: aice stats)

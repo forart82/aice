@@ -26,6 +26,7 @@ function runCli(args: string[], cwd: string, telemetryPath?: string) {
     env.AICE_TELEMETRY_PATH = telemetryPath;
   } else {
     delete env.AICE_TELEMETRY_PATH;
+    delete env.AICE_TELEMETRY_DIR;
   }
   return spawnSync(TSX_BIN, [CLI_ENTRY, ...args], {
     cwd,

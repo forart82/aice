@@ -395,16 +395,22 @@ describe("Comma suite", () => {
     it("unifies isTestEnvWithoutExplicitTelemetry, honors nativeChars, and strips trailing control bytes in analyzeProject", () => {
       const savedEnv = {
         AICE_TELEMETRY_PATH: process.env.AICE_TELEMETRY_PATH,
+        AICE_TELEMETRY_DIR: process.env.AICE_TELEMETRY_DIR,
         AICE_TELEMETRY_ERRORS_PATH: process.env.AICE_TELEMETRY_ERRORS_PATH,
         AICE_HOME: process.env.AICE_HOME,
       };
       const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-telemetry-guards-"));
       try {
         delete process.env.AICE_TELEMETRY_PATH;
+        delete process.env.AICE_TELEMETRY_DIR;
         delete process.env.AICE_TELEMETRY_ERRORS_PATH;
         delete process.env.AICE_HOME;
         expect(isTestEnvWithoutExplicitTelemetry()).toBe(true);
         expect(isTestEnvWithoutExplicitTelemetry("/tmp/custom.jsonl")).toBe(false);
+
+        process.env.AICE_TELEMETRY_DIR = tmpDir;
+        expect(isTestEnvWithoutExplicitTelemetry()).toBe(false);
+        delete process.env.AICE_TELEMETRY_DIR;
 
         process.env.AICE_HOME = tmpDir;
         expect(isTestEnvWithoutExplicitTelemetry()).toBe(false);

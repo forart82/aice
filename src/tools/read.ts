@@ -1640,6 +1640,12 @@ function extractRepresentativeSymbolHints(opts: {
     bucket.push(candidate);
   };
 
+  const approxTotalLines = rawSource ? countSourceLines(rawSource) : undefined;
+  const nonImportSymbolCount = symbols
+    ? symbols.filter((s) => !NON_SYMBOL_HINT_KINDS.has(s.kind)).length
+    : 0;
+  let skippedLoneMonolithVar = false;
+
   if (symbols && symbols.length > 0) {
     for (const sym of symbols) {
       if (NON_SYMBOL_HINT_KINDS.has(sym.kind)) continue;
@@ -1663,7 +1669,16 @@ function extractRepresentativeSymbolHints(opts: {
         if (PRIMARY_CALLABLE_HINT_KINDS.has(sym.kind)) {
           pushUnique(primary, symName);
         } else {
-          pushUnique(secondary, symName);
+          const isLoneMonolithVar =
+            (sym.kind === "var" || sym.kind === "const") &&
+            nonImportSymbolCount <= 1 &&
+            (!sym.children || sym.children.length === 0) &&
+            (approxTotalLines ?? 0) >= 200;
+          if (isLoneMonolithVar) {
+            skippedLoneMonolithVar = true;
+          } else {
+            pushUnique(secondary, symName);
+          }
         }
         if (sym.children && sym.children.length > 0) {
           for (const ch of sym.children) {
@@ -1711,7 +1726,7 @@ function extractRepresentativeSymbolHints(opts: {
     if (!chosen.includes(s)) chosen.push(s);
   }
 
-  if (chosen.length === 0) {
+  if (chosen.length === 0 && !skippedLoneMonolithVar) {
     if (rawSource === undefined && resolvedDiskPath && fs.existsSync(resolvedDiskPath)) {
       try {
         rawSource = fs.readFileSync(resolvedDiskPath, "utf-8");
@@ -1723,9 +1738,10 @@ function extractRepresentativeSymbolHints(opts: {
     const isCodeLike =
       CODE_EXT_FOR_REGEX_HINT_RE.test(checkRef) || Boolean(rawSource?.startsWith("#!"));
     if (rawSource && isCodeLike) {
+      const strippedStrings = rawSource.replace(/"""[\s\S]*?"""|'''[\s\S]*?'''|`[\s\S]*?`/g, "");
       const declRe =
         /(?:^|\n)[ \t]*(?:export\s+)?(?:pub\s+)?(?:async\s+)?(?:function|fn|def|class|struct)\s+([A-Za-z_$][A-Za-z0-9_$]{3,})\b/g;
-      for (const m of rawSource.matchAll(declRe)) {
+      for (const m of strippedStrings.matchAll(declRe)) {
         const cand = m[1]?.trim();
         if (cand && cand !== cleanExclude && !chosen.includes(cand)) {
           chosen.push(cand);
@@ -4036,7 +4052,10 @@ export async function aiceRead(
       Math.max(850, outlineItems.length * 1_100),
     );
     if (Buffer.byteLength(rawOutlineSectionBody, "utf-8") > maxOutlineShareBytes) {
-      const subBlocks = rawOutlineSectionBody.split("\n\n");
+      const subBlocks =
+        outlineItems.length === 1 && !outlineItems[0]?.isDir
+          ? [rawOutlineSectionBody]
+          : rawOutlineSectionBody.split(/\n\n(?=\/\/ (?:Auto-outlined |=== ))/);
       const perBlockCap = Math.max(
         260,
         Math.floor(
@@ -4745,6 +4764,14 @@ async function executeContextStream(params: {
       }
       if (!matchedSubset) {
         multiTargetErrors.push(targetErr);
+        const label = item.effectiveSelector
+          ? `${item.displayPath}:${item.effectiveSelector}`
+          : item.displayPath;
+        const dymMatch =
+          targetErr instanceof Error ? /Did you mean:\s*([^\n]+)/.exec(targetErr.message) : null;
+        missingTargets.push(
+          dymMatch?.[1] ? `${label} (Did you mean: ${dymMatch[1].trim()})` : label,
+        );
       }
     }
 

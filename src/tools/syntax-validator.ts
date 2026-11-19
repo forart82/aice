@@ -952,9 +952,38 @@ export function validateNativeSyntax(
       }
 
       const isAiplInlineFn = (text: string) => {
-        const lastParen = text.lastIndexOf(")");
-        if (lastParen < 0) return false;
-        const afterParen = text.slice(lastParen + 1).trim();
+        const openParen = text.indexOf("(");
+        if (openParen < 0) return false;
+        let depth = 0;
+        let inQuote: string | null = null;
+        let paramClose = -1;
+        for (let k = openParen; k < text.length; k++) {
+          const c = text[k]!;
+          if (inQuote) {
+            if (c === "\\") {
+              k++;
+              continue;
+            }
+            if (c === inQuote) inQuote = null;
+            continue;
+          }
+          if (c === '"' || c === "'") {
+            inQuote = c;
+            continue;
+          }
+          if (c === "(") depth++;
+          else if (c === ")") {
+            depth--;
+            if (depth === 0) {
+              paramClose = k;
+              break;
+            }
+          }
+        }
+        if (paramClose < 0) return false;
+        const afterParen = text.slice(paramClose + 1).trim();
+        if (afterParen.startsWith("=") && !afterParen.startsWith("==")) return true;
+        if (/^(?::|->)\s*[^=:]+=\s*\S+/.test(afterParen)) return true;
         const colons = (afterParen.match(/:/g) || []).length;
         if (colons >= 2) return true;
         if (colons === 1 && afterParen.includes("=")) return true;
@@ -963,7 +992,6 @@ export function validateNativeSyntax(
           /^\s*:\s*(?:ret\b|return\b|pass\b|assert\b|print|if\b|\{)/.test(afterParen)
         )
           return true;
-        if (/^\s*=\s*\S+/.test(afterParen)) return true;
         return false;
       };
 

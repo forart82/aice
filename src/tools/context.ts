@@ -440,7 +440,7 @@ function computeSymbolSurgicalWindowText(
   let hitIdx = -1;
   if (esc) {
     const declRe = new RegExp(
-      `(?:function|def|func|fun|class|interface|type|const|let|var|public|private|protected)\\s+.*\\b${esc}\\b`,
+      `(?:function|fn|def|func|fun|class|struct|enum|trait|module|interface|type|const|let|var|public|private|protected|pub)\\s+.*\\b${esc}\\b`,
     );
     hitIdx = rawLines.findIndex((l) => declRe.test(l));
     if (hitIdx < 0) {
@@ -585,7 +585,56 @@ export function computeHonestReadBaselineText(params: HonestReadBaselineParams):
 
   if (sym && sym !== "*" && sym.toLowerCase() !== "outline" && params.rawSource !== undefined) {
     const raw = params.rawSource;
-    const rawLinesCount = Math.max(1, countContextLines(raw));
+    const rawLines = raw.split(/\r?\n/);
+    const rawLinesCount = Math.max(1, rawLines.length);
+    const symParts = splitSymbolSelectors(sym)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (symParts.length > 1) {
+      const intervals: Array<{ s: number; e: number }> = [];
+      for (const p of symParts) {
+        if (isPureLineRangeSymbolString(p)) {
+          const m = p.match(/L?(\d+)(?:-L?(\d+))?/i);
+          const sL = m?.[1] ? Math.max(1, Number.parseInt(m[1], 10) - 10) : 1;
+          const eL = m?.[2]
+            ? Math.min(rawLinesCount, Number.parseInt(m[2], 10) + 10)
+            : Math.min(rawLinesCount, sL + 20);
+          intervals.push({ s: sL, e: Math.max(sL, eL) });
+        } else {
+          const w = computeSymbolSurgicalWindowText(raw, p, 120);
+          intervals.push({ s: w.startLine, e: w.endLine });
+        }
+      }
+      intervals.sort((a, b) => a.s - b.s || a.e - b.e);
+      const mergedIntervals: Array<{ s: number; e: number }> = [];
+      for (const iv of intervals) {
+        const last = mergedIntervals[mergedIntervals.length - 1];
+        if (last && iv.s <= last.e + 1) {
+          last.e = Math.max(last.e, iv.e);
+        } else {
+          mergedIntervals.push({ ...iv });
+        }
+      }
+      const multiStdout = mergedIntervals
+        .map(
+          (iv) =>
+            `Showing lines ${iv.s}-${iv.e} of ${rawLinesCount}\n${numberReadFileLines(rawLines.slice(iv.s - 1, iv.e).join("\n"), iv.s)}`,
+        )
+        .join("\n");
+      if (!wrap) {
+        return estimateTokens(multiStdout, "cl100k_base") <= estimateTokens(raw, "cl100k_base")
+          ? multiStdout
+          : raw;
+      }
+      const fullWrapped = `${JSON.stringify({ Path: safePath })}\nShowing lines 1-${rawLinesCount} of ${rawLinesCount}\n${numberReadFileLines(raw, 1)}`;
+      const multiWrapped = mergedIntervals
+        .map(
+          (iv) =>
+            `${JSON.stringify({ Path: safePath, StartLine: iv.s, EndLine: iv.e })}\nShowing lines ${iv.s}-${iv.e} of ${rawLinesCount}\n${numberReadFileLines(rawLines.slice(iv.s - 1, iv.e).join("\n"), iv.s)}`,
+        )
+        .join("\n");
+      return multiWrapped.length <= fullWrapped.length ? multiWrapped : fullWrapped;
+    }
     const win = computeSymbolSurgicalWindowText(raw, sym, 120);
     const pureSymStdout = `Showing lines ${win.startLine}-${win.endLine} of ${rawLinesCount}\n${numberReadFileLines(win.sliceText, win.startLine)}`;
     if (!wrap) {

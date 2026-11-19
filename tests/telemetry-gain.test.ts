@@ -354,6 +354,7 @@ describe("Phase 5 & Step 6: Honest Signed BPE Token Savings Telemetry (aice gain
 
     try {
       delete process.env.AICE_TELEMETRY_PATH;
+      delete process.env.AICE_TELEMETRY_DIR;
       delete process.env.AICE_TELEMETRY_ERRORS_PATH;
       delete process.env.AICE_HOME;
       delete process.env.VITEST;

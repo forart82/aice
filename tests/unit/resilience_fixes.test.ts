@@ -98,6 +98,7 @@ export function calculateTotal(price: number, tax: number): number {
 
     beforeEach(() => {
       delete process.env.AICE_TELEMETRY_PATH;
+      delete process.env.AICE_TELEMETRY_DIR;
       delete process.env.AICE_TELEMETRY_ERRORS_PATH;
       delete process.env.AICE_HOME;
     });
@@ -126,8 +127,11 @@ export function calculateTotal(price: number, tax: number): number {
       expect(isEphemeralWorkspace("/tmp/my-sandbox", "/custom/telemetry.jsonl")).toBe(false);
     });
 
-    it("does not treat path as ephemeral if AICE_HOME is set", () => {
+    it("does not treat path as ephemeral if AICE_HOME or AICE_TELEMETRY_DIR is set", () => {
       process.env.AICE_HOME = "/custom/home";
+      expect(isEphemeralWorkspace("/tmp/my-sandbox")).toBe(false);
+      delete process.env.AICE_HOME;
+      process.env.AICE_TELEMETRY_DIR = "/tmp/custom-telemetry-dir";
       expect(isEphemeralWorkspace("/tmp/my-sandbox")).toBe(false);
     });
 

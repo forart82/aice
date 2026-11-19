@@ -27,6 +27,7 @@ import { detectTargetFromPathOrContent, type TargetLanguage } from "../emitters/
 import { collapseModuleIdioms } from "../idioms/idiom-transform.js";
 import { recordTelemetryEvent, withSuppressedTelemetry } from "../telemetry/index.js";
 import { estimateTokens } from "../tokenomics/index.js";
+import { maskSourceLexically } from "./preprocessor.js";
 import {
   extractNativeTestBlocks,
   extractScriptOrMarkdownSymbols,
@@ -2351,63 +2352,86 @@ function supplementNativeSymbolsFromSource(
     return;
   }
 
-  const lines = source.split(/\r?\n/);
+  const maskedCode = maskSourceLexically(source, targetLang).maskedCode;
+  const lines = maskedCode.split(/\r?\n/);
   const fnPrefix = "fn ";
-  const declPatterns: Array<{ re: RegExp; kind: string; sigPrefix: string }> = [
+  const allDeclPatterns: Array<{
+    langs?: TargetLanguage[];
+    re: RegExp;
+    kind: string;
+    sigPrefix: string;
+  }> = [
     {
+      langs: ["rust"],
       re: /^\s*(?:pub\s+)?macro_rules!\s+([A-Za-z_][A-Za-z0-9_]*)/,
       kind: "function",
       sigPrefix: fnPrefix,
     },
     {
+      langs: ["rust"],
       re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?fn\s+([A-Za-z_][A-Za-z0-9_]*)/,
       kind: "function",
       sigPrefix: fnPrefix,
     },
     {
-      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      langs: ["rust"],
+      re: /^\s*(?:pub(?:\([^)]*\))?\s+)?(?:struct|trait|enum)\s+([A-Za-z_][A-Za-z0-9_]*)/,
       kind: "class",
       sigPrefix: "class ",
     },
     {
+      langs: ["go"],
       re: /^\s*func\s+(?:\([^)]+\)\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
       kind: "function",
       sigPrefix: fnPrefix,
     },
     {
+      langs: ["go"],
       re: /^\s*type\s+([A-Za-z_][A-Za-z0-9_]*)\s+(?:struct|interface)\b/,
       kind: "interface",
       sigPrefix: "type ",
     },
     {
+      langs: ["kotlin"],
       re: /^\s*(?:public\s+|internal\s+|private\s+)?(?:sealed\s+interface|sealed\s+class|data\s+class|class|interface|object)\s+([A-Za-z_][A-Za-z0-9_]*)/,
       kind: "class",
       sigPrefix: "class ",
     },
     {
+      langs: ["kotlin"],
       re: /^\s*(?:public\s+|internal\s+|private\s+|override\s+)*(?:suspend\s+|inline\s+)*fun\s+(?:<[^>]+>\s*)?(?:[A-Za-z_][A-Za-z0-9_<>?.*]*\.)?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
       kind: "function",
       sigPrefix: fnPrefix,
     },
     {
-      re: /^\s*(?:public|private|protected|internal|sealed|abstract|partial|static|\s)*\b(?:record|class|struct|interface)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      langs: ["python"],
+      re: /^\s*class\s+([A-Za-z_][A-Za-z0-9_]*)\s*(?:\(|:)/,
       kind: "class",
       sigPrefix: "class ",
     },
     {
+      langs: ["python"],
       re: /^\s*(?:async\s+)?def\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
       kind: "function",
       sigPrefix: fnPrefix,
     },
     {
+      langs: ["cpp", "csharp", "php"],
+      re: /^\s*(?:public|private|protected|internal|sealed|abstract|partial|static|\s)*\b(?:record|class|struct|interface|trait)\s+([A-Za-z_][A-Za-z0-9_]*)/,
+      kind: "class",
+      sigPrefix: "class ",
+    },
+    {
+      langs: ["php"],
       re: /^\s*(?:public|protected|private|static|abstract|final|\s)*function\s+&?([A-Za-z_][A-Za-z0-9_]*)\s*\(/,
       kind: "function",
       sigPrefix: fnPrefix,
     },
   ];
+  const declPatterns = allDeclPatterns.filter((p) => !p.langs || p.langs.includes(targetLang));
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i]!;
     for (const pat of declPatterns) {
       const m = line.match(pat.re);
       if (m && m[1]) {

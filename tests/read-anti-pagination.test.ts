@@ -2,11 +2,15 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { computeProjectSystemicEconomics, readTelemetryEvents } from "../src/telemetry/index.js";
+import {
+  computeProjectSystemicEconomics,
+  readTelemetryEvents,
+  resolveTelemetryPath,
+} from "../src/telemetry/index.js";
+import { computeHonestReadBaselineText } from "../src/tools/context.js";
 import { aiceRead, DEFAULT_CLI_READ_MAX_BYTES } from "../src/tools/read.js";
 
 const SEQUENTIAL_SLICE_TRAP_RE = /next(?:\s+slice)?:\s+aice read\s+[^\s]+:L\d+/i;
-
 describe("v0.9.52 Read Anti-Pagination, 1-Turn Priority Batch Packing & Zero Single-File Loss", () => {
   let tmpDir: string;
 
@@ -499,6 +503,152 @@ describe("v0.9.52 Read Anti-Pagination, 1-Turn Priority Batch Packing & Zero Sin
       } finally {
         process.chdir(origCwd);
         fs.rmSync(nestedCfgPath, { force: true });
+      }
+    });
+  });
+
+  describe("Stage 2 Real-World Reproof Gauntlet Regressions", () => {
+    it("accepts AIPL expression-body functions ending in ')' without false Native Syntax Diagnostics or read token loss", async () => {
+      const aiplFile = path.join(tmpDir, "sieve_fizzbuzz.aipl");
+      const aiplSrc = [
+        "fn sievePrimes(limit):",
+        "  mut isPrime = [i >= 2 for i in 0..=limit]",
+        "  ret [k for k in 2..=limit if isPrime[k]]",
+        "",
+        'fn classifyCell(n, isPrime) = if isPrime: "PRIME({n})" else if n % 15 == 0: "FizzBuzz" else: str(n)',
+        "",
+        "let primes = sievePrimes(30)",
+        'println("{classifyCell(2, true)}")',
+        "",
+      ].join("\n");
+      fs.writeFileSync(aiplFile, aiplSrc, "utf-8");
+
+      const res = await aiceRead(aiplFile, { projectRoot: tmpDir, surface: "cli" });
+      expect(res.output).not.toContain("Native Syntax Diagnostics");
+      expect(res.output).toContain("classifyCell");
+      expect(res.stats.tokenCount).toBeLessThanOrEqual(res.stats.originalTokens ?? 0);
+    });
+
+    it("does not hallucinate Rust/C++/TS symbols inside Python triple-quoted strings and skips >=200L lone var hints", async () => {
+      const pyDataFile = path.join(tmpDir, "sources_data.py");
+      const embeddedLines: string[] = [
+        "# Polyglot benchmark sources dictionary",
+        "SOURCES = {}",
+        'SOURCES[("01", "cpp")] = """',
+        "std::string formatGreeting(const std::string& name) { return name; }",
+        "class FakeCppClass {};",
+        '"""',
+        'SOURCES[("01", "rust")] = """',
+        "pub fn fakeRustFn(x: i32) -> i32 { x + 1 }",
+        "pub struct FakeRustStruct { pub id: i32 }",
+        '"""',
+        'SOURCES[("01", "ts")] = """',
+        "export function parseCliArgs(args: string[]): string[] { return args; }",
+        '"""',
+      ];
+      for (let i = 0; i < 230; i++) {
+        embeddedLines.push(`# data row ${i}: "def notAFunction_${i}(): pass"`);
+      }
+      fs.writeFileSync(pyDataFile, `${embeddedLines.join("\n")}\n`, "utf-8");
+
+      const res = await aiceRead(pyDataFile, { projectRoot: tmpDir, surface: "cli" });
+      expect(res.output).not.toContain("formatGreeting");
+      expect(res.output).not.toContain("fakeRustFn");
+      expect(res.output).not.toContain("parseCliArgs");
+      expect(res.output).toContain("narrow with aice search <pat>");
+    });
+
+    it("packs mixed .aipl multi-target batches in 1 turn without splitting outline blank lines and reports missing batch symbols", async () => {
+      const smallAipl = path.join(tmpDir, "small_log.aipl");
+      fs.writeFileSync(
+        smallAipl,
+        [
+          "struct LogSummary:",
+          "  total: int",
+          "",
+          "fn analyzeLogs(n: int): int:",
+          "  ret n + 1",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      const sliceAipl = path.join(tmpDir, "arm64.aipl");
+      fs.writeFileSync(
+        sliceAipl,
+        Array.from(
+          { length: 40 },
+          (_, i) => `pub fn emitOp${i}(v: int): int:\n  ret v + ${i}\n`,
+        ).join("\n"),
+        "utf-8",
+      );
+      const hugeAipl = path.join(tmpDir, "huge_main.aipl");
+      fs.writeFileSync(
+        hugeAipl,
+        Array.from(
+          { length: 180 },
+          (_, i) => `pub fn compilerStage${i}(input: str): str:\n  let s = input\n  ret s\n`,
+        ).join("\n"),
+        "utf-8",
+      );
+
+      const otherAipl = path.join(tmpDir, "other_mod.aipl");
+      fs.writeFileSync(otherAipl, "pub fn actualHelper(x: int): int:\n  ret x\n", "utf-8");
+
+      const batchRes = await aiceRead(
+        [
+          `${sliceAipl}:L1-L15`,
+          smallAipl,
+          hugeAipl,
+          `${sliceAipl}:emitOp2`,
+          `${sliceAipl}:nonExistentInSlice`,
+          `${otherAipl}:actualHelpr`,
+        ],
+        { projectRoot: tmpDir, surface: "cli" },
+      );
+
+      expect(Buffer.byteLength(batchRes.output, "utf-8")).toBeLessThanOrEqual(
+        DEFAULT_CLI_READ_MAX_BYTES,
+      );
+      expect(batchRes.output).not.toMatch(/omitted\s*[—-]\s*9\s*KB/i);
+      expect(batchRes.output).toContain("emitOp0");
+      expect(batchRes.output).toContain("LogSummary");
+      expect(batchRes.output).toContain("Auto-outlined");
+      expect(batchRes.output).toContain("emitOp2");
+      expect(batchRes.output).toContain("// missing: nonExistentInSlice");
+      expect(batchRes.output).toContain("actualHelpr (Did you mean: actualHelper)");
+    });
+    it("unions multi-symbol surgical windows in computeHonestReadBaselineText and honors AICE_TELEMETRY_DIR", () => {
+      const bigSrc = Array.from(
+        { length: 400 },
+        (_, i) => `export function handlerFunc_${i}(x: number): number { return x + ${i}; }`,
+      ).join("\n");
+      const singleBase = computeHonestReadBaselineText({
+        rawSource: bigSrc,
+        relPath: "handlers.ts",
+        symbolSelector: "handlerFunc_10",
+        mode: "slice",
+      });
+      const multiBase = computeHonestReadBaselineText({
+        rawSource: bigSrc,
+        relPath: "handlers.ts",
+        symbolSelector: "handlerFunc_10,handlerFunc_320",
+        mode: "slice",
+      });
+      expect(multiBase.length).toBeGreaterThan(singleBase.length * 1.5);
+      expect(multiBase).toContain("handlerFunc_10");
+      expect(multiBase).toContain("handlerFunc_320");
+
+      const prevDir = process.env.AICE_TELEMETRY_DIR;
+      const prevPath = process.env.AICE_TELEMETRY_PATH;
+      try {
+        delete process.env.AICE_TELEMETRY_PATH;
+        process.env.AICE_TELEMETRY_DIR = path.join(tmpDir, "custom-tel-dir");
+        expect(resolveTelemetryPath()).toBe(path.join(tmpDir, "custom-tel-dir", "gains.jsonl"));
+      } finally {
+        if (prevDir === undefined) delete process.env.AICE_TELEMETRY_DIR;
+        else process.env.AICE_TELEMETRY_DIR = prevDir;
+        if (prevPath === undefined) delete process.env.AICE_TELEMETRY_PATH;
+        else process.env.AICE_TELEMETRY_PATH = prevPath;
       }
     });
   });
