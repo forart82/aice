@@ -1,5 +1,5 @@
-<!-- AICE:START v0.9.52 -->
-## AICE (v0.9.52)
+<!-- AICE:START v0.9.53 -->
+## AICE (v0.9.53)
 - Gate: ONLY if `aice.config.json` has `"enabled": true`; blocker: `aice disable` / `aice enable`.
 ### Batch Read & Splice
 - ONLY aice read/search/find (aice_read) & aice splice/aice write (aice_splice); no shell writes or `sed`/`grep`/`cat`/`find`.

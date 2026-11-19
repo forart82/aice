@@ -247,8 +247,8 @@ When operating on any native codebase (zero `.aice` files on disk, with `$idioms
 When `aice enable` configures a project workspace, `syncProjectWorkspaceRules` writes the compact **`<= 300`-BPE-token** (across both `cl100k_base` and `o200k_base`) directive block from `src/rules/mandatory-rules.ts` **only** to `AGENTS.md` (and `CLAUDE.md` only if already present without `@AGENTS.md`), while automatically purging legacy `GEMINI.md` / `.GEMINI.md` blocks and `.agents/rules/aice.md` duplicates. When `aice agents setup --global-rules` configures global home directories (`~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.aider/CONVENTIONS.md`), it idempotently syncs the exact same `MANDATORY_AGENT_RULES_MARKDOWN` cheat-card:
 
 ````markdown
-<!-- AICE:START v0.9.52 -->
-## AICE (v0.9.52)
+<!-- AICE:START v0.9.53 -->
+## AICE (v0.9.53)
 - Gate: ONLY if `aice.config.json` has `"enabled": true`; blocker: `aice disable` / `aice enable`.
 ### Batch Read & Splice
 - ONLY aice read/search/find (aice_read) & aice splice/aice write (aice_splice); no shell writes or `sed`/`grep`/`cat`/`find`.

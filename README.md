@@ -2,7 +2,7 @@
 
 # AICE: On-the-Fly AI Context Engine & Surgical Code Splicer
 
-[![Version: 0.9.52](https://img.shields.io/badge/Version-0.9.52-00bcd4.svg)](https://github.com/forart82/aice/releases)
+[![Version: 0.9.53](https://img.shields.io/badge/Version-0.9.53-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
@@ -123,7 +123,7 @@ aice --version && aice agents status
 
 ### 2. Turn AICE On or Off Per Project
 
-AICE is **opt-in per workspace** via `aice.config.json` and maintains a single compact **`<= 300`-token `AGENTS.md`** (`v0.9.52`) instruction card with explicit anti-pagination guardrails (automatically stripping legacy duplicate `GEMINI.md` / `.agents/rules/aice.md` blocks):
+AICE is **opt-in per workspace** via `aice.config.json` and maintains a single compact **`<= 300`-token `AGENTS.md`** (`v0.9.53`) instruction card with explicit anti-pagination guardrails (automatically stripping legacy duplicate `GEMINI.md` / `.agents/rules/aice.md` blocks):
 
 ```bash
 aice enable ~/dev/my-project    # Writes "enabled": true in aice.config.json + <=300-tok AGENTS.md
@@ -179,10 +179,10 @@ EOF
 
 ### 4. Built-In Guardrails & Real Savings Telemetry (`aice gain` & `aice analyze`)
 
-- **Anti-Pagination & 1-Turn Batch Packing (`v0.9.52`)**: Oversized or budget-capped files emit `batch symbols: aice read <file>:<sym1> <file>:<sym2> or aice search <pat> <file>` hints (preserving nested-subproject `cwd`-relative paths) instead of linear `:L1-L140` breadcrumbs; `aice read f1:sym f2 f3` packs explicit selectors and small files first while auto-outlining oversized bare files in **1 turn**; and the `<= 300`-token `AGENTS.md` rule forbids sequential `:L1-L150` -> `:L151-L300` paging across turns.
-- **1-Turn `:Lstart-Lend` & Hunk Splice Recovery (`v0.9.52`)**: Pre-write native syntax validation, inclusive `:L` off-by-one guard, `±20`-line shifted anchor & prefix+suffix envelope `:Lstart-Lend` recovery, CSS off-by-1 brace disambiguation, 5th-pass interior-whitespace `<<< === >>>` hunk matching, actionable retry `Tip:` diagnostics (`±5` numbered lines), and atomic `.tmp` -> `rename` commits settle edits in 1 turn with zero broken disk writes.
+- **Anti-Pagination & 1-Turn Batch Packing (`v0.9.53`)**: Oversized or budget-capped files emit `batch symbols: aice read <file>:<sym1> <file>:<sym2> or aice search <pat> <file>` hints (preserving nested-subproject `cwd`-relative paths) instead of linear `:L1-L140` breadcrumbs; `aice read f1:sym f2 f3` packs explicit selectors and small files first while auto-outlining oversized bare files in **1 turn**; and the `<= 300`-token `AGENTS.md` rule forbids sequential `:L1-L150` -> `:L151-L300` paging across turns.
+- **1-Turn `:Lstart-Lend` & Hunk Splice Recovery (`v0.9.53`)**: Pre-write native syntax validation, inclusive `:L` off-by-one guard, `±20`-line shifted anchor & prefix+suffix envelope `:Lstart-Lend` recovery, CSS off-by-1 brace disambiguation, 5th-pass interior-whitespace `<<< === >>>` hunk matching, actionable retry `Tip:` diagnostics (`±5` numbered lines), and atomic `.tmp` -> `rename` commits settle edits in 1 turn with zero broken disk writes.
 - **Smart Self-Healing Diagnostics**: Missing symbols trigger Levenshtein `Did you mean` hints, invalid regex patterns fall back safely to literal search, and MCP-style flags (`--files-only=true`, `--context-lines=5`) passed to CLI calls normalize automatically.
-- **Honest Signed BPE & Session Accounting (`v0.9.52`)**: Tracks `cl100k_base` & `o200k_base` deltas in a `< 250 B/event` numeric ledger (`~/.aice/telemetry/gains.jsonl`, overrideable via `AICE_TELEMETRY_DIR` / `AICE_TELEMETRY_PATH` / `AICE_HOME`), while `aice analyze` counts `extraReadTurns` strictly on true same-file repeat reads, strips shell redirects (`2>/dev/null`, `2>&1`), and separates post-`&&` non-AICE command failures from AICE errors.
+- **Honest Signed BPE & Session Accounting (`v0.9.53`)**: Tracks `cl100k_base` & `o200k_base` deltas in a `< 250 B/event` numeric ledger (`~/.aice/telemetry/gains.jsonl`, overrideable via `AICE_TELEMETRY_DIR` / `AICE_TELEMETRY_PATH` / `AICE_HOME`), while `aice analyze` counts `extraReadTurns` strictly on true same-file repeat reads, strips shell redirects (`2>/dev/null`, `2>&1`), and separates post-`&&` non-AICE command failures from AICE errors.
 
 ```bash
 aice gain              # Global summary, Rule Break-Even & <90s Repeat-Read Turn Warnings (alias: aice stats)
@@ -276,7 +276,7 @@ aice/
   author       = {forart82},
   title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
   year         = {2026},
-  version = {0.9.52},
+  version = {0.9.53},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}
