@@ -819,8 +819,28 @@ function tokenizeShellWords(segment: string): string[] {
 interface ParsedAiceCliInvocation {
   subcommands: string[];
   hasHelpOnly: boolean;
+  hasNonAiceSegment: boolean;
   readTargetCandidates: string[];
   writeTargetCandidates: string[];
+}
+
+function stripShellRedirectTokens(words: string[]): string[] {
+  const cleaned: string[] = [];
+  for (let i = 0; i < words.length; i++) {
+    const tok = words[i] ?? "";
+    if (!tok) continue;
+    // Standalone redirect operator whose target is the next token: >, >>, 2>, &>, <, <<-
+    if (/^(?:\d*(?:>>?|<<-?|>&|<&)|&>>?)$/.test(tok)) {
+      i++;
+      continue;
+    }
+    // Attached redirect token: 2>/dev/null, 2>&1, >/dev/null, &>/tmp/out, <<'EOF', 1>/dev/null
+    if (/^(?:\d*(?:>>?|<<-?|>&|<&)|&>>?).+/.test(tok)) {
+      continue;
+    }
+    cleaned.push(tok);
+  }
+  return cleaned;
 }
 
 function extractAiceCliInvocations(
@@ -830,6 +850,7 @@ function extractAiceCliInvocations(
   const subcommands: string[] = [];
   let nonHelpCount = 0;
   let helpCount = 0;
+  let hasNonAiceSegment = false;
   const readTargetCandidates: string[] = [];
   const writeTargetCandidates: string[] = [];
 
@@ -868,7 +889,10 @@ function extractAiceCliInvocations(
   let sawAnyAiceWrite = false;
 
   for (const seg of segments) {
-    const words = tokenizeShellWords(seg);
+    const rawWords = tokenizeShellWords(seg);
+    const words = stripShellRedirectTokens(rawWords);
+    if (words.length === 0) continue;
+
     let idx = 0;
     while (idx < words.length && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[idx] ?? "")) {
       idx++;
@@ -883,19 +907,37 @@ function extractAiceCliInvocations(
       }
     }
     if (idx >= words.length || !/(?:^|\/)aice(?:\.mjs|\.ts)?$/.test(words[idx] ?? "")) {
+      if (idx < words.length) {
+        hasNonAiceSegment = true;
+      }
       continue;
     }
 
+    const leadingFlags = words.slice(idx + 1);
     let subIdx = idx + 1;
     while (subIdx < words.length && words[subIdx]?.startsWith("-")) {
       subIdx++;
     }
-    if (subIdx >= words.length) continue;
+    if (subIdx >= words.length) {
+      if (
+        leadingFlags.some(
+          (f) => f === "--help" || f === "-h" || f === "--version" || f === "-V" || f === "-v",
+        )
+      ) {
+        helpCount++;
+      }
+      continue;
+    }
 
     const sub = (words[subIdx] ?? "").toLowerCase();
-    if (!sub) continue;
+    if (!sub || !/^[a-z][a-z0-9_-]*$/.test(sub)) continue;
     const rest = words.slice(subIdx + 1);
-    const isHelp = rest.includes("--help") || rest.includes("-h");
+    const preFlags = words.slice(idx + 1, subIdx);
+    const isHelp =
+      preFlags.includes("--help") ||
+      preFlags.includes("-h") ||
+      rest.includes("--help") ||
+      rest.includes("-h");
     if (isHelp) helpCount++;
     else nonHelpCount++;
 
@@ -984,6 +1026,7 @@ function extractAiceCliInvocations(
   return {
     subcommands,
     hasHelpOnly: helpCount > 0 && nonHelpCount === 0,
+    hasNonAiceSegment,
     readTargetCandidates,
     writeTargetCandidates,
   };
@@ -1043,6 +1086,7 @@ interface PendingToolSlot {
   turnOutputTokens: number;
   isAiceCall: boolean;
   isHelpOnly: boolean;
+  hasNonAiceSegment: boolean;
   aiceSubcommands: string[];
   hasWriteSubcommand: boolean;
 }
@@ -1264,6 +1308,7 @@ function parseTranscriptFile(
 
         const slotSubcommands: string[] = [];
         let slotHasHelpOnly = false;
+        let slotHasNonAiceSegment = false;
         let slotHasWrite = false;
 
         const rawPVal = args.Path ?? args.file_path ?? args.target_file ?? args.path;
@@ -1311,6 +1356,7 @@ function parseTranscriptFile(
           const effectiveCmdDir = cdMatch?.[1] ? path.resolve(cdMatch[1]) : effectiveBaseDir;
           const parsedCli = extractAiceCliInvocations(commandText, heredocTargetPaths);
           slotHasHelpOnly = parsedCli.hasHelpOnly;
+          slotHasNonAiceSegment = parsedCli.hasNonAiceSegment;
 
           for (const sub of parsedCli.subcommands) {
             aiceSubcommands[sub] = (aiceSubcommands[sub] ?? 0) + 1;
@@ -1414,20 +1460,29 @@ function parseTranscriptFile(
           turnOutputTokens: ot,
           isAiceCall: slotSubcommands.length > 0,
           isHelpOnly: slotHasHelpOnly,
+          hasNonAiceSegment: slotHasNonAiceSegment,
           aiceSubcommands: slotSubcommands,
           hasWriteSubcommand: slotHasWrite,
         });
       }
 
+      let hasSameFileRepeatRead = false;
+      for (const rf of turnReadFiles) {
+        if ((activeFileReadStreaks.get(rf) ?? 0) >= 1) {
+          hasSameFileRepeatRead = true;
+          break;
+        }
+      }
+
       if (turnHasRead) {
         readTurns++;
+        if (hasSameFileRepeatRead) {
+          extraReadTurns++;
+        }
         if (turnHasWrite) {
           const settledStreak = currentReadStreak + 1;
           if (settledStreak > maxConsecutiveReadStreak) {
             maxConsecutiveReadStreak = settledStreak;
-          }
-          if (settledStreak >= 2) {
-            extraReadTurns++;
           }
           currentReadStreak = 0;
         } else {
@@ -1435,15 +1490,17 @@ function parseTranscriptFile(
           if (currentReadStreak > maxConsecutiveReadStreak) {
             maxConsecutiveReadStreak = currentReadStreak;
           }
-          if (currentReadStreak >= 2) {
-            extraReadTurns++;
-          }
         }
       } else {
         currentReadStreak = 0;
       }
 
       if (turnHasWrite) {
+        if (turnHasRead) {
+          for (const rf of turnReadFiles) {
+            activeFileReadStreaks.set(rf, (activeFileReadStreaks.get(rf) ?? 0) + 1);
+          }
+        }
         for (const [trackedFile, streak] of activeFileReadStreaks.entries()) {
           if (streak >= 2) {
             sameFileRepeatReadChains.push({
@@ -1541,7 +1598,24 @@ function parseTranscriptFile(
       (!exitedCleanlyZero &&
         (/^❌ Error\b/m.test(cleanedOut) || /"isError"\s*:\s*true/.test(cleanedOut)));
     if (isHardError) {
-      const isAiceErr = Boolean(matchedSlot?.isAiceCall && !matchedSlot.isHelpOnly);
+      const aiceWriteSucceededBeforeChainErr =
+        /✔\s*(?:Batch\s+)?(?:Spliced|Created|Patched)\b/i.test(cleanedOut) &&
+        !/^❌\s*Error\b/m.test(cleanedOut) &&
+        !/^error:\s+(?:unknown|missing|option|argument)\b/im.test(cleanedOut) &&
+        !/"isError"\s*:\s*true/.test(cleanedOut);
+      const aiceReadSucceededBeforeChainErr =
+        Boolean(matchedSlot?.hasNonAiceSegment && !matchedSlot.hasWriteSubcommand) &&
+        /^\/\/\s+\S+/m.test(cleanedOut) &&
+        !/^❌\s*Error\b/m.test(cleanedOut) &&
+        !/^error:\s+/im.test(cleanedOut) &&
+        !/Target file not found:/m.test(cleanedOut) &&
+        !/"isError"\s*:\s*true/.test(cleanedOut);
+      const isAiceErr = Boolean(
+        matchedSlot?.isAiceCall &&
+          !matchedSlot.isHelpOnly &&
+          !aiceWriteSucceededBeforeChainErr &&
+          !aiceReadSucceededBeforeChainErr,
+      );
       const cause = isAiceErr ? classifyFrictionCause(cleanedOut) : undefined;
       errors.push({
         step: idx,

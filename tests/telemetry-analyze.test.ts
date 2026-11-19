@@ -560,7 +560,7 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
     expect(report.readLoopAudit.totalTurns).toBe(8);
     expect(report.readLoopAudit.readTurnRatioPct).toBe(62.5);
     expect(report.readLoopAudit.maxConsecutiveReadStreak).toBe(4);
-    expect(report.readLoopAudit.extraReadTurns).toBe(3);
+    expect(report.readLoopAudit.extraReadTurns).toBe(2);
     expect(report.readLoopAudit.sameFileRepeatReadChainCount).toBe(1);
     expect(report.readLoopAudit.sameFileRepeatReadChains).toEqual([
       {
@@ -571,15 +571,15 @@ describe("Phase 5: Post-Session Project Analyzer (`aice analyze`) & Error Teleme
     ]);
     // Total (input + cache_read) = 240,000 across 8 turns -> 30,000 avgSessionContextTokens
     expect(report.readLoopAudit.avgSessionContextTokens).toBe(30000);
-    expect(report.readLoopAudit.contextReplayTokenTax).toBe(90000);
+    expect(report.readLoopAudit.contextReplayTokenTax).toBe(60000);
 
     const formatted = formatAnalyzeReport(report);
     expect(formatted).toContain("3. READ-LOOP & TURN-AMPLIFICATION AUDIT");
     expect(formatted).toContain("Read Turns / Ratio     : 5 / 8 LLM turns (62.5%)");
-    expect(formatted).toContain("Max Consecutive Reads  : 4 turn(s) (3 extra read turn(s))");
+    expect(formatted).toContain("Max Consecutive Reads  : 4 turn(s) (2 extra read turn(s))");
     expect(formatted).toContain("src/engine.ts (3x)");
     expect(formatted).toContain(
-      "Context Replay Tax Est : 90,000 tokens (3 extra read turn(s) × 30,000 avg context tokens)",
+      "Context Replay Tax Est : 60,000 tokens (2 extra read turn(s) × 30,000 avg context tokens)",
     );
   });
 
