@@ -342,7 +342,10 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(res.targets[0]?.autoOutlined).toBe(true);
       expect(res.targets[0]?.lineCount).toBe(341);
       expect(res.text).toContain("// Auto-outlined src/over28kb.ts (341L");
-      expect(res.text).toMatch(/next: aice read src\/over28kb\.ts:L1-L\d+/);
+      expect(res.text).toContain(
+        "batch symbols: aice read src/over28kb.ts:computeOverBudget_0 src/over28kb.ts:computeOverBudget_1 or aice search <pat> src/over28kb.ts",
+      );
+      expect(res.text).not.toMatch(/next:\s+aice read src\/over28kb\.ts:L\d+/);
       expect(res.text).toContain("computeOverBudget_0");
       expect(res.text).not.toContain("987654321");
     });
@@ -988,7 +991,10 @@ describe("Unified Read Engine (`aiceRead`)", () => {
         DEFAULT_READ_MAX_BYTES,
       );
       expect(budgetedRes.output).toContain("// Auto-outlined src/heavy1.ts");
-      expect(budgetedRes.output).toMatch(/aice read src\/heavy\d\.ts:L1-L\d+/);
+      expect(budgetedRes.output).toContain(
+        "batch symbols: aice read src/heavy1.ts:computeHeavyMetric_1_0 src/heavy1.ts:computeHeavyMetric_1_1",
+      );
+      expect(budgetedRes.output).not.toMatch(/aice read src\/heavy\d\.ts:L1-L\d+/);
 
       // --full overrides the default 28 KB ceiling
       const fullRes = await aiceRead(heavyTargets, { projectRoot: tmpDir, full: true });
@@ -1020,7 +1026,10 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       const dirRes = await aiceRead("src/massive", { projectRoot: tmpDir });
       expect(dirRes.mode).toBe("auto-outline-dir");
       expect(Buffer.byteLength(dirRes.output, "utf-8")).toBeLessThanOrEqual(DEFAULT_READ_MAX_BYTES);
-      expect(dirRes.output).toMatch(/aice read src\/massive\/module_\d+\.ts:L1-L20/);
+      expect(dirRes.output).toMatch(
+        /more files omitted — batch: aice outline src\/massive\/module_\d+\.ts/,
+      );
+      expect(dirRes.output).not.toMatch(/aice read src\/massive\/module_\d+\.ts:L1-L20/);
     });
 
     it("enforces Surface-Aware 9 KB CLI Anti-Middle-Truncation Cap (surface: 'cli') across bare, line, and symbol reads", async () => {
@@ -1057,9 +1066,10 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       });
       const lineBytes = Buffer.byteLength(lineRes.output, "utf-8");
       expect(lineBytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
-      expect(lineRes.output).toContain(
-        "// [9 KB CLI stdout budget reached — next: aice read src/cli_oversized.ts:L",
+      expect(lineRes.output).toMatch(
+        /\/\/ \[9 KB CLI stdout budget reached \(L\d+-L400 remaining\) — narrow with aice search <pat> src\/cli_oversized\.ts\]/,
       );
+      expect(lineRes.output).not.toContain("next: aice read");
       expect(lineRes.output).not.toContain("--full");
       expect(lineRes.output).toMatch(/\n\/\/ \[9 KB CLI stdout budget reached/);
 
@@ -1070,28 +1080,24 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       });
       const symBytes = Buffer.byteLength(symRes.output, "utf-8");
       expect(symBytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
-      expect(symRes.output).toContain(
-        "// [9 KB CLI stdout budget reached — next: aice read src/cli_oversized.ts:L",
-      );
+      expect(symRes.output).toContain("— narrow with aice search <pat> src/cli_oversized.ts]");
+      expect(symRes.output).not.toContain("next: aice read");
       expect(symRes.output).not.toContain("myLongFunc:L");
       expect(symRes.output).not.toContain("Dependency::L");
 
-      // 3. Bare file auto-outlines with compact 1-line next-slice hint
+      // 3. Bare file auto-outlines with batch symbols / search hint (no :L1-L... paging trap)
       const bareRes = await read("src/cli_oversized.ts", {
         projectRoot: tmpDir,
         surface: "cli",
       });
       expect(bareRes.mode).toBe("auto-outline-file");
-      expect(bareRes.output).toContain("next: aice read src/cli_oversized.ts:L1-L");
-      const nextSliceMatch = bareRes.output.match(
-        /next: aice read src\/cli_oversized\.ts:L1-L(\d+)/,
+      expect(bareRes.output).toContain(
+        "batch symbols: aice read src/cli_oversized.ts:myLongFunc or aice search <pat> src/cli_oversized.ts",
       );
-      expect(nextSliceMatch).toBeTruthy();
-      const endLineHint = Number(nextSliceMatch?.[1]);
-      expect(endLineHint).toBeLessThanOrEqual(200);
+      expect(bareRes.output).not.toContain("next: aice read src/cli_oversized.ts:L1-L");
     });
 
-    it("correctly infers next window without bogus Dependency: headers, strips :selector suffix, and clamps explicit :Lstart-Lend", async () => {
+    it("correctly infers remaining span without bogus Dependency: headers, strips :selector suffix, and clamps explicit :Lstart-Lend", async () => {
       // 1. Explicit range selector file:L251-L500 truncated within 9 KB CLI budget
       const rangedLines = Array.from(
         { length: 600 },
@@ -1106,12 +1112,12 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(Buffer.byteLength(rangedRes.output, "utf-8")).toBeLessThanOrEqual(
         DEFAULT_CLI_READ_MAX_BYTES,
       );
-      expect(rangedRes.output).toContain(
-        "// [9 KB CLI stdout budget reached — next: aice read src/cli_ranged.ts:L",
+      // Verify remaining span endLine is clamped to L500 without sequential :L paging breadcrumbs
+      expect(rangedRes.output).toMatch(
+        /\/\/ \[9 KB CLI stdout budget reached \(L\d+-L500 remaining\) — narrow with aice search <pat> src\/cli_ranged\.ts\]/,
       );
-      // Verify endLine is clamped to L500
-      expect(rangedRes.output).toMatch(/next: aice read src\/cli_ranged\.ts:L\d+-L500\b/);
-      expect(rangedRes.output).not.toContain("src/cli_ranged.ts:L251-L500:L");
+      expect(rangedRes.output).not.toContain("next: aice read");
+      expect(rangedRes.output).not.toContain("src/cli_ranged.ts:L251-L500");
       expect(rangedRes.output).not.toContain("Dependency::L");
 
       // 2. Truncating file:myLongFunc with dependency in output never produces Dependency::L...
@@ -1146,7 +1152,8 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(depRes.output).not.toContain("Dependency::L");
       expect(depRes.output).not.toContain("myFuncWithDeps:L");
       expect(depRes.output).toContain("## Target File Content:");
-      expect(depRes.output).toContain("aice read src/caller_with_deps.ts:L");
+      expect(depRes.output).toContain("narrow with aice search <pat> src/caller_with_deps.ts");
+      expect(depRes.output).not.toContain("next: aice read");
 
       // 3. Target-first ordering: concise symbol in a file with > 10 KB of imported contracts emits 100% of target lines first
       const heavyDepExports = Array.from(
@@ -1230,11 +1237,11 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       expect(bytes).toBeLessThanOrEqual(DEFAULT_CLI_READ_MAX_BYTES);
       expect(res.output).toContain("// src/multi_slice_a.ts:1-140");
       expect(res.output).toContain(
-        "// src/multi_slice_b.ts:L141-L280 (omitted — 9 KB CLI budget; next: aice read src/multi_slice_b.ts:L141-L280)",
+        "// src/multi_slice_b.ts:L141-L280 (omitted — 9 KB CLI budget; narrow with aice search <pat> src/multi_slice_b.ts)",
       );
       expect(res.output).not.toContain("auto-downgraded to :outline");
       expect(res.output).not.toContain("module multi_slice_b:");
-      expect(res.output).toContain("aice read src/multi_slice_b.ts:L141-L280");
+      expect(res.output).not.toContain("next: aice read src/multi_slice_b.ts:L141-L280");
     });
 
     it("eliminates unsolicited envelope bloat on CLI reads defaulting to zero-envelope without # AICE Context Pack", async () => {
@@ -1306,16 +1313,18 @@ describe("Unified Read Engine (`aiceRead`)", () => {
         projectRoot: tmpDir,
         surface: "cli",
       });
-      expect(bareRes.output).toContain("next: aice read src/cli_oversized.ts:L1-L");
+      expect(bareRes.output).toContain(
+        "batch symbols: aice read src/cli_oversized.ts:myLongFunc or aice search <pat> src/cli_oversized.ts",
+      );
+      expect(bareRes.output).not.toContain("next: aice read src/cli_oversized.ts:L1-L");
 
-      // 2. In budget ceiling footer with remaining slices
+      // 2. In budget ceiling footer with remaining span summary + search hint
       const symRes = await aiceRead("src/cli_oversized.ts:myLongFunc", {
         projectRoot: tmpDir,
         surface: "cli",
       });
-      expect(symRes.output).toContain(
-        "// [9 KB CLI stdout budget reached — next: aice read src/cli_oversized.ts:L",
-      );
+      expect(symRes.output).toContain("— narrow with aice search <pat> src/cli_oversized.ts]");
+      expect(symRes.output).not.toContain("next: aice read src/cli_oversized.ts:L");
     });
 
     it("supports comma-separated multi-range and multi-symbol selectors on a single file in 1 turn", async () => {
@@ -2369,16 +2378,14 @@ describe("Unified Read Engine (`aiceRead`)", () => {
       // Target A is emitted in full
       expect(res.output).toContain("targetA_1");
       expect(res.output).toContain("targetA_48");
-      // Target B receives partial slice fill with exact resume line continuation footer
+      // Target B receives partial slice fill with remaining span summary (no sequential :L breadcrumb)
       expect(res.output).toContain("targetB_1");
       expect(res.output).toMatch(
-        /\/\/ \[9 KB CLI budget reached — next slice: aice read src\/order_b\.ts:L\d+-L120\]/,
+        /\/\/ \[9 KB CLI budget reached \(L\d+-L120 remaining\) — narrow with aice search <pat> src\/order_b\.ts\]/,
       );
-      // Target C stays omitted after Target B (original order strictly preserved)
-      expect(res.output).not.toContain("targetC_12");
-      expect(res.output).toContain(
-        "// src/order_c.ts:L1-L12 (omitted — 9 KB CLI budget; next: aice read src/order_c.ts:L1-L12)",
-      );
+      expect(res.output).not.toContain("next slice:");
+      // Target C (fitting explicit range) packs in Turn 1 while strictly preserving A -> B -> C order!
+      expect(res.output).toContain("targetC_12");
       expect(res.output.indexOf("src/order_a.ts")).toBeLessThan(
         res.output.indexOf("src/order_b.ts"),
       );

@@ -63,6 +63,7 @@ import {
   LOCKFILE_SKIP_NAMES,
   type OutlineOptions,
   type OutlineResult,
+  type OutlineSymbol,
   outlinePath,
 } from "./outline.js";
 import { didYouMeanFile } from "./suggest.js";
@@ -1502,17 +1503,251 @@ function parseSelectorLineRange(
   return undefined;
 }
 
+const VALID_AST_HINT_IDENT_RE = /^[A-Za-z_$][A-Za-z0-9_$.]*$/;
+const NON_SYMBOL_HINT_KINDS = new Set(["import", "module", "style", "section", "component"]);
+const PRIMARY_CALLABLE_HINT_KINDS = new Set(["function", "method", "class", "struct", "enum"]);
+const NON_AST_SYMBOL_HINT_EXT_RE =
+  /\.(?:md|markdown|css|scss|sass|less|jsonc?|ya?ml|toml|html?|svg|xml|txt|csv|tsv|hebar|cff|lock|ini|env)$/i;
+const CODE_EXT_FOR_REGEX_HINT_RE =
+  /\.(?:[cm]?[jt]sx?|py|aipl|go|rs|java|kt|kts|cs|php|rb|swift|c|cc|cpp|h|hpp|sh|bash|zsh)$/i;
+
+function extractRepresentativeSymbolHints(opts: {
+  symbols?: OutlineSymbol[];
+  rawSource?: string;
+  diskPath?: string;
+  displayPath?: string;
+  projectRoot?: string;
+  excludeSymbol?: string;
+  maxCount?: number;
+}): string[] {
+  const maxCount = opts.maxCount ?? 2;
+  const cleanExclude = opts.excludeSymbol?.trim();
+  const fileRef = opts.diskPath ?? opts.displayPath ?? "";
+  if (fileRef && NON_AST_SYMBOL_HINT_EXT_RE.test(fileRef)) {
+    return [];
+  }
+
+  let resolvedDiskPath = opts.diskPath;
+  if (!resolvedDiskPath && opts.displayPath) {
+    const cleanDisp = splitPathAndSelector(opts.displayPath).filePath.trim();
+    if (cleanDisp && cleanDisp !== ".") {
+      const cand = opts.projectRoot
+        ? path.resolve(opts.projectRoot, cleanDisp)
+        : path.isAbsolute(cleanDisp)
+          ? cleanDisp
+          : undefined;
+      if (cand && fs.existsSync(cand)) {
+        try {
+          if (fs.statSync(cand).isFile()) {
+            resolvedDiskPath = cand;
+          }
+        } catch {
+          // ignore stat errors
+        }
+      }
+    }
+  }
+  if (resolvedDiskPath && NON_AST_SYMBOL_HINT_EXT_RE.test(resolvedDiskPath)) {
+    return [];
+  }
+
+  let symbols = opts.symbols;
+  let rawSource = opts.rawSource;
+  if (!symbols && resolvedDiskPath) {
+    try {
+      if (rawSource === undefined && fs.existsSync(resolvedDiskPath)) {
+        rawSource = fs.readFileSync(resolvedDiskPath, "utf-8");
+      }
+      const outRes = withSuppressedTelemetry(() =>
+        generateOutline(resolvedDiskPath!, {
+          compact: true,
+          includeTypes: false,
+          skipTokenStats: true,
+          lineRanges: false,
+          projectRoot: opts.projectRoot,
+          ...(rawSource !== undefined ? { preReadSource: rawSource } : {}),
+        }),
+      );
+      symbols = outRes.symbols;
+    } catch {
+      // fall through to regex fallback
+    }
+  }
+
+  const primary: string[] = [];
+  const secondary: string[] = [];
+  const childMethods: string[] = [];
+  const seen = new Set<string>();
+  const pushUnique = (bucket: string[], candidate: string): void => {
+    if (!candidate || candidate === cleanExclude || seen.has(candidate)) return;
+    if (!VALID_AST_HINT_IDENT_RE.test(candidate)) return;
+    seen.add(candidate);
+    bucket.push(candidate);
+  };
+
+  if (symbols && symbols.length > 0) {
+    for (const sym of symbols) {
+      if (NON_SYMBOL_HINT_KINDS.has(sym.kind)) continue;
+      const symName = sym.name?.trim() ?? "";
+      if (VALID_AST_HINT_IDENT_RE.test(symName)) {
+        if (symName === cleanExclude) {
+          if (sym.children && sym.children.length > 0) {
+            for (const ch of sym.children) {
+              const chName = ch.name?.trim() ?? "";
+              if (
+                !NON_SYMBOL_HINT_KINDS.has(ch.kind) &&
+                VALID_AST_HINT_IDENT_RE.test(chName) &&
+                chName !== "constructor"
+              ) {
+                pushUnique(childMethods, `${symName}.${chName}`);
+              }
+            }
+          }
+          continue;
+        }
+        if (PRIMARY_CALLABLE_HINT_KINDS.has(sym.kind)) {
+          pushUnique(primary, symName);
+        } else {
+          pushUnique(secondary, symName);
+        }
+        if (sym.children && sym.children.length > 0) {
+          for (const ch of sym.children) {
+            const chName = ch.name?.trim() ?? "";
+            if (
+              (ch.kind === "method" || ch.kind === "function") &&
+              VALID_AST_HINT_IDENT_RE.test(chName) &&
+              chName !== "constructor"
+            ) {
+              pushUnique(childMethods, `${symName}.${chName}`);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  const chosen: string[] = [];
+  if (cleanExclude && childMethods.length > 0) {
+    for (const m of childMethods) {
+      if (chosen.length >= maxCount) break;
+      chosen.push(m);
+    }
+  }
+  const orderedPrimary = [
+    ...primary.filter((n) => n.length >= 3),
+    ...primary.filter((n) => n.length < 3),
+  ];
+  const orderedSecondary = [
+    ...secondary.filter((n) => n.length >= 3),
+    ...secondary.filter((n) => n.length < 3),
+  ];
+  for (const p of orderedPrimary) {
+    if (chosen.length >= maxCount) break;
+    if (!chosen.includes(p)) chosen.push(p);
+  }
+  if (chosen.length === 1 && childMethods.length > 0) {
+    for (const m of childMethods) {
+      if (chosen.length >= maxCount) break;
+      if (!chosen.includes(m)) chosen.push(m);
+    }
+  }
+  for (const s of orderedSecondary) {
+    if (chosen.length >= maxCount) break;
+    if (!chosen.includes(s)) chosen.push(s);
+  }
+
+  if (chosen.length === 0) {
+    if (rawSource === undefined && resolvedDiskPath && fs.existsSync(resolvedDiskPath)) {
+      try {
+        rawSource = fs.readFileSync(resolvedDiskPath, "utf-8");
+      } catch {
+        // ignore
+      }
+    }
+    const checkRef = resolvedDiskPath ?? fileRef;
+    const isCodeLike =
+      CODE_EXT_FOR_REGEX_HINT_RE.test(checkRef) || Boolean(rawSource?.startsWith("#!"));
+    if (rawSource && isCodeLike) {
+      const declRe =
+        /(?:^|\n)[ \t]*(?:export\s+)?(?:pub\s+)?(?:async\s+)?(?:function|fn|def|class|struct)\s+([A-Za-z_$][A-Za-z0-9_$]{3,})\b/g;
+      for (const m of rawSource.matchAll(declRe)) {
+        const cand = m[1]?.trim();
+        if (cand && cand !== cleanExclude && !chosen.includes(cand)) {
+          chosen.push(cand);
+          if (chosen.length >= maxCount) break;
+        }
+      }
+    }
+  }
+
+  return chosen.slice(0, maxCount);
+}
+
+function formatBatchSymbolsOrSearchHint(displayPath: string, symbolNames: string[]): string {
+  const safePath = splitPathAndSelector(displayPath).filePath.trim() || ".";
+  if (symbolNames.length >= 2) {
+    return `batch symbols: aice read ${safePath}:${symbolNames[0]} ${safePath}:${symbolNames[1]} or aice search <pat> ${safePath}`;
+  }
+  if (symbolNames.length === 1) {
+    return `batch symbols: aice read ${safePath}:${symbolNames[0]} or aice search <pat> ${safePath}`;
+  }
+  return `narrow with aice search <pat> ${safePath}`;
+}
+
+function compactAutoOutlineBlock(
+  headerLine: string,
+  outlineBody: string,
+  maxBlockBytes: number,
+  displayPath: string,
+): string {
+  const safePath = splitPathAndSelector(displayPath).filePath.trim() || ".";
+  const trimmedBody = outlineBody.trim();
+  if (!trimmedBody) {
+    return headerLine;
+  }
+  const fullBlock = `${headerLine}\n${trimmedBody}`;
+  if (Buffer.byteLength(fullBlock, "utf-8") <= maxBlockBytes) {
+    return fullBlock;
+  }
+  const outLines = trimmedBody.split("\n");
+  const kept: string[] = [];
+  const headerBytes = Buffer.byteLength(headerLine, "utf-8") + 1;
+  const footerReserveBytes = Buffer.byteLength(
+    `\n// ... (+${outLines.length} more symbols — use aice search <pat> ${safePath})`,
+    "utf-8",
+  );
+  const availBodyBytes = Math.max(0, maxBlockBytes - headerBytes - footerReserveBytes);
+  let used = 0;
+  for (const ln of outLines) {
+    const lnBytes = Buffer.byteLength(ln, "utf-8") + (kept.length > 0 ? 1 : 0);
+    if (used + lnBytes > availBodyBytes) {
+      break;
+    }
+    kept.push(ln);
+    used += lnBytes;
+  }
+  const omittedCount = Math.max(1, outLines.length - kept.length);
+  const suffix = `// ... (+${omittedCount} more symbols — use aice search <pat> ${safePath})`;
+  return kept.length > 0
+    ? `${headerLine}\n${kept.join("\n")}\n${suffix}`
+    : `${headerLine}\n${suffix}`;
+}
+
 function buildAutoOutlineHeader(
   displayPath: string,
   lineCount: number,
-  opts?: { nextSliceCmd?: string; budgetDowngraded?: boolean; budgetLabel?: string },
+  opts?: {
+    symbolNames?: string[];
+    budgetDowngraded?: boolean;
+    budgetLabel?: string;
+  },
 ): string {
-  const slicePart = opts?.nextSliceCmd ? ` — next: ${opts.nextSliceCmd}` : "";
   const budgetNote =
     (opts?.budgetDowngraded || lineCount >= 250) && opts?.budgetLabel
       ? `, >${opts.budgetLabel}`
       : "";
-  return `// Auto-outlined ${displayPath} (${lineCount}L${budgetNote}) — pass ${displayPath}:<sym> or :L<start>-L<end>${slicePart}`;
+  const guidance = formatBatchSymbolsOrSearchHint(displayPath, opts?.symbolNames ?? []);
+  return `// Auto-outlined ${displayPath} (${lineCount}L${budgetNote}) — ${guidance}`;
 }
 
 function formatContextStatsFooter(
@@ -1564,73 +1799,27 @@ function shouldEnforceDefaultReadBudget(
   return true;
 }
 
-function buildNextSliceHintCommand(
+function buildAntiPaginationHintForTarget(
   displayPath: string,
-  startLine = 1,
-  totalLines?: number,
   opts?: {
+    symbols?: OutlineSymbol[];
     diskPath?: string;
     rawSource?: string;
     projectRoot?: string;
-    sliceByteBudget?: number;
-    maxEndLine?: number;
+    excludeSymbol?: string;
   },
 ): string {
   const parsed = splitPathAndSelector(displayPath);
   const safePath = parsed.filePath.trim() || ".";
-  const sLine = Math.max(1, startLine);
-
-  let resolvedDiskPath = opts?.diskPath;
-  let resolvedRawSource = opts?.rawSource;
-  if (resolvedRawSource === undefined) {
-    const candidateAbs =
-      resolvedDiskPath ??
-      (opts?.projectRoot
-        ? path.resolve(opts.projectRoot, safePath)
-        : path.isAbsolute(safePath)
-          ? safePath
-          : undefined);
-    if (candidateAbs) {
-      try {
-        if (fs.existsSync(candidateAbs) && fs.statSync(candidateAbs).isFile()) {
-          resolvedDiskPath = candidateAbs;
-          resolvedRawSource = fs.readFileSync(candidateAbs, "utf-8");
-        }
-      } catch {
-        // fall through to conservative window
-      }
-    }
-  }
-
-  const parsedRange = parseSelectorLineRange(parsed.selector);
-  const effectiveMaxEnd =
-    opts?.maxEndLine ??
-    (parsedRange?.endLine !== undefined && parsedRange.endLine >= sLine
-      ? parsedRange.endLine
-      : undefined);
-
-  if (resolvedRawSource !== undefined) {
-    const span = computeDynamicSliceSpan(
-      resolvedDiskPath ?? safePath,
-      resolvedRawSource,
-      sLine,
-      opts?.sliceByteBudget ?? DEFAULT_SLICE_BYTE_BUDGET,
-    );
-    const endLine =
-      effectiveMaxEnd !== undefined
-        ? Math.max(span.startLine, Math.min(span.endLine, effectiveMaxEnd))
-        : span.endLine;
-    return `aice read ${safePath}:L${span.startLine}-L${endLine}`;
-  }
-
-  const fallbackWindow = 160;
-  const rawEnd = sLine + fallbackWindow - 1;
-  let eLine =
-    totalLines !== undefined && totalLines >= sLine ? Math.min(totalLines, rawEnd) : rawEnd;
-  if (effectiveMaxEnd !== undefined) {
-    eLine = Math.max(sLine, Math.min(eLine, effectiveMaxEnd));
-  }
-  return `aice read ${safePath}:L${sLine}-L${eLine}`;
+  const syms = extractRepresentativeSymbolHints({
+    symbols: opts?.symbols,
+    diskPath: opts?.diskPath,
+    rawSource: opts?.rawSource,
+    displayPath: safePath,
+    projectRoot: opts?.projectRoot,
+    excludeSymbol: opts?.excludeSymbol,
+  });
+  return formatBatchSymbolsOrSearchHint(safePath, syms);
 }
 
 function isLikelyCompactHeaderPath(candPath: string, fallbackFilePath?: string): boolean {
@@ -1695,17 +1884,15 @@ function matchValidSectionHeaderLine(
   };
 }
 
-function inferNextWindowFromTruncatedSlice(
+function inferTruncatedSliceContext(
   emittedSlice: string,
   fallbackTargetPath: string,
-  totalLines?: number,
-  opts?: {
-    diskPath?: string;
-    rawSource?: string;
-    projectRoot?: string;
-    sliceByteBudget?: number;
-  },
-): string {
+): {
+  filePath: string;
+  activeSelector?: string;
+  nextStartLine: number;
+  requestedEndLine?: number;
+} {
   const lines = emittedSlice.split("\n");
   const initialTarget = fallbackTargetPath.split(/,\s+/)[0]?.trim() || ".";
   const parsedFallback = splitPathAndSelector(initialTarget);
@@ -1748,23 +1935,19 @@ function inferNextWindowFromTruncatedSlice(
     }
   }
 
-  const nextStart = lastLineNum > 0 ? lastLineNum + 1 : 1;
+  const nextStartLine = lastLineNum > 0 ? lastLineNum + 1 : 1;
   const parsedRange = parseSelectorLineRange(activeSelector);
-  const reqEnd =
-    parsedRange?.endLine !== undefined && parsedRange.endLine >= nextStart
+  const requestedEndLine =
+    parsedRange?.endLine !== undefined && parsedRange.endLine >= nextStartLine
       ? parsedRange.endLine
       : undefined;
 
-  const useProvidedSource =
-    opts?.rawSource !== undefined && lastFilePath === parsedFallback.filePath;
-
-  return buildNextSliceHintCommand(lastFilePath, nextStart, totalLines, {
-    diskPath: useProvidedSource ? opts?.diskPath : undefined,
-    rawSource: useProvidedSource ? opts?.rawSource : undefined,
-    projectRoot: opts?.projectRoot,
-    sliceByteBudget: opts?.sliceByteBudget,
-    maxEndLine: reqEnd,
-  });
+  return {
+    filePath: lastFilePath,
+    activeSelector,
+    nextStartLine,
+    requestedEndLine,
+  };
 }
 
 function closeUnclosedMarkdownFence(text: string): string {
@@ -1828,7 +2011,6 @@ function enforceReadBudgetCeiling(params: {
   } = params;
   const maxBytes = params.maxBytes ?? DEFAULT_READ_MAX_BYTES;
   const maxTokens = params.maxTokens ?? DEFAULT_READ_MAX_TOKENS;
-  const sliceByteBudget = params.sliceByteBudget ?? DEFAULT_SLICE_BYTE_BUDGET;
   const budgetLabel = params.budgetLabel ?? "28 KB";
 
   const statsAllowanceBytes = statsText ? Buffer.byteLength(`\n\n${statsText}`, "utf-8") : 0;
@@ -1850,7 +2032,7 @@ function enforceReadBudgetCeiling(params: {
   }
 
   const lines = bundle.split("\n");
-  const targetKeepBytes = Math.max(512, maxBundleBytes - 260);
+  const targetKeepBytes = Math.max(400, maxBundleBytes - 320);
   const targetKeepTokens = Math.max(128, effectiveTokenCeiling - 90);
 
   const initialFallbackTarget = fallbackTargetPath.split(/,\s+/)[0]?.trim() || ".";
@@ -1906,44 +2088,88 @@ function enforceReadBudgetCeiling(params: {
       return `\n// [${budgetLabel} stdout budget reached — target complete; contracts trimmed${fullHint}]`;
     }
 
-    let primaryHint: string;
-    if (extraHints && extraHints.length > 0) {
-      primaryHint = extraHints[0]!;
-    } else if (boundaryOmittedHdr) {
-      if (boundaryOmittedHdr.rangeStart !== undefined) {
-        primaryHint = buildNextSliceHintCommand(
-          boundaryOmittedHdr.filePath,
-          boundaryOmittedHdr.rangeStart,
-          undefined,
-          {
-            projectRoot,
-            sliceByteBudget,
-            maxEndLine: boundaryOmittedHdr.rangeEnd,
-          },
-        );
-      } else if (boundaryOmittedHdr.selector) {
-        primaryHint = `aice read ${boundaryOmittedHdr.filePath}:${boundaryOmittedHdr.selector}`;
-      } else {
-        primaryHint = buildNextSliceHintCommand(boundaryOmittedHdr.filePath, 1, undefined, {
-          projectRoot,
-          sliceByteBudget,
-        });
-      }
-    } else {
-      primaryHint = inferNextWindowFromTruncatedSlice(
-        candidateKept,
-        fallbackTargetPath,
-        totalLines,
-        {
-          diskPath,
-          rawSource,
-          projectRoot,
-          sliceByteBudget,
-        },
-      );
-    }
     const fullHint = isCliBudget ? "" : " (or --full)";
-    return `\n// [${budgetLabel} stdout budget reached — next: ${primaryHint}${fullHint}]`;
+    if (extraHints && extraHints.length > 0) {
+      return `\n// [${budgetLabel} stdout budget reached — ${extraHints[0]}${fullHint}]`;
+    }
+
+    if (boundaryOmittedHdr) {
+      const safeBoundaryPath =
+        splitPathAndSelector(boundaryOmittedHdr.filePath).filePath.trim() || ".";
+      if (boundaryOmittedHdr.rangeStart !== undefined) {
+        const rangeLabel =
+          boundaryOmittedHdr.rangeEnd !== undefined
+            ? `L${boundaryOmittedHdr.rangeStart}-L${boundaryOmittedHdr.rangeEnd}`
+            : `L${boundaryOmittedHdr.rangeStart}+`;
+        return `\n// [${budgetLabel} stdout budget reached (${safeBoundaryPath}:${rangeLabel} omitted) — narrow with aice search <pat> ${safeBoundaryPath}${fullHint}]`;
+      }
+      if (boundaryOmittedHdr.selector) {
+        const omittedSyms: string[] = [`${safeBoundaryPath}:${boundaryOmittedHdr.selector}`];
+        for (let k = firstDroppedIdx + 1; k < lines.length && omittedSyms.length < 2; k++) {
+          const nextHdr = matchValidSectionHeaderLine(lines, k, parsedCeilingFallback.filePath);
+          if (nextHdr?.selector && nextHdr.rangeStart === undefined) {
+            const p = splitPathAndSelector(nextHdr.filePath).filePath.trim() || ".";
+            const entry = `${p}:${nextHdr.selector}`;
+            if (!omittedSyms.includes(entry)) {
+              omittedSyms.push(entry);
+            }
+          }
+        }
+        return `\n// [${budgetLabel} stdout budget reached — batch symbols: aice read ${omittedSyms.join(" ")} or aice search <pat> ${safeBoundaryPath}${fullHint}]`;
+      }
+      const guidance = buildAntiPaginationHintForTarget(safeBoundaryPath, { projectRoot });
+      return `\n// [${budgetLabel} stdout budget reached — ${guidance}${fullHint}]`;
+    }
+
+    const truncCtx = inferTruncatedSliceContext(candidateKept, fallbackTargetPath);
+    const safeTarget = splitPathAndSelector(truncCtx.filePath).filePath.trim() || ".";
+    const isSameAsFallback = safeTarget === (parsedCeilingFallback.filePath || ".");
+    const isExplicitRange = Boolean(
+      truncCtx.activeSelector && LINE_RANGE_SELECTOR_RE.test(truncCtx.activeSelector),
+    );
+
+    if (isExplicitRange) {
+      const effectiveEnd =
+        truncCtx.requestedEndLine !== undefined
+          ? totalLines !== undefined && isSameAsFallback
+            ? Math.min(totalLines, truncCtx.requestedEndLine)
+            : truncCtx.requestedEndLine
+          : isSameAsFallback
+            ? totalLines
+            : undefined;
+      const remSpan =
+        effectiveEnd !== undefined && effectiveEnd >= truncCtx.nextStartLine
+          ? ` (L${truncCtx.nextStartLine}-L${effectiveEnd} remaining)`
+          : truncCtx.nextStartLine > 1
+            ? ` (from L${truncCtx.nextStartLine} remaining)`
+            : "";
+      return `\n// [${budgetLabel} stdout budget reached${remSpan} — narrow with aice search <pat> ${safeTarget}${fullHint}]`;
+    }
+
+    const excludeSym =
+      truncCtx.activeSelector &&
+      !isPureRegexSelector(truncCtx.activeSelector) &&
+      !truncCtx.activeSelector.includes(",")
+        ? truncCtx.activeSelector
+        : undefined;
+    const symHints = extractRepresentativeSymbolHints({
+      diskPath: isSameAsFallback ? diskPath : undefined,
+      rawSource: isSameAsFallback ? rawSource : undefined,
+      displayPath: safeTarget,
+      projectRoot,
+      excludeSymbol: excludeSym,
+    });
+    if (symHints.length > 0) {
+      return `\n// [${budgetLabel} stdout budget reached — ${formatBatchSymbolsOrSearchHint(safeTarget, symHints)}${fullHint}]`;
+    }
+
+    const remSpan =
+      isSameAsFallback && totalLines !== undefined && totalLines >= truncCtx.nextStartLine
+        ? ` (L${truncCtx.nextStartLine}-L${totalLines} remaining)`
+        : truncCtx.nextStartLine > 1
+          ? ` (from L${truncCtx.nextStartLine} remaining)`
+          : "";
+    return `\n// [${budgetLabel} stdout budget reached${remSpan} — narrow with aice search <pat> ${safeTarget}${fullHint}]`;
   };
 
   let closedKept = closeUnclosedMarkdownFence(keptText);
@@ -3697,27 +3923,11 @@ export async function aiceRead(
     });
   }
 
-  // 3C. Mixed Context + Outline Stream (e.g. `["src/a.ts:fnA", "src/b.ts:L10-L40", "src/rules"]`)
+  // 3C. Mixed Context + Outline Stream (e.g. `["src/a.ts:fnA", "src/big.ts", "src/small.ts"]`)
   const bypassInternalCap = Boolean(
     options.full || options.maxTokens !== undefined || options.json,
   );
-  const ctxPart = await withSuppressedTelemetryAsync(() =>
-    executeContextStream({
-      contextItems,
-      missingTargets: [],
-      isMultiInput: true,
-      sharedScanCache,
-      options: {
-        ...options,
-        full: bypassInternalCap,
-        maxTokens: undefined,
-        json: false,
-        stats: false,
-        _bypassInternalCap: true,
-      },
-      surface,
-    }),
-  );
+  const enforceMixedBudget = shouldEnforceDefaultReadBudget(options, normalizedItems);
 
   const effectiveIdioms = isProjectIdiomsEnabled(
     outlineItems[0]?.resolved.config ?? {},
@@ -3730,7 +3940,7 @@ export async function aiceRead(
       outlineItems.length === 1 && !outlineItems[0]?.isDir ? firstBatchPath : batchPaths,
       {
         depth: options.depth,
-        compact: options.compact,
+        compact: options.compact ?? enforceMixedBudget,
         includeTypes: options.includeTypes !== false,
         idioms: effectiveIdioms,
         json: Boolean(options.json),
@@ -3757,12 +3967,73 @@ export async function aiceRead(
     }),
   );
 
-  const outlineSectionBody =
+  const rawOutlineSectionBody =
     outlineItems.length === 1 && !outlineItems[0]?.isDir && outlineItems[0]
       ? outlinePart.formattedBundle.startsWith("// ")
         ? outlinePart.formattedBundle
         : `// ${outlineItems[0].displayPath}\n${outlinePart.formattedBundle}`
       : outlinePart.formattedBundle;
+
+  let compactOutlineSectionBody = rawOutlineSectionBody;
+  if (enforceMixedBudget) {
+    const maxOutlineShareBytes = Math.min(
+      Math.floor(effectiveBudgets.softByteCap * 0.42),
+      Math.max(850, outlineItems.length * 1_100),
+    );
+    if (Buffer.byteLength(rawOutlineSectionBody, "utf-8") > maxOutlineShareBytes) {
+      const subBlocks = rawOutlineSectionBody.split("\n\n");
+      const perBlockCap = Math.max(
+        260,
+        Math.floor(
+          (maxOutlineShareBytes - Math.max(0, subBlocks.length - 1) * 2) /
+            Math.max(1, subBlocks.length),
+        ),
+      );
+      compactOutlineSectionBody = subBlocks
+        .map((blk, idx) => {
+          const nlIdx = blk.indexOf("\n");
+          if (nlIdx <= 0) return blk;
+          const hdr = blk.slice(0, nlIdx);
+          const body = blk.slice(nlIdx + 1);
+          const disp = outlineItems[idx]?.displayPath ?? outlineItems[0]?.displayPath ?? ".";
+          return compactAutoOutlineBlock(hdr, body, perBlockCap, disp);
+        })
+        .join("\n\n");
+    }
+  }
+
+  const reservedForOutlineBytes = enforceMixedBudget
+    ? Buffer.byteLength(compactOutlineSectionBody, "utf-8") + 96
+    : 0;
+  const ctxBudgetMaxBytes = enforceMixedBudget
+    ? Math.max(1_024, effectiveBudgets.maxBytes - reservedForOutlineBytes)
+    : options.maxBytes;
+
+  const ctxPart = await withSuppressedTelemetryAsync(() =>
+    executeContextStream({
+      contextItems,
+      missingTargets: [],
+      isMultiInput: true,
+      sharedScanCache,
+      options: {
+        ...options,
+        full: bypassInternalCap,
+        maxTokens: undefined,
+        maxBytes: ctxBudgetMaxBytes,
+        json: false,
+        stats: false,
+        _bypassInternalCap: !enforceMixedBudget,
+      },
+      surface,
+    }),
+  );
+
+  const ctxActualBytes = Buffer.byteLength(ctxPart.formattedBundle, "utf-8");
+  const fullOutlineBytes = Buffer.byteLength(rawOutlineSectionBody, "utf-8");
+  const outlineSectionBody =
+    !enforceMixedBudget || ctxActualBytes + 2 + fullOutlineBytes <= effectiveBudgets.maxBytes - 96
+      ? rawOutlineSectionBody
+      : compactOutlineSectionBody;
 
   let combinedBundle = `${ctxPart.formattedBundle}\n\n${outlineSectionBody}`;
   if (missingTargets.length > 0) {
@@ -3952,16 +4223,20 @@ function buildPureOutlineResult(params: {
         ? formatReadDisplayPath(itemRes.file, projectRoot, rawKey)
         : rawKey;
       const autoMeta = autoOutlineByAbsPath.get(path.resolve(itemRes.file));
+      const symbolNames = autoMeta
+        ? extractRepresentativeSymbolHints({
+            symbols: itemRes.symbols,
+            diskPath: autoMeta.diskPath,
+            rawSource: autoMeta.preReadSource,
+            displayPath: displayKey,
+            projectRoot,
+          })
+        : undefined;
       const headerLine = autoMeta
         ? `${buildAutoOutlineHeader(displayKey, autoMeta.lineCount, {
+            symbolNames,
             budgetDowngraded: autoMeta.budgetDowngraded,
             budgetLabel: effectiveBudgets.budgetLabel,
-            nextSliceCmd: buildNextSliceHintCommand(displayKey, 1, autoMeta.lineCount, {
-              diskPath: autoMeta.diskPath,
-              rawSource: autoMeta.preReadSource,
-              projectRoot,
-              sliceByteBudget: effectiveBudgets.sliceByteBudget,
-            }),
           })}\n`
         : "";
       outlineDisplayKeys.push(displayKey);
@@ -4021,19 +4296,15 @@ function buildPureOutlineResult(params: {
         runningBytes += blkBytes;
       }
       if (omittedDisplayPaths.length > 0) {
-        const nextCmd = buildNextSliceHintCommand(omittedDisplayPaths[0]!, 1, undefined, {
-          projectRoot,
-          sliceByteBudget: effectiveBudgets.sliceByteBudget,
-        });
+        const batchPreview = omittedDisplayPaths.slice(0, 3).join(" ");
         keptOutlineBlocks.push(
-          `// +${omittedDisplayPaths.length} more files omitted — next: ${nextCmd}`,
+          `// +${omittedDisplayPaths.length} more files omitted — batch: aice outline ${batchPreview} or aice search <pat>`,
         );
       }
       rawBundle = keptOutlineBlocks.join("\n\n");
     } else {
       rawBundle = textBlocks.join("\n\n");
     }
-
     jsonData = jsonItems;
     if (options.stats) {
       statsText = formatAggregateOutlineStatsFooter(fileCount, totalOrigTokens, totalOutlineTokens);
@@ -4055,16 +4326,17 @@ function buildPureOutlineResult(params: {
         : undefined;
 
     if (autoMeta) {
-      const nextSliceCmd = buildNextSliceHintCommand(autoMeta.displayPath, 1, autoMeta.lineCount, {
+      const symbolNames = extractRepresentativeSymbolHints({
+        symbols: outlineRes.symbols,
         diskPath: autoMeta.diskPath,
         rawSource: autoMeta.preReadSource,
+        displayPath: autoMeta.displayPath,
         projectRoot,
-        sliceByteBudget: effectiveBudgets.sliceByteBudget,
       });
       const autoHeader = buildAutoOutlineHeader(autoMeta.displayPath, autoMeta.lineCount, {
+        symbolNames,
         budgetDowngraded: autoMeta.budgetDowngraded,
         budgetLabel: effectiveBudgets.budgetLabel,
-        nextSliceCmd,
       });
       let compactOutlineBody = outlineRes.text;
       if (autoMeta.preReadSource && compactOutlineBody) {
@@ -4074,9 +4346,16 @@ function buildPureOutlineResult(params: {
           rawTokEst > 0 &&
           estimateTokens(`${autoHeader}\n${compactOutlineBody}`, "cl100k_base") > rawTokEst * 0.48
         ) {
-          const maxKeep = Math.max(12, Math.min(35, Math.floor(outLines.length * 0.35)));
+          let maxKeep = Math.max(6, Math.min(35, Math.floor(outLines.length * 0.35)));
           if (outLines.length > maxKeep) {
-            compactOutlineBody = `${outLines.slice(0, maxKeep).join("\n")}\n// ... (+${outLines.length - maxKeep} more symbols — slice ${autoMeta.displayPath}:L<start>-L<end> or search)`;
+            compactOutlineBody = `${outLines.slice(0, maxKeep).join("\n")}\n// ... (+${outLines.length - maxKeep} more symbols — use aice search <pat> ${autoMeta.displayPath})`;
+          }
+          while (
+            maxKeep > 3 &&
+            estimateTokens(`${autoHeader}\n${compactOutlineBody}`, "cl100k_base") > rawTokEst * 0.78
+          ) {
+            maxKeep = Math.max(3, Math.floor(maxKeep * 0.6));
+            compactOutlineBody = `${outLines.slice(0, maxKeep).join("\n")}\n// ... (+${Math.max(1, outLines.length - maxKeep)} more symbols — use aice search <pat> ${autoMeta.displayPath})`;
           }
         }
       }
@@ -4563,84 +4842,135 @@ async function executeContextStream(params: {
     let formattedBundle = merged.formattedBundle;
     const paginationHints: string[] = [];
 
-    // Auto-downgrade heavy overflow targets to `:outline` + exact `Lstart-Lend` hints when > budget
+    // Priority 1-turn batch packer:
+    // 1. Pack explicit selectors (`:sym`, `:L`, `:/regex/`) that fit within budget FIRST
+    // 2. Pack small bare files that fit within remaining budget (smallest-first)
+    // 3. Auto-outline oversized bare files cleanly (never partial-filling bare files across turns)
     if (
       enforceStreamBudget &&
       (Buffer.byteLength(formattedBundle, "utf-8") > effectiveBudgets.maxBytes ||
         (merged.tokenCount ?? estimateTokens(formattedBundle)) > effectiveBudgets.maxTokens)
     ) {
-      const keptContextResults: ContextResult[] = [];
-      const downgradedBlocks: string[] = [];
       const statsAllowanceBytes = options.stats ? 180 : 0;
       const maxBundleBytes = Math.max(400, effectiveBudgets.maxBytes - statsAllowanceBytes);
       const softByteCap = Math.min(
         effectiveBudgets.softByteCap,
-        Math.max(400, maxBundleBytes - 350),
+        Math.max(400, maxBundleBytes - 260),
       );
       const softTokenCap = effectiveBudgets.softTokenCap;
 
-      // Pack targets strictly in original request order up to softByteCap / softTokenCap
+      const itemMeta = results.map((resItem, idx) => {
+        const blockStr = resItem.formattedBundle.startsWith("// ")
+          ? resItem.formattedBundle
+          : `// ${resItem.targetPath}\n${resItem.formattedBundle}`;
+        return {
+          idx,
+          itemBytes: Buffer.byteLength(blockStr, "utf-8"),
+          itemToks: resItem.tokenCount ?? estimateTokens(blockStr),
+          hasExplicitSelector: Boolean(matchedTargets[idx]?.effectiveSelector),
+        };
+      });
+
+      const explicitIndices = itemMeta.filter((m) => m.hasExplicitSelector).map((m) => m.idx);
+      const bareIndices = itemMeta.filter((m) => !m.hasExplicitSelector).map((m) => m.idx);
+
       const fitInlineIndices = new Set<number>();
       let usedBytes = 0;
       let usedTokens = 0;
-      for (let idx = 0; idx < results.length; idx++) {
-        const resItem = results[idx]!;
-        const itemBytes = Buffer.byteLength(resItem.formattedBundle, "utf-8");
-        const itemToks = resItem.tokenCount ?? estimateTokens(resItem.formattedBundle);
+
+      // Pass 1: Explicit selectors (`:sym`, `:L`, `:/regex/`) — do not `break` when one oversized range overflows
+      for (let ePos = 0; ePos < explicitIndices.length; ePos++) {
+        const idx = explicitIndices[ePos]!;
+        const meta = itemMeta[idx]!;
         const sep = fitInlineIndices.size > 0 ? 2 : 0;
-        if (usedBytes + sep + itemBytes <= softByteCap && usedTokens + itemToks <= softTokenCap) {
+        const laterExplicitCount = explicitIndices.length - ePos - 1;
+        const minCushionBytes = Math.min(
+          Math.floor(softByteCap * 0.32),
+          bareIndices.length * 320 + laterExplicitCount * 110,
+        );
+        if (
+          usedBytes + sep + meta.itemBytes <= softByteCap - minCushionBytes &&
+          usedTokens + meta.itemToks <= softTokenCap
+        ) {
           fitInlineIndices.add(idx);
-          usedBytes += sep + itemBytes;
-          usedTokens += itemToks;
-        } else {
-          break;
+          usedBytes += sep + meta.itemBytes;
+          usedTokens += meta.itemToks;
         }
       }
 
-      let partialFillHandled = false;
+      // Pass 2: Small bare files that fit within remaining budget (smallest-first water-filling)
+      const sortedBareIndices = [...bareIndices].sort(
+        (a, b) => itemMeta[a]!.itemBytes - itemMeta[b]!.itemBytes || a - b,
+      );
+      let remainingBareCandidates = sortedBareIndices.length;
+      for (const idx of sortedBareIndices) {
+        remainingBareCandidates--;
+        const meta = itemMeta[idx]!;
+        const sep = fitInlineIndices.size > 0 ? 2 : 0;
+        const minCushionBytes = Math.min(
+          Math.floor(softByteCap * 0.35),
+          remainingBareCandidates * 340,
+        );
+        if (
+          usedBytes + sep + meta.itemBytes <= softByteCap - minCushionBytes &&
+          usedTokens + meta.itemToks <= softTokenCap
+        ) {
+          fitInlineIndices.add(idx);
+          usedBytes += sep + meta.itemBytes;
+          usedTokens += meta.itemToks;
+        }
+      }
+
+      // Pass 3: Render all targets in original request order (inline where packed, compact auto-outline for oversized bare files)
+      let unpackedRemaining = results.length - fitInlineIndices.size;
+      let partialExplicitHandled = false;
+      const packedContextResults: ContextResult[] = [];
+
       for (let i = 0; i < results.length; i++) {
         const resItem = results[i]!;
         const targetMeta = matchedTargets[i]!;
 
         if (fitInlineIndices.has(i)) {
-          keptContextResults.push(resItem);
+          packedContextResults.push(resItem);
           continue;
         }
 
+        unpackedRemaining = Math.max(0, unpackedRemaining - 1);
+        const hasExplicitSel = Boolean(targetMeta.effectiveSelector);
         const isExplicitLineRange = Boolean(
           targetMeta.effectiveSelector && LINE_RANGE_SELECTOR_RE.test(targetMeta.effectiveSelector),
         );
         const parsedOverflowRange = parseSelectorLineRange(targetMeta.effectiveSelector);
-
-        let startHintLine = 1;
-        if (
-          targetMeta.effectiveSelector &&
-          LINE_RANGE_SELECTOR_RE.test(targetMeta.effectiveSelector)
-        ) {
-          const rm = targetMeta.effectiveSelector.match(/L(\d+)/i);
-          if (rm?.[1]) {
-            startHintLine = Math.max(1, Number.parseInt(rm[1], 10));
-          }
-        }
         const cachedRaw =
-          targetMeta.preReadSource ?? sharedScanCache.fileContentByPath.get(targetMeta.diskPath);
+          targetMeta.preReadSource ??
+          sharedScanCache.fileContentByPath.get(targetMeta.diskPath) ??
+          (!targetMeta.isDir && fs.existsSync(targetMeta.diskPath)
+            ? fs.readFileSync(targetMeta.diskPath, "utf-8")
+            : undefined);
         const totalTargetLines =
           targetMeta.lineCount ?? (cachedRaw ? countSourceLines(cachedRaw) : undefined);
         const requestedEndLine = parsedOverflowRange
           ? (parsedOverflowRange.endLine ?? parsedOverflowRange.startLine)
           : undefined;
 
-        const sepBefore = keptContextResults.length > 0 || downgradedBlocks.length > 0 ? 2 : 0;
-        const remainingBytes = softByteCap - usedBytes - sepBefore;
-        const remainingTokens = softTokenCap - usedTokens;
+        const sepBefore = packedContextResults.length > 0 ? 2 : 0;
+        const reserveForLaterUnpacked = unpackedRemaining * 260;
+        const availForThisBytes = Math.max(
+          220,
+          softByteCap - usedBytes - sepBefore - reserveForLaterUnpacked,
+        );
+        const availForThisTokens = softTokenCap - usedTokens;
+
+        // Partial slice fill ONLY for an oversized explicit selector (`:L` or `:sym`), NEVER for bare files
         if (
-          !partialFillHandled &&
+          hasExplicitSel &&
+          !partialExplicitHandled &&
           targetMeta.route === "context" &&
-          remainingBytes >= 1_500 &&
-          remainingTokens >= 300
+          availForThisBytes >= 1_100 &&
+          availForThisTokens >= 240
         ) {
-          partialFillHandled = true;
-          const partialBudgetBytes = remainingBytes - 240;
+          partialExplicitHandled = true;
+          const partialBudgetBytes = availForThisBytes - 200;
           const rawBundleLines = resItem.formattedBundle.split("\n");
           const hasTrackableLines = rawBundleLines.some(
             (ln) => /^\s*\d+[│:]\s/.test(ln) || /^\/\/ [^\s:]+:\d+(?:-\d+)?$/.test(ln),
@@ -4686,7 +5016,6 @@ async function executeContextStream(params: {
 
             if (lastEmittedLine > 0) {
               const closedPartial = closeUnclosedMarkdownFence(keptPartialLines.join("\n"));
-              let nextCmd: string | undefined;
               let continuationFooter: string;
               if (isExplicitLineRange && requestedEndLine !== undefined) {
                 const cappedEnd =
@@ -4694,29 +5023,23 @@ async function executeContextStream(params: {
                     ? Math.min(requestedEndLine, totalTargetLines)
                     : requestedEndLine;
                 if (cappedEnd > lastEmittedLine) {
-                  nextCmd = `aice read ${targetMeta.displayPath}:L${lastEmittedLine + 1}-L${cappedEnd}`;
-                  continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — next slice: ${nextCmd}]`;
+                  const hint = `narrow with aice search <pat> ${targetMeta.displayPath}`;
+                  paginationHints.push(hint);
+                  continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached (L${lastEmittedLine + 1}-L${cappedEnd} remaining) — ${hint}]`;
                 } else {
                   continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — target range complete]`;
                 }
               } else if (totalTargetLines !== undefined && lastEmittedLine >= totalTargetLines) {
                 continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — target content complete]`;
               } else {
-                nextCmd = inferNextWindowFromTruncatedSlice(
-                  closedPartial,
-                  targetMeta.displayPath,
-                  totalTargetLines,
-                  {
-                    diskPath: targetMeta.isDir ? undefined : targetMeta.diskPath,
-                    rawSource: cachedRaw,
-                    projectRoot: targetMeta.resolved.projectRoot,
-                    sliceByteBudget: effectiveBudgets.sliceByteBudget,
-                  },
-                );
-                continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached — next slice: ${nextCmd}]`;
-              }
-              if (nextCmd) {
-                paginationHints.push(nextCmd);
+                const hint = buildAntiPaginationHintForTarget(targetMeta.displayPath, {
+                  diskPath: targetMeta.isDir ? undefined : targetMeta.diskPath,
+                  rawSource: cachedRaw,
+                  projectRoot: targetMeta.resolved.projectRoot,
+                  excludeSymbol: targetMeta.effectiveSelector,
+                });
+                paginationHints.push(hint);
+                continuationFooter = `// [${effectiveBudgets.budgetLabel} budget reached (from L${lastEmittedLine + 1} remaining) — ${hint}]`;
               }
               if (targetSummaries[i]) {
                 targetSummaries[i] = {
@@ -4725,43 +5048,41 @@ async function executeContextStream(params: {
                 };
               }
               const partialBlock = `${closedPartial}\n${continuationFooter}`;
-              downgradedBlocks.push(partialBlock);
+              packedContextResults.push({
+                targetPath: targetMeta.displayPath,
+                targetContent: partialBlock,
+                formattedBundle: partialBlock,
+                dependencies: [],
+                callers: [],
+                tokenCount: estimateTokens(partialBlock),
+              });
               usedBytes += sepBefore + Buffer.byteLength(partialBlock, "utf-8");
               usedTokens += estimateTokens(partialBlock);
               continue;
             }
           }
-        } else if (!partialFillHandled) {
-          partialFillHandled = true;
         }
 
-        const nextCmd =
-          isExplicitLineRange && requestedEndLine !== undefined
-            ? `aice read ${targetMeta.displayPath}:L${startHintLine}-L${requestedEndLine}`
-            : buildNextSliceHintCommand(targetMeta.displayPath, startHintLine, totalTargetLines, {
-                diskPath: targetMeta.isDir ? undefined : targetMeta.diskPath,
-                rawSource: cachedRaw,
-                projectRoot: targetMeta.resolved.projectRoot,
-                sliceByteBudget: effectiveBudgets.sliceByteBudget,
-                maxEndLine:
-                  requestedEndLine !== undefined && requestedEndLine >= startHintLine
-                    ? requestedEndLine
-                    : undefined,
-              });
-        paginationHints.push(nextCmd);
-        if (targetSummaries[i]) {
-          targetSummaries[i] = {
-            ...targetSummaries[i]!,
-            autoOutlined: true,
-            ...(totalTargetLines !== undefined ? { lineCount: totalTargetLines } : {}),
-          };
-        }
-
+        let downgradedBlock: string;
         if (isExplicitLineRange) {
-          downgradedBlocks.push(
-            `// ${targetMeta.displayPath}:${targetMeta.effectiveSelector} (omitted — ${effectiveBudgets.budgetLabel} budget; next: ${nextCmd})`,
-          );
+          const hint = `narrow with aice search <pat> ${targetMeta.displayPath}`;
+          paginationHints.push(hint);
+          downgradedBlock = `// ${targetMeta.displayPath}:${targetMeta.effectiveSelector} (omitted — ${effectiveBudgets.budgetLabel} budget; ${hint})`;
+        } else if (targetMeta.effectiveSelector) {
+          const effSel = targetMeta.effectiveSelector;
+          const hint = isPureRegexSelector(effSel)
+            ? `aice search "${effSel.replace(/^\/|\/[gimsuy]*$/g, "")}" ${targetMeta.displayPath}`
+            : `batch symbols: aice read ${targetMeta.displayPath}:${effSel} or aice search <pat> ${targetMeta.displayPath}`;
+          paginationHints.push(hint);
+          downgradedBlock = `// ${targetMeta.displayPath}:${effSel} (omitted — ${effectiveBudgets.budgetLabel} budget; ${hint})`;
         } else {
+          if (targetSummaries[i]) {
+            targetSummaries[i] = {
+              ...targetSummaries[i]!,
+              autoOutlined: true,
+              ...(totalTargetLines !== undefined ? { lineCount: totalTargetLines } : {}),
+            };
+          }
           try {
             if (!targetMeta.isDir && fs.existsSync(targetMeta.diskPath)) {
               const oRes = await withSuppressedTelemetryAsync(() =>
@@ -4770,29 +5091,66 @@ async function executeContextStream(params: {
                   compact: true,
                   idioms: isProjectIdiomsEnabled(targetMeta.resolved.config, options.idioms),
                   projectRoot: targetMeta.resolved.projectRoot,
+                  ...(cachedRaw !== undefined ? { preReadSource: cachedRaw } : {}),
                 }),
               );
-              const singleOutline =
-                oRes instanceof Map ? (Array.from(oRes.values())[0]?.text ?? "") : oRes.text;
-              downgradedBlocks.push(
-                `// Auto-outlined ${targetMeta.displayPath} (${effectiveBudgets.budgetLabel} budget — next: ${nextCmd})\n${singleOutline}`,
+              const singleOutlineObj = oRes instanceof Map ? Array.from(oRes.values())[0] : oRes;
+              const singleOutlineText = singleOutlineObj?.text ?? "";
+              const symNames = extractRepresentativeSymbolHints({
+                symbols: singleOutlineObj?.symbols,
+                diskPath: targetMeta.diskPath,
+                rawSource: cachedRaw,
+                displayPath: targetMeta.displayPath,
+                projectRoot: targetMeta.resolved.projectRoot,
+              });
+              const guidance = formatBatchSymbolsOrSearchHint(targetMeta.displayPath, symNames);
+              paginationHints.push(guidance);
+              const hdr = buildAutoOutlineHeader(targetMeta.displayPath, totalTargetLines ?? 1, {
+                symbolNames: symNames,
+                budgetDowngraded: true,
+                budgetLabel: effectiveBudgets.budgetLabel,
+              });
+              const perOutlineCap = Math.max(
+                260,
+                Math.floor(
+                  Math.max(320, softByteCap - usedBytes - sepBefore) /
+                    Math.max(1, unpackedRemaining + 1),
+                ),
+              );
+              downgradedBlock = compactAutoOutlineBlock(
+                hdr,
+                singleOutlineText,
+                perOutlineCap,
+                targetMeta.displayPath,
               );
             } else {
-              downgradedBlocks.push(
-                `// ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next: ${nextCmd})`,
-              );
+              const guidance = buildAntiPaginationHintForTarget(targetMeta.displayPath, {
+                projectRoot: targetMeta.resolved.projectRoot,
+              });
+              paginationHints.push(guidance);
+              downgradedBlock = `// ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; ${guidance})`;
             }
           } catch {
-            downgradedBlocks.push(
-              `// ${targetMeta.displayPath} (omitted — ${effectiveBudgets.budgetLabel} budget; next: ${nextCmd})`,
-            );
+            const guidance = `narrow with aice search <pat> ${targetMeta.displayPath}`;
+            paginationHints.push(guidance);
+            downgradedBlock = `// Auto-outlined ${targetMeta.displayPath} (${totalTargetLines ?? 1}L, >${effectiveBudgets.budgetLabel}) — ${guidance}`;
           }
         }
+
+        packedContextResults.push({
+          targetPath: targetMeta.displayPath,
+          targetContent: downgradedBlock,
+          formattedBundle: downgradedBlock,
+          dependencies: [],
+          callers: [],
+          tokenCount: estimateTokens(downgradedBlock),
+        });
+        usedBytes += sepBefore + Buffer.byteLength(downgradedBlock, "utf-8");
+        usedTokens += estimateTokens(downgradedBlock);
       }
 
-      const partsAfterDowngrade: string[] = [];
-      if (keptContextResults.length > 0) {
-        merged = mergeMultiContextResults(keptContextResults, {
+      if (packedContextResults.length > 0) {
+        merged = mergeMultiContextResults(packedContextResults, {
           outlineTarget: Boolean(options.outlineTarget),
           includeDeps: effectiveIncludeDeps,
           includeCallers: effectiveIncludeCallers,
@@ -4800,12 +5158,8 @@ async function executeContextStream(params: {
           rawNative: effectiveRawNative,
           surface: options.surface,
         });
-        partsAfterDowngrade.push(merged.formattedBundle);
+        formattedBundle = merged.formattedBundle;
       }
-      if (downgradedBlocks.length > 0) {
-        partsAfterDowngrade.push(downgradedBlocks.join("\n\n"));
-      }
-      formattedBundle = partsAfterDowngrade.join("\n\n");
     }
 
     if (missingTargets.length > 0) {
@@ -4944,6 +5298,77 @@ async function executeContextStream(params: {
         };
   formattedBundle = truncatedSingle.text;
   let tokenCount = truncatedSingle.tokenCount;
+
+  // Eliminate single-file read / small-slice chrome bloat when headers or resume numbers push aiceCl100k > realisticNativeCl100k
+  const effectiveSingleRealisticTok = Math.min(totalFullNativeCl100k, totalRealisticNativeCl100k);
+  const singleMatchedForCompact = matchedTargets[0];
+  if (
+    !isMultiInput &&
+    missingTargets.length === 0 &&
+    !options.json &&
+    !options.stats &&
+    !effectiveIncludeDeps &&
+    !effectiveIncludeCallers &&
+    (options.surface === "cli" || options.surface === "mcp" || effectiveRawNative) &&
+    effectiveSingleRealisticTok > 0 &&
+    tokenCount > effectiveSingleRealisticTok &&
+    singleMatchedForCompact &&
+    !singleMatchedForCompact.isDir
+  ) {
+    const sel = singleMatchedForCompact.effectiveSelector?.trim();
+    const singleRangeMatch = sel?.match(/^\[?L?(\d+)(?:-L?(\d+))?\]?$/i);
+    if (singleRangeMatch?.[1] && !formattedBundle.includes("[Clamped ")) {
+      const rawSrc =
+        singleMatchedForCompact.preReadSource ??
+        sharedScanCache.fileContentByPath.get(singleMatchedForCompact.diskPath) ??
+        (fs.existsSync(singleMatchedForCompact.diskPath)
+          ? fs.readFileSync(singleMatchedForCompact.diskPath, "utf-8")
+          : undefined);
+      if (rawSrc !== undefined) {
+        const rawLines = rawSrc.replace(/\r?\n$/, "").split(/\r?\n/);
+        const totalL = Math.max(1, rawLines.length);
+        if (totalL <= DEFAULT_AUTO_OUTLINE_LINE_THRESHOLD) {
+          const rStart = Math.max(1, Math.min(totalL, Number.parseInt(singleRangeMatch[1], 10)));
+          const rEnd = Math.max(
+            rStart,
+            Math.min(
+              totalL,
+              singleRangeMatch[2] ? Number.parseInt(singleRangeMatch[2], 10) : rStart,
+            ),
+          );
+          const cleanSlice = rawLines.slice(rStart - 1, rEnd).join("\n");
+          const withCompactHeader = `// ${singleMatchedForCompact.displayPath}:${rStart}-${rEnd}\n${cleanSlice}`;
+          const withHdrTok = estimateTokens(withCompactHeader, "cl100k_base");
+          const cleanTok = estimateTokens(cleanSlice, "cl100k_base");
+          if (withHdrTok <= effectiveSingleRealisticTok) {
+            formattedBundle = withCompactHeader;
+            tokenCount = withHdrTok;
+          } else if (cleanTok < tokenCount) {
+            formattedBundle = cleanSlice;
+            tokenCount = cleanTok;
+          }
+        }
+      }
+    } else if (
+      sel &&
+      !isPureRegexSelector(sel) &&
+      totalFullNativeCl100k >= 400 &&
+      tokenCount > totalFullNativeCl100k
+    ) {
+      let stripped = formattedBundle.replace(
+        /\n\/\/ siblings[^\n]*(?:\n\/\/ siblings[^\n]*)*$/,
+        "",
+      );
+      if (estimateTokens(stripped, "cl100k_base") > totalFullNativeCl100k) {
+        stripped = stripped.replace(/^\/\/ [^\n]+\n/, "");
+      }
+      const strippedTok = estimateTokens(stripped, "cl100k_base");
+      if (strippedTok < tokenCount) {
+        formattedBundle = stripped;
+        tokenCount = strippedTok;
+      }
+    }
+  }
 
   const jsonData = singleResult;
   const jsonOutput = options.json ? JSON.stringify(jsonData, null, 2) : undefined;

@@ -959,14 +959,17 @@ describe("Real-World Read/Search/Find BPE Token Reduction & R1-R5 Regression Sui
     );
     expect(cappedMultiSlice.output).not.toContain("aice read //");
     expect(cappedMultiSlice.output).not.toContain("aice read Exports");
-    const hintMatch = cappedMultiSlice.output.match(
-      /next:\s+aice read src\/engine\/tricky_pagination\.ts:L(\d+)-L(\d+)/,
+    expect(cappedMultiSlice.output).not.toContain("aice search <pat> //");
+    expect(cappedMultiSlice.output).not.toContain("aice search <pat> Exports");
+    expect(cappedMultiSlice.output).not.toContain("next: aice read");
+    const remMatch = cappedMultiSlice.output.match(
+      /\(L(\d+)-L(\d+) remaining\) — narrow with aice search <pat> src\/engine\/tricky_pagination\.ts/,
     );
-    expect(hintMatch).not.toBeNull();
-    const nextStart = Number.parseInt(hintMatch![1]!, 10);
-    const nextEnd = Number.parseInt(hintMatch![2]!, 10);
+    expect(remMatch).not.toBeNull();
+    const nextStart = Number.parseInt(remMatch![1]!, 10);
+    const nextEnd = Number.parseInt(remMatch![2]!, 10);
     expect(nextStart).toBeGreaterThan(50);
     expect(nextStart).toBeLessThanOrEqual(240);
-    expect(nextEnd).toBeLessThanOrEqual(240);
+    expect(nextEnd).toBe(240);
   });
 });
