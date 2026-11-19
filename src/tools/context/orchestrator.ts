@@ -550,13 +550,15 @@ export async function generateContext(
         const joinDeduplicatedBlocks = (blocks: string[]): string => {
           if (blocks.length <= 1) return blocks[0] ?? "";
           const cleaned = blocks.map((b) => stripSlicePrefix(b));
-          const firstHasModule = /^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+/m.test(cleaned[0]!);
+          const firstHasModule = /^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+/m.test(
+            cleaned[0] ?? "",
+          );
           const joinedBody = cleaned
             .map((blk, idx) => {
               if (idx === 0 || !firstHasModule) return blk;
               return blk.replace(/^(?:[ \t]*#[^\n]*\n)*[ \t]*module\s+[^\n]+\n+/, "");
             })
-            .join("\n\n");
+            .join(effectiveRawNative ? "\n" : "\n\n");
           return effectiveRawNative ? `// @preformatted\n${joinedBody}` : joinedBody;
         };
         if (firstMissingErr !== undefined) {

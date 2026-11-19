@@ -5,6 +5,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { FileStatLruCache } from "../../cache/lru.js";
 import {
   AICE_DISABLED_MESSAGE,
   DEFAULT_IGNORED_SCAN_DIRECTORIES,
@@ -186,6 +187,21 @@ export interface DiscoveredWorkspaceFile {
   lines: number;
   bytes: number;
   sizeKB: number;
+}
+
+interface DiscoveryFileMeta {
+  isBinary: boolean;
+  lines: number;
+  bytes: number;
+}
+
+const MAX_DISCOVERY_META_CACHE_ENTRIES = 2048;
+const discoveryFileMetaCache = new FileStatLruCache<DiscoveryFileMeta>(
+  MAX_DISCOVERY_META_CACHE_ENTRIES,
+);
+
+export function clearDiscoveryFileMetaCache(): void {
+  discoveryFileMetaCache.clear();
 }
 
 export function executeFilesOnlyRead(
@@ -407,20 +423,35 @@ export function executeFilesOnlyRead(
 
   for (const relPath of sortedRelPaths) {
     const absPath = candidateFiles.get(relPath)!;
-    let buf: Buffer;
+    let stat: fs.Stats;
     try {
-      buf = fs.readFileSync(absPath);
+      stat = fs.statSync(absPath);
     } catch {
       continue;
     }
-    if (isLikelyBinaryBuffer(buf)) continue;
-    const lines = countBufferLinesFast(buf);
-    const bytes = buf.length;
-    const sizeKBNum = bytes === 0 ? 0 : Number(Math.max(0.1, bytes / 1024).toFixed(1));
+    if (!stat.isFile()) continue;
+    let meta = discoveryFileMetaCache.getIfFresh(absPath, stat);
+    if (!meta) {
+      let buf: Buffer;
+      try {
+        buf = fs.readFileSync(absPath);
+      } catch {
+        continue;
+      }
+      const isBinary = isLikelyBinaryBuffer(buf);
+      meta = {
+        isBinary,
+        lines: isBinary ? 0 : countBufferLinesFast(buf),
+        bytes: buf.length,
+      };
+      discoveryFileMetaCache.setWithStat(absPath, stat, meta);
+    }
+    if (meta.isBinary) continue;
+    const sizeKBNum = meta.bytes === 0 ? 0 : Number(Math.max(0.1, meta.bytes / 1024).toFixed(1));
     discovered.push({
       path: relPath,
-      lines,
-      bytes,
+      lines: meta.lines,
+      bytes: meta.bytes,
       sizeKB: sizeKBNum,
     });
   }

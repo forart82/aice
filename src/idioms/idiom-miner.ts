@@ -7,7 +7,6 @@
  * parameterizes holes via structural anti-unification, and enforces strict BPE token gates.
  */
 
-import { getEncoding } from "js-tiktoken";
 import type { ProjectIdiomDefinition, ProjectIdiomParam } from "../config/project-config.js";
 import type {
   ArrayLiteralExpr,
@@ -35,6 +34,7 @@ import type {
 import { parse } from "../core/parser.js";
 import type { Span } from "../core/span.js";
 import { AiceGenerator } from "../decompiler/aice-generator.js";
+import { estimateTokens } from "../tokenomics/bpe.js";
 
 export interface IdiomFileInput {
   filePath: string;
@@ -60,18 +60,9 @@ export interface MineIdiomsResult {
   zeroIdiomsReason?: "insufficient_repetition" | string;
 }
 
-// BPE Tokenizer singleton
-let tiktokenEncoder: ReturnType<typeof getEncoding> | null = null;
-function getTiktoken(): ReturnType<typeof getEncoding> {
-  if (!tiktokenEncoder) {
-    tiktokenEncoder = getEncoding("cl100k_base");
-  }
-  return tiktokenEncoder;
-}
-
 function countBpeTokens(text: string): number {
   if (!text) return 0;
-  return getTiktoken().encode(text).length;
+  return estimateTokens(text, "cl100k_base");
 }
 
 interface StmtCandidateOccurrence {

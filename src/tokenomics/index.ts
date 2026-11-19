@@ -7,10 +7,8 @@
  * and enforces zero target drift.
  */
 
-import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { getEncoding } from "js-tiktoken";
 import {
   AICE_DISABLED_MESSAGE,
   findProjectRoot,
@@ -23,68 +21,19 @@ import { decompile } from "../decompiler/index.js";
 import { detectTargetFromPath, emitTarget } from "../emitters/index.js";
 import { collapseAiceSourceIdioms } from "../idioms/index.js";
 import { withSuppressedTelemetry } from "../telemetry/index.js";
+import { estimateTokens } from "./bpe.js";
 
-let cl100k: ReturnType<typeof getEncoding> | undefined;
-let o200k: ReturnType<typeof getEncoding> | undefined;
-
-const MAX_TOKEN_CACHE_ENTRIES = 512;
-const MAX_CACHEABLE_TEXT_LENGTH = 500_000;
-const tokenCountCache = new Map<string, number>();
-
-function getTokenizerEncoding(encoding: "cl100k_base" | "o200k_base" = "cl100k_base") {
-  if (encoding === "o200k_base") {
-    if (!o200k) o200k = getEncoding("o200k_base");
-    return o200k;
-  }
-  if (!cl100k) cl100k = getEncoding("cl100k_base");
-  return cl100k;
-}
-
-export function estimateTokens(
-  text: string,
-  encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
-): number {
-  if (!text) return 0;
-  if (text.length <= MAX_CACHEABLE_TEXT_LENGTH) {
-    const cacheKey =
-      text.length <= 128
-        ? `${encoding}:s:${text}`
-        : `${encoding}:h:${text.length}:${createHash("sha256").update(text, "utf-8").digest("hex").slice(0, 32)}`;
-    const cached = tokenCountCache.get(cacheKey);
-    if (cached !== undefined) {
-      tokenCountCache.delete(cacheKey);
-      tokenCountCache.set(cacheKey, cached);
-      return cached;
-    }
-    const count = getTokenizerEncoding(encoding).encode(text).length;
-    if (tokenCountCache.size >= MAX_TOKEN_CACHE_ENTRIES) {
-      const oldestKey = tokenCountCache.keys().next().value;
-      if (oldestKey !== undefined) {
-        tokenCountCache.delete(oldestKey);
-      }
-    }
-    tokenCountCache.set(cacheKey, count);
-    return count;
-  }
-  return getTokenizerEncoding(encoding).encode(text).length;
-}
-
-export class TiktokenTokenizer {
-  public static count(
-    text: string,
-    encoding: "cl100k_base" | "o200k_base" = "cl100k_base",
-  ): number {
-    return estimateTokens(text, encoding);
-  }
-
-  public count(text: string, encoding: "cl100k_base" | "o200k_base" = "cl100k_base"): number {
-    return estimateTokens(text, encoding);
-  }
-
-  public encode(text: string, encoding: "cl100k_base" | "o200k_base" = "cl100k_base"): number[] {
-    return Array.from(getTokenizerEncoding(encoding).encode(text));
-  }
-}
+export {
+  type BpeEncodingName,
+  clearBpeTokenCaches,
+  estimateTokens,
+  getBpeTokenCacheStats,
+  getTokenizerEncoding,
+  MAX_BPE_PIECE_CACHE_ENTRIES,
+  MAX_CACHEABLE_TEXT_LENGTH,
+  MAX_WHOLE_TEXT_TOKEN_CACHE_ENTRIES,
+  TiktokenTokenizer,
+} from "./bpe.js";
 
 export interface TokenomicsFileResult {
   file: string;
@@ -194,15 +143,13 @@ export function calculateFileTokenomics(
   const aiceChars = aiceContent.length;
   const charSavingsPct = targetChars > 0 ? ((targetChars - aiceChars) / targetChars) * 100 : 0;
 
-  const encCl100k = getTokenizerEncoding("cl100k_base");
-  const encO200k = getTokenizerEncoding("o200k_base");
-  const targetCl100k = encCl100k.encode(targetContent).length;
-  const aiceCl100k = encCl100k.encode(aiceContent).length;
+  const targetCl100k = estimateTokens(targetContent, "cl100k_base");
+  const aiceCl100k = estimateTokens(aiceContent, "cl100k_base");
   const cl100kSavingsPct =
     targetCl100k > 0 ? ((targetCl100k - aiceCl100k) / targetCl100k) * 100 : 0;
 
-  const targetO200k = encO200k.encode(targetContent).length;
-  const aiceO200k = encO200k.encode(aiceContent).length;
+  const targetO200k = estimateTokens(targetContent, "o200k_base");
+  const aiceO200k = estimateTokens(aiceContent, "o200k_base");
   const o200kSavingsPct = targetO200k > 0 ? ((targetO200k - aiceO200k) / targetO200k) * 100 : 0;
 
   let drift = false;

@@ -5,7 +5,14 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { DEFAULT_IGNORED_SCAN_DIRECTORIES, isLikelyBinaryDiskFile } from "../../config/index.js";
+import {
+  DEFAULT_IGNORED_SCAN_DIRECTORIES,
+  DEFAULT_MAX_TEXT_FILE_BYTES,
+  isBinaryExtension,
+  isLikelyBinaryDiskFile,
+  isUniversalTextFileNameCandidate,
+  readUniversalTextFileSync,
+} from "../../config/index.js";
 import { recordTelemetryEvent } from "../../telemetry/index.js";
 import { estimateTokens } from "../../tokenomics/index.js";
 import {
@@ -44,21 +51,26 @@ export interface SearchCandidateFile {
 
 export function collectSearchCandidateFiles(
   classified: ClassifiedReadTarget[],
-  opts?: { allowDotfiles?: boolean },
+  opts?: { allowDotfiles?: boolean; deferBinaryProbe?: boolean },
 ): SearchCandidateFile[] {
   const seenRealOrAbs = new Set<string>();
+  const visitedRealDirs = new Set<string>();
   const out: SearchCandidateFile[] = [];
+  const deferBinaryProbe = Boolean(opts?.deferBinaryProbe);
 
   const pushCandidate = (
     absPath: string,
     relPath: string,
     projectRoot: string,
     isExplicitTestSearch: boolean,
+    knownDedupKey?: string,
   ): void => {
-    let dedupKey = path.resolve(absPath);
-    try {
-      dedupKey = fs.realpathSync(absPath);
-    } catch {}
+    let dedupKey = knownDedupKey ?? path.resolve(absPath);
+    if (!knownDedupKey) {
+      try {
+        dedupKey = fs.realpathSync(absPath);
+      } catch {}
+    }
     if (seenRealOrAbs.has(dedupKey)) return;
     seenRealOrAbs.add(dedupKey);
     out.push({ absPath, relPath, projectRoot, isExplicitTestSearch });
@@ -71,6 +83,13 @@ export function collectSearchCandidateFiles(
     explicitAllowedDirs: Set<string>,
     isExplicitTestSearch: boolean,
   ): void => {
+    let realDirAbs = path.resolve(dirAbs);
+    try {
+      realDirAbs = fs.realpathSync(dirAbs);
+    } catch {}
+    if (visitedRealDirs.has(realDirAbs)) return;
+    visitedRealDirs.add(realDirAbs);
+
     let entries: fs.Dirent[];
     try {
       entries = fs.readdirSync(dirAbs, { withFileTypes: true });
@@ -107,16 +126,21 @@ export function collectSearchCandidateFiles(
           isExplicitTestSearch,
         );
       } else if (ent.isFile()) {
-        if (
-          isSupportedReadDiskFile(childAbs, {
-            allowDotfiles: Boolean(opts?.allowDotfiles) || explicitAllowedDirs.has(ent.name),
-          })
-        ) {
+        const allowDot = Boolean(opts?.allowDotfiles) || explicitAllowedDirs.has(ent.name);
+        const accepted = deferBinaryProbe
+          ? isUniversalTextFileNameCandidate(childAbs, {
+              allowDotfiles: allowDot,
+              skipLockfiles: true,
+              skipRootAgentDocs: false,
+            })
+          : isSupportedReadDiskFile(childAbs, { allowDotfiles: allowDot });
+        if (accepted) {
           pushCandidate(
             childAbs,
             formatReadDisplayPath(childAbs, projectRoot),
             projectRoot,
             isExplicitTestSearch,
+            path.join(realDirAbs, ent.name),
           );
         }
       }
@@ -144,7 +168,9 @@ export function collectSearchCandidateFiles(
         explicitAllowed,
         isExplicitTest,
       );
-    } else if (!isLikelyBinaryDiskFile(item.diskPath)) {
+    } else if (
+      deferBinaryProbe ? !isBinaryExtension(item.diskPath) : !isLikelyBinaryDiskFile(item.diskPath)
+    ) {
       pushCandidate(item.diskPath, item.displayPath, item.resolved.projectRoot, isExplicitTest);
     }
   }
@@ -165,6 +191,7 @@ export function executeFilesWithMatchesSearch(params: {
   const primaryRoot = classified[0]?.resolved.projectRoot ?? process.cwd();
   const candidateFiles = collectSearchCandidateFiles(classified, {
     allowDotfiles: Boolean(options.full),
+    deferBinaryProbe: true,
   });
 
   interface ScoredPathHit {
@@ -172,14 +199,16 @@ export function executeFilesWithMatchesSearch(params: {
     score: number;
   }
   const matchedScored: ScoredPathHit[] = [];
+  let rawMatchCorpusChars = 0;
 
   for (const file of candidateFiles) {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(file.absPath, "utf-8");
-    } catch {
-      continue;
-    }
+    const readRes = readUniversalTextFileSync(file.absPath, {
+      checkFileName: false,
+      maxBytes: DEFAULT_MAX_TEXT_FILE_BYTES,
+    });
+    if (!readRes) continue;
+    const raw = readRes.text;
+    rawMatchCorpusChars += readRes.bytes;
     regex.lastIndex = 0;
     if (!regex.test(raw)) continue;
 
@@ -246,13 +275,6 @@ export function executeFilesWithMatchesSearch(params: {
     includeToolWrapper: false,
   });
   const honestOrigTokens = estimateTokens(honestFilesMatchBaseline, "cl100k_base");
-  const rawMatchCorpusChars = candidateFiles.reduce((acc, f) => {
-    try {
-      return acc + fs.statSync(f.absPath).size;
-    } catch {
-      return acc;
-    }
-  }, 0);
   const rawMatchCorpusTokens = Math.max(honestOrigTokens, Math.ceil(rawMatchCorpusChars / 4));
 
   if (classified[0]) {
@@ -327,6 +349,7 @@ export function executeUnifiedCompactSearch(params: {
   const primaryRoot = classified[0]?.resolved.projectRoot ?? process.cwd();
   const candidateFiles = collectSearchCandidateFiles(classified, {
     allowDotfiles: Boolean(options.full),
+    deferBinaryProbe: true,
   });
   const effectiveBudgets = resolveEffectiveReadBudgets(options);
   const enforceCeiling = shouldEnforceDefaultReadBudget(
@@ -346,12 +369,12 @@ export function executeUnifiedCompactSearch(params: {
   const baselineEntries: HonestBaselineFileEntry[] = [];
 
   for (const file of candidateFiles) {
-    let raw: string;
-    try {
-      raw = fs.readFileSync(file.absPath, "utf-8");
-    } catch {
-      continue;
-    }
+    const readRes = readUniversalTextFileSync(file.absPath, {
+      checkFileName: false,
+      maxBytes: DEFAULT_MAX_TEXT_FILE_BYTES,
+    });
+    if (!readRes) continue;
+    const raw = readRes.text;
     baselineEntries.push({ relPath: file.relPath, rawSource: raw });
 
     const matchedParts: string[] = [];

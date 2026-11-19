@@ -1533,5 +1533,8 @@ export function extractSymbolFromAiceSource(
   ) {
     return sliceExactDiskLines(matchedItems[0].span.start.line, matchedItems[0].span.end.line);
   }
-  return finalizeExtracted(AiceGenerator.generate(scopedMod), startLineForSym);
+  return finalizeExtracted(
+    AiceGenerator.generate(scopedMod, { omitModuleHeader: true }).trimEnd(),
+    startLineForSym,
+  );
 }

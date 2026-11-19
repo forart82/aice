@@ -21,9 +21,21 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { type BoundedCacheStats, FileStatLruCache } from "../cache/lru.js";
 
 export const DEFAULT_BINARY_PROBE_BYTES = 8192;
 export const DEFAULT_MAX_TEXT_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_BINARY_PROBE_CACHE_ENTRIES = 2048;
+
+const binaryProbeCache = new FileStatLruCache<boolean>(MAX_BINARY_PROBE_CACHE_ENTRIES);
+
+export function clearFileClassificationCache(): void {
+  binaryProbeCache.clear();
+}
+
+export function getFileClassificationCacheStats(): BoundedCacheStats {
+  return binaryProbeCache.getStats();
+}
 
 /**
  * Single Source of Truth for known binary file extensions.
@@ -542,25 +554,38 @@ export function isLikelyBinaryBuffer(
 export interface BinaryDiskFileOptions {
   probeBytes?: number;
   maxTextBytes?: number;
+  stat?: fs.Stats;
 }
 
 function probeOpenedDiskFileIsBinary(
   filePath: string,
-  fileSize: number,
+  stat: fs.Stats,
   probeBytes: number,
 ): boolean {
+  const fileSize = stat.size;
   if (fileSize === 0) return false;
+
+  const cacheKey = `${path.resolve(filePath)}:${probeBytes}`;
+  const cached = binaryProbeCache.getIfFresh(cacheKey, stat);
+  if (cached !== undefined) {
+    return cached;
+  }
+
   const readLen = Math.min(fileSize, probeBytes);
   const buf = Buffer.allocUnsafe(readLen);
   let fd: number | undefined;
   try {
     fd = fs.openSync(filePath, "r");
     const bytesRead = fs.readSync(fd, buf, 0, readLen, 0);
-    if (bytesRead === 0) return false;
-    return isLikelyBinaryBuffer(buf.subarray(0, bytesRead), {
-      probeBytes: bytesRead,
-      allowPartialTrailingUtf8: fileSize > bytesRead,
-    });
+    const isBinary =
+      bytesRead === 0
+        ? false
+        : isLikelyBinaryBuffer(buf.subarray(0, bytesRead), {
+            probeBytes: bytesRead,
+            allowPartialTrailingUtf8: fileSize > bytesRead,
+          });
+    binaryProbeCache.setWithStat(cacheKey, stat, isBinary);
+    return isBinary;
   } catch {
     return false;
   } finally {
@@ -577,15 +602,18 @@ function probeOpenedDiskFileIsBinary(
 /**
  * Checks whether a disk file is binary using an O(1) extension check followed by
  * a bounded leading-byte probe (default 8192 bytes) through `isLikelyBinaryBuffer`.
+ * Results are cached in a bounded mtime+ctime+size+ino LRU cache.
  */
 export function isLikelyBinaryDiskFile(filePath: string, options?: BinaryDiskFileOptions): boolean {
   if (isBinaryExtension(filePath)) return true;
 
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(filePath);
-  } catch {
-    return false;
+  let stat = options?.stat;
+  if (!stat) {
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      return false;
+    }
   }
   if (!stat.isFile()) return false;
   if (options?.maxTextBytes !== undefined && stat.size > options.maxTextBytes) {
@@ -593,7 +621,7 @@ export function isLikelyBinaryDiskFile(filePath: string, options?: BinaryDiskFil
   }
   return probeOpenedDiskFileIsBinary(
     filePath,
-    stat.size,
+    stat,
     options?.probeBytes ?? DEFAULT_BINARY_PROBE_BYTES,
   );
 }
@@ -604,18 +632,18 @@ export interface UniversalTextDiskFileOptions {
   skipRootAgentDocs?: boolean;
   maxBytes?: number;
   probeBytes?: number;
+  stat?: fs.Stats;
 }
 
 /**
- * Universal Text File SSOT predicate for disk files.
- * Accepts ALL valid UTF-8 text files regardless of extension (`.svg`, `.csv`, `.toml`,
- * `.customblob`, `.tf`, `.rst`, `.mdx`, `.vue`, `.svelte`, `.zig`, extensionless files,
- * known/allowed dotfiles) while skipping AICE internal metadata, lockfiles (by default),
- * known binary extensions, and any file failing the NUL/control/UTF-8 content guard.
+ * Zero-syscall filename/extension pre-filter matching `isUniversalTextDiskFile` rules.
  */
-export function isUniversalTextDiskFile(
+export function isUniversalTextFileNameCandidate(
   filePath: string,
-  options?: UniversalTextDiskFileOptions,
+  options?: Pick<
+    UniversalTextDiskFileOptions,
+    "allowDotfiles" | "skipLockfiles" | "skipRootAgentDocs"
+  >,
 ): boolean {
   const baseName = path.basename(filePath);
   if (!baseName || isAiceInternalMetaFile(baseName)) {
@@ -636,15 +664,31 @@ export function isUniversalTextDiskFile(
     return false;
   }
 
-  if (isBinaryExtension(filePath)) {
+  return !isBinaryExtension(filePath);
+}
+
+/**
+ * Universal Text File SSOT predicate for disk files.
+ * Accepts ALL valid UTF-8 text files regardless of extension (`.svg`, `.csv`, `.toml`,
+ * `.customblob`, `.tf`, `.rst`, `.mdx`, `.vue`, `.svelte`, `.zig`, extensionless files,
+ * known/allowed dotfiles) while skipping AICE internal metadata, lockfiles (by default),
+ * known binary extensions, and any file failing the NUL/control/UTF-8 content guard.
+ */
+export function isUniversalTextDiskFile(
+  filePath: string,
+  options?: UniversalTextDiskFileOptions,
+): boolean {
+  if (!isUniversalTextFileNameCandidate(filePath, options)) {
     return false;
   }
 
-  let stat: fs.Stats;
-  try {
-    stat = fs.statSync(filePath);
-  } catch {
-    return false;
+  let stat = options?.stat;
+  if (!stat) {
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      return false;
+    }
   }
   if (!stat.isFile()) return false;
   if (options?.maxBytes !== undefined && stat.size > options.maxBytes) {
@@ -653,9 +697,71 @@ export function isUniversalTextDiskFile(
 
   return !probeOpenedDiskFileIsBinary(
     filePath,
-    stat.size,
+    stat,
     options?.probeBytes ?? DEFAULT_BINARY_PROBE_BYTES,
   );
+}
+
+/**
+ * Single-pass stat + binary-check + UTF-8 read helper for search and workspace scanners.
+ * Avoids opening/reading the same file twice (probe + readFileSync) while populating
+ * the bounded `binaryProbeCache`.
+ */
+export function readUniversalTextFileSync(
+  filePath: string,
+  options?: UniversalTextDiskFileOptions & { checkFileName?: boolean },
+): { text: string; bytes: number; stat: fs.Stats } | undefined {
+  if (options?.checkFileName !== false && !isUniversalTextFileNameCandidate(filePath, options)) {
+    return undefined;
+  }
+  if (options?.checkFileName === false && isBinaryExtension(filePath)) {
+    return undefined;
+  }
+
+  let stat = options?.stat;
+  if (!stat) {
+    try {
+      stat = fs.statSync(filePath);
+    } catch {
+      return undefined;
+    }
+  }
+  if (!stat.isFile()) return undefined;
+  const maxBytes = options?.maxBytes ?? DEFAULT_MAX_TEXT_FILE_BYTES;
+  if (stat.size > maxBytes) {
+    return undefined;
+  }
+  if (stat.size === 0) {
+    return { text: "", bytes: 0, stat };
+  }
+
+  const probeBytes = options?.probeBytes ?? DEFAULT_BINARY_PROBE_BYTES;
+  const cacheKey = `${path.resolve(filePath)}:${probeBytes}`;
+  const cachedBinary = binaryProbeCache.getIfFresh(cacheKey, stat);
+  if (cachedBinary === true) {
+    return undefined;
+  }
+
+  let buf: Buffer;
+  try {
+    buf = fs.readFileSync(filePath);
+  } catch {
+    return undefined;
+  }
+
+  if (cachedBinary === undefined) {
+    const isBinary = isLikelyBinaryBuffer(buf, { probeBytes });
+    binaryProbeCache.setWithStat(cacheKey, stat, isBinary);
+    if (isBinary) {
+      return undefined;
+    }
+  }
+
+  return {
+    text: buf.toString("utf-8"),
+    bytes: buf.length,
+    stat,
+  };
 }
 
 export interface SafeTextWriteCheckResult {

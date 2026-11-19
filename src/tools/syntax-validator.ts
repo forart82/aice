@@ -5,10 +5,12 @@
  * AICE Multi-Language Pre-Write Syntax Validation Gate (`validateNativeSyntax`).
  */
 import { spawnSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import * as path from "node:path";
 import postcss from "postcss";
 import YAML from "yaml";
-import ts from "../compat/typescript.js";
+import { BoundedLruCache } from "../cache/lru.js";
+import ts, { getCachedTsSourceFile } from "../compat/typescript.js";
 import { type ProjectIdiomDefinition, stripJsonComments } from "../config/index.js";
 import { detectTargetFromPathOrContent, type TargetLanguage } from "../emitters/index.js";
 import { maskSourceLexically } from "./preprocessor.js";
@@ -458,11 +460,26 @@ function checkHtmlScriptAndStyleTags(code: string): SyntaxDiagnosticItem[] {
 
   return items;
 }
-const syntaxValidationCache: Array<{
-  key: string;
-  code: string;
-  result: SyntaxValidationResult;
-}> = [];
+const MAX_SYNTAX_VALIDATION_CACHE = 128;
+const syntaxValidationCache = new BoundedLruCache<
+  string,
+  { code: string; result: SyntaxValidationResult }
+>(MAX_SYNTAX_VALIDATION_CACHE);
+const pythonSyntaxCache = new BoundedLruCache<
+  string,
+  { code: string; items: SyntaxDiagnosticItem[] }
+>(MAX_SYNTAX_VALIDATION_CACHE);
+const bashSyntaxCache = new BoundedLruCache<
+  string,
+  { code: string; items: SyntaxDiagnosticItem[] }
+>(MAX_SYNTAX_VALIDATION_CACHE);
+
+function hashCodeKey(code: string): string {
+  return `${code.length}:${createHash("sha256").update(code, "utf-8").digest("hex").slice(0, 24)}`;
+}
+
+const PYTHON_SYNTAX_CHECK_SCRIPT =
+  'import sys\ntry:\n compile(sys.stdin.read(),"<a>","exec")\nexcept SyntaxError as e:\n sys.stdout.write(f"{e.lineno or 1}\\t{e.offset or 1}\\t{type(e).__name__}\\t{e.msg or e}")\n sys.exit(1)';
 
 function stripInlineBacktickSpans(line: string): string {
   let out = "";
@@ -896,11 +913,11 @@ export function validateNativeSyntax(
     activeIdioms && Object.keys(activeIdioms).length > 0
       ? Object.keys(activeIdioms).sort().join(",")
       : "";
-  const cacheKey = `${passthroughMode || targetLang}:${lowerFp}:${idiomKey}:${code.length}`;
-  for (const entry of syntaxValidationCache) {
-    if (entry.key === cacheKey && entry.code === code) {
-      return entry.result;
-    }
+  const codeHash = hashCodeKey(code);
+  const cacheKey = `${passthroughMode || targetLang}:${lowerFp}:${idiomKey}:${codeHash}`;
+  const cachedEntry = syntaxValidationCache.get(cacheKey);
+  if (cachedEntry && cachedEntry.code === code) {
+    return cachedEntry.result;
   }
 
   const items: SyntaxDiagnosticItem[] = [];
@@ -910,10 +927,7 @@ export function validateNativeSyntax(
       diagnostics: items.map((d) => `Line ${d.line}:${d.column} - ${d.message}`),
       items,
     };
-    syntaxValidationCache.unshift({ key: cacheKey, code, result: res });
-    if (syntaxValidationCache.length > 32) {
-      syntaxValidationCache.pop();
-    }
+    syntaxValidationCache.set(cacheKey, { code, result: res });
     return res;
   };
 
@@ -988,7 +1002,7 @@ export function validateNativeSyntax(
             ? ts.ScriptKind.JS
             : ts.ScriptKind.TS;
 
-    const sf = ts.createSourceFile(filePath, code, ts.ScriptTarget.Latest, true, scriptKind);
+    const sf = getCachedTsSourceFile(code, filePath, scriptKind);
     const parseDiags =
       (sf as unknown as { parseDiagnostics?: ts.DiagnosticWithLocation[] }).parseDiagnostics ?? [];
 
@@ -1144,23 +1158,33 @@ export function validateNativeSyntax(
   ) {
     items.push(...checkUnfencedHunkCorruption(code, targetLang === "markdown"));
     if (targetLang === "shell" && !filePath.toLowerCase().endsWith(".zsh")) {
-      try {
-        const res = spawnSync("bash", ["-n"], {
-          input: code,
-          encoding: "utf-8",
-          timeout: 2500,
-        });
-        if (res.status !== null && res.status !== 0 && !res.error) {
-          const stderr = (res.stderr ?? "").trim();
-          const lineMatch = stderr.match(/line\s+(\d+):\s*(.+)/i);
-          items.push({
-            line: lineMatch ? Number.parseInt(lineMatch[1], 10) : 1,
-            column: 1,
-            message: lineMatch ? lineMatch[2].trim() : stderr || "Shell syntax error",
+      const cachedBash = bashSyntaxCache.get(codeHash);
+      if (cachedBash && cachedBash.code === code) {
+        items.push(...cachedBash.items);
+      } else {
+        const bashItems: SyntaxDiagnosticItem[] = [];
+        try {
+          const res = spawnSync("bash", ["-n"], {
+            input: code,
+            encoding: "utf-8",
+            timeout: 2500,
           });
+          if (res.status !== null && res.status !== 0 && !res.error) {
+            const stderr = (res.stderr ?? "").trim();
+            const lineMatch = stderr.match(/line\s+(\d+):\s*(.+)/i);
+            bashItems.push({
+              line: lineMatch ? Number.parseInt(lineMatch[1], 10) : 1,
+              column: 1,
+              message: lineMatch ? lineMatch[2].trim() : stderr || "Shell syntax error",
+            });
+          }
+          if (!res.error) {
+            bashSyntaxCache.set(codeHash, { code, items: bashItems });
+          }
+        } catch {
+          // bash binary unavailable; skip external syntax check
         }
-      } catch {
-        // bash binary unavailable; skip external syntax check
+        items.push(...bashItems);
       }
     }
     return finish();
@@ -1376,34 +1400,42 @@ export function validateNativeSyntax(
   items.push(...checkStructuralTruncationArtifacts(maskRes.maskedCode, code, maskRes.maskLengths));
 
   if (targetLang === "python" && items.length === 0 && code.trim().length > 0) {
-    try {
-      const pyScript =
-        'import ast, json, sys\nsrc = sys.stdin.read()\ntry:\n ast.parse(src)\nexcept SyntaxError as e:\n print(json.dumps({"line": e.lineno or 1, "col": e.offset or 1, "type": type(e).__name__, "msg": e.msg or str(e)}))\n sys.exit(1)';
-      const res = spawnSync("python3", ["-S", "-c", pyScript], {
-        input: code,
-        encoding: "utf-8",
-        timeout: 2500,
-      });
-      if (res.status !== null && res.status !== 0 && !res.error) {
-        try {
-          const parsedErr = JSON.parse((res.stdout ?? "").trim()) as {
-            line?: number;
-            col?: number;
-            type?: string;
-            msg?: string;
-          };
-          items.push({
-            line: parsedErr.line ?? 1,
-            column: parsedErr.col ?? 1,
-            message: `${parsedErr.type ?? "SyntaxError"}: ${parsedErr.msg ?? "invalid Python syntax"}`,
-          });
-        } catch {
-          const rawMsg = (res.stderr || res.stdout || "Python syntax error").trim();
-          items.push({ line: 1, column: 1, message: rawMsg });
+    const cachedPy = pythonSyntaxCache.get(codeHash);
+    if (cachedPy && cachedPy.code === code) {
+      items.push(...cachedPy.items);
+    } else {
+      const pyItems: SyntaxDiagnosticItem[] = [];
+      try {
+        const res = spawnSync("python3", ["-S", "-I", "-c", PYTHON_SYNTAX_CHECK_SCRIPT], {
+          input: code,
+          encoding: "utf-8",
+          timeout: 2500,
+        });
+        if (res.status !== null && res.status !== 0 && !res.error) {
+          const out = (res.stdout ?? "").trim();
+          const parts = out.split("\t");
+          if (parts.length >= 4) {
+            const lineNum = Number.parseInt(parts[0]!, 10) || 1;
+            const colNum = Number.parseInt(parts[1]!, 10) || 1;
+            const errType = parts[2] || "SyntaxError";
+            const errMsg = parts.slice(3).join("\t") || "invalid Python syntax";
+            pyItems.push({
+              line: lineNum,
+              column: colNum,
+              message: `${errType}: ${errMsg}`,
+            });
+          } else {
+            const rawMsg = (res.stderr || out || "Python syntax error").trim();
+            pyItems.push({ line: 1, column: 1, message: rawMsg });
+          }
         }
+        if (!res.error) {
+          pythonSyntaxCache.set(codeHash, { code, items: pyItems });
+        }
+      } catch {
+        // python3 binary unavailable; fallback delimiter/lexical checks already ran
       }
-    } catch {
-      // python3 binary unavailable; fallback delimiter/lexical checks already ran
+      items.push(...pyItems);
     }
   }
 

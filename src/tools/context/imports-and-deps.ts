@@ -7,6 +7,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { type BoundedCacheStats, FileStatLruCache } from "../../cache/lru.js";
 import { extractFastTsImports, isTsLikeFilePath } from "../../compat/typescript.js";
 import { type AiceProjectConfig, findProjectRoot, loadProjectConfig } from "../../config/index.js";
 import type { Block, Expr, ImportDecl, LayoutNode, Module, ModuleItem } from "../../core/ast.js";
@@ -889,24 +890,77 @@ export const NON_IMPORTING_EXTENSIONS = new Set([
   ".cff",
 ]);
 
-export function extractImportsFromFile(filePath: string, preReadContent?: string): ImportDecl[] {
+const MAX_FILE_IMPORTS_CACHE_ENTRIES = 1024;
+const fileImportsCache = new FileStatLruCache<ImportDecl[]>(MAX_FILE_IMPORTS_CACHE_ENTRIES);
+
+export function clearFileImportsCache(): void {
+  fileImportsCache.clear();
+}
+
+export function getFileImportsCacheStats(): BoundedCacheStats {
+  return fileImportsCache.getStats();
+}
+
+export function getCachedDiskFileImports(
+  filePath: string,
+  stat: fs.Stats,
+): ImportDecl[] | undefined {
+  return fileImportsCache.getIfFresh(path.resolve(filePath), stat);
+}
+
+export function setCachedDiskFileImports(
+  filePath: string,
+  stat: fs.Stats,
+  imports: ImportDecl[],
+): void {
+  fileImportsCache.setWithStat(path.resolve(filePath), stat, imports);
+}
+
+export function extractImportsFromFile(
+  filePath: string,
+  preReadContent?: string,
+  diskStat?: fs.Stats,
+): ImportDecl[] {
   try {
+    const resolvedPath = path.resolve(filePath);
+    let activeStat = diskStat;
+    if (preReadContent === undefined && !activeStat) {
+      try {
+        activeStat = fs.statSync(resolvedPath);
+      } catch {
+        activeStat = undefined;
+      }
+    }
+    if (activeStat) {
+      const cached = fileImportsCache.getIfFresh(resolvedPath, activeStat);
+      if (cached !== undefined) {
+        return cached;
+      }
+    }
+
+    const cacheAndReturn = (result: ImportDecl[]): ImportDecl[] => {
+      if (activeStat) {
+        fileImportsCache.setWithStat(resolvedPath, activeStat, result);
+      }
+      return result;
+    };
+
     if (!filePath.endsWith(".aice")) {
       const ext = path.extname(filePath).toLowerCase();
       if (NON_IMPORTING_EXTENSIONS.has(ext)) {
-        return [];
+        return cacheAndReturn([]);
       }
       if (isTsLikeFilePath(filePath)) {
         const content = preReadContent ?? fs.readFileSync(filePath, "utf-8");
         if (!/\b(?:import|export|require)\b/.test(content)) {
-          return [];
+          return cacheAndReturn([]);
         }
-        return extractFastTsImports(content, filePath);
+        return cacheAndReturn(extractFastTsImports(content, filePath));
       }
     }
     const content = preReadContent ?? fs.readFileSync(filePath, "utf-8");
     if (filePath.toLowerCase().endsWith(".aipl")) {
-      return extractAiplImports(content);
+      return cacheAndReturn(extractAiplImports(content));
     }
     const detected = detectTargetFromPathOrContent(filePath, content);
     if (
@@ -915,15 +969,17 @@ export function extractImportsFromFile(filePath: string, preReadContent?: string
       detected === "java" ||
       detected === "text"
     ) {
-      return [];
+      return cacheAndReturn([]);
     }
     if (filePath.endsWith(".aice")) {
       const mod = parse(content, filePath);
-      return mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
+      return cacheAndReturn(
+        mod.items.filter((item): item is ImportDecl => item.kind === "ImportDecl"),
+      );
     }
     const targetLang = detected;
     if (targetLang === "aipl") {
-      return extractAiplImports(content);
+      return cacheAndReturn(extractAiplImports(content));
     }
     let sourceToDecompile = content;
     if (content.length > 6_000) {
@@ -950,7 +1006,9 @@ export function extractImportsFromFile(filePath: string, preReadContent?: string
     const decomp = withSuppressedTelemetry(() =>
       decompile(sourceToDecompile, targetLang, { filePath }),
     );
-    return decomp.ast.items.filter((item): item is ImportDecl => item.kind === "ImportDecl");
+    return cacheAndReturn(
+      decomp.ast.items.filter((item): item is ImportDecl => item.kind === "ImportDecl"),
+    );
   } catch {
     return [];
   }

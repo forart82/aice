@@ -6,3 +6,4 @@
  */
 
 export * from "./disk-cache.js";
+export * from "./lru.js";

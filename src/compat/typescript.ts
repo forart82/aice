@@ -69,7 +69,7 @@ function makeSourceCacheKey(source: string, scriptKind: ts.ScriptKind): string {
   return `${scriptKind}:${source.length}:${digest}`;
 }
 
-const MAX_TS_AST_CACHE = 24;
+const MAX_TS_AST_CACHE = 64;
 const sourceFileCache = new Map<string, ts.SourceFile>();
 const symbolIndexCache = new Map<string, TsFileSymbolIndex>();
 
@@ -417,8 +417,119 @@ export function getCachedTsSymbolIndex(source: string, filePath = "temp.ts"): Ts
   return index;
 }
 
+function extractTsImportsFromSourceFile(sf: ts.SourceFile): TsFastImportEntry[] {
+  const imports: TsFastImportEntry[] = [];
+  for (const stmt of sf.statements) {
+    if (ts.isImportDeclaration(stmt) && ts.isStringLiteral(stmt.moduleSpecifier)) {
+      const span = nodeLineSpan(sf, stmt);
+      const specifiers: Array<{ name: string; alias?: string }> = [];
+      const clause = stmt.importClause;
+      let isTypeOnly = Boolean(clause?.isTypeOnly);
+      if (clause) {
+        if (clause.name) {
+          specifiers.push({ name: clause.name.text });
+        }
+        if (clause.namedBindings) {
+          if (ts.isNamespaceImport(clause.namedBindings)) {
+            specifiers.push({ name: "*", alias: clause.namedBindings.name.text });
+          } else if (ts.isNamedImports(clause.namedBindings)) {
+            const elements = clause.namedBindings.elements;
+            if (elements.length > 0 && elements.every((e) => e.isTypeOnly)) {
+              isTypeOnly = true;
+            }
+            for (const el of elements) {
+              const orig = el.propertyName ? el.propertyName.text : el.name.text;
+              const alias = el.propertyName ? el.name.text : undefined;
+              specifiers.push({ name: orig, ...(alias ? { alias } : {}) });
+            }
+          }
+        }
+      }
+      imports.push({
+        source: stmt.moduleSpecifier.text,
+        specifiers,
+        isTypeOnly,
+        ...span,
+      });
+    } else if (
+      ts.isExportDeclaration(stmt) &&
+      stmt.moduleSpecifier &&
+      ts.isStringLiteral(stmt.moduleSpecifier)
+    ) {
+      const span = nodeLineSpan(sf, stmt);
+      const specifiers: Array<{ name: string; alias?: string }> = [];
+      let isTypeOnly = Boolean(stmt.isTypeOnly);
+      if (stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+        const elements = stmt.exportClause.elements;
+        if (elements.length > 0 && elements.every((e) => e.isTypeOnly)) {
+          isTypeOnly = true;
+        }
+        for (const el of elements) {
+          const orig = el.propertyName ? el.propertyName.text : el.name.text;
+          const alias = el.propertyName ? el.name.text : undefined;
+          specifiers.push({ name: orig, ...(alias ? { alias } : {}) });
+        }
+      } else {
+        specifiers.push({ name: "*" });
+      }
+      imports.push({
+        source: stmt.moduleSpecifier.text,
+        specifiers,
+        isTypeOnly,
+        ...span,
+      });
+    }
+  }
+  return imports;
+}
+
 export function extractFastTsImports(source: string, filePath = "temp.ts"): ImportDecl[] {
-  const entries = getCachedTsSymbolIndex(source, filePath).imports;
+  const scriptKind = resolveScriptKind(filePath);
+  const fullKey = makeSourceCacheKey(source, scriptKind);
+  const cachedIndex = symbolIndexCache.get(fullKey);
+  let entries: TsFastImportEntry[];
+
+  if (cachedIndex) {
+    touchLru(symbolIndexCache, fullKey, cachedIndex, MAX_TS_AST_CACHE);
+    entries = cachedIndex.imports;
+  } else if (source.length > 2_000) {
+    // Fast header-slice parse for large TS/JS files: scan for last import/export-from line
+    // so workspace caller scans avoid full-file AST parsing when imports are at top of file.
+    const lines = source.split(/\r?\n/);
+    let lastImportLine = -1;
+    let sawAnyFromOrSideEffectImport = false;
+    for (let i = 0; i < lines.length; i++) {
+      const ln = lines[i]!;
+      if (
+        ln.includes("from ") ||
+        ln.includes('from"') ||
+        ln.includes("from'") ||
+        /^\s*import\s+["']/.test(ln)
+      ) {
+        lastImportLine = i;
+        sawAnyFromOrSideEffectImport = true;
+      }
+    }
+    if (!sawAnyFromOrSideEffectImport) {
+      return [];
+    }
+    if (lastImportLine >= 0 && lastImportLine < Math.floor(lines.length * 0.45)) {
+      const sliceSource = lines.slice(0, Math.min(lines.length, lastImportLine + 3)).join("\n");
+      const sf = ts.createSourceFile(
+        filePath,
+        sliceSource,
+        ts.ScriptTarget.Latest,
+        false,
+        scriptKind,
+      );
+      entries = extractTsImportsFromSourceFile(sf);
+    } else {
+      entries = getCachedTsSymbolIndex(source, filePath).imports;
+    }
+  } else {
+    entries = getCachedTsSymbolIndex(source, filePath).imports;
+  }
+
   return entries.map((imp) => {
     const impSpan = {
       file: filePath,

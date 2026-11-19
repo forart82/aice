@@ -44,6 +44,7 @@ import {
   extractImportsFromFile,
   formatDisplayPath,
   generateExternalContract,
+  getCachedDiskFileImports,
   isExternalSpecifier,
   NON_IMPORTING_EXTENSIONS,
   resolveEffectiveTargetAndRoot,
@@ -197,14 +198,38 @@ export function scanWorkspaceCallers(
 
   const resolvedTarget = path.resolve(targetFullPath);
   const targetBase = resolvedTarget.replace(/\.aice$/, "");
+  const targetDir = path.dirname(targetBase);
   const targetFileName = path.basename(targetBase);
   const targetExt = path.extname(targetFileName);
   const targetStem = targetExt ? targetFileName.slice(0, -targetExt.length) : targetFileName;
+  const targetNoExt = targetExt ? targetBase.slice(0, -targetExt.length) : targetBase;
   const isIndexStem = targetStem === "index" || targetStem === "mod" || targetStem === "lib";
   const escapedStem = targetStem.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const importHintRegex = !isIndexStem
     ? new RegExp(`(?:from|import|require|use|#include)[^\\n;]*\\b${escapedStem}\\b`)
     : undefined;
+  const leafRe = queriedLeaf
+    ? new RegExp(`\\b${queriedLeaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`)
+    : undefined;
+
+  const canRelativeImportMatchTarget = (fromFile: string, specifier: string): boolean => {
+    if (!specifier.startsWith(".")) return true;
+    const candAbs = path.resolve(path.dirname(fromFile), specifier);
+    if (candAbs === resolvedTarget || candAbs === targetBase || candAbs === targetNoExt) {
+      return true;
+    }
+    if (isIndexStem && candAbs === targetDir) {
+      return true;
+    }
+    const candExt = path.extname(candAbs);
+    if (candExt) {
+      const candNoExt = candAbs.slice(0, -candExt.length);
+      if (candNoExt === targetNoExt || candNoExt === targetBase) {
+        return true;
+      }
+    }
+    return false;
+  };
 
   for (const file of filesToScan) {
     const resolvedCandidate = path.resolve(file);
@@ -215,38 +240,63 @@ export function scanWorkspaceCallers(
     }
 
     let rawContent = scanCache?.fileContentByPath.get(resolvedCandidate);
-    if (rawContent === undefined) {
+    let imports = scanCache?.importsByPath.get(resolvedCandidate);
+    let candidateStat: fs.Stats | undefined;
+
+    if (!imports) {
       try {
-        rawContent = fs.readFileSync(file, "utf-8");
-        scanCache?.fileContentByPath.set(resolvedCandidate, rawContent);
+        candidateStat = fs.statSync(file);
+        imports = getCachedDiskFileImports(resolvedCandidate, candidateStat);
       } catch {
         continue;
       }
+      if (imports) {
+        scanCache?.importsByPath.set(resolvedCandidate, imports);
+      }
     }
 
-    if (!isIndexStem && !rawContent.includes(targetStem)) {
-      continue;
-    }
-    if (importHintRegex && !importHintRegex.test(rawContent)) {
-      continue;
-    }
-
-    let imports = scanCache?.importsByPath.get(resolvedCandidate);
     if (!imports) {
-      imports = extractImportsFromFile(file, rawContent);
+      if (rawContent === undefined) {
+        try {
+          rawContent = fs.readFileSync(file, "utf-8");
+          scanCache?.fileContentByPath.set(resolvedCandidate, rawContent);
+        } catch {
+          continue;
+        }
+      }
+
+      if (!isIndexStem && !rawContent.includes(targetStem)) {
+        continue;
+      }
+      if (importHintRegex && !importHintRegex.test(rawContent)) {
+        continue;
+      }
+
+      imports = extractImportsFromFile(file, rawContent, candidateStat);
       scanCache?.importsByPath.set(resolvedCandidate, imports);
     }
 
+    if (imports.length === 0) continue;
+
     for (const imp of imports) {
+      if (!canRelativeImportMatchTarget(file, imp.source)) {
+        continue;
+      }
       const resolved = resolveImportPath(file, imp.source, config, projectRoot);
       if (resolved) {
         const resolvedBase = path.resolve(resolved).replace(/\.aice$/, "");
         if (path.resolve(resolved) === resolvedTarget || resolvedBase === targetBase) {
           const symbols = imp.specifiers.map((s) => s.name);
           let callSiteLines: number[] | undefined;
-          if (queriedLeaf) {
-            const escLeaf = queriedLeaf.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-            const leafRe = new RegExp(`\\b${escLeaf}\\b`);
+          if (queriedLeaf && leafRe) {
+            if (rawContent === undefined) {
+              try {
+                rawContent = fs.readFileSync(file, "utf-8");
+                scanCache?.fileContentByPath.set(resolvedCandidate, rawContent);
+              } catch {
+                rawContent = "";
+              }
+            }
             const fileLines = rawContent.split(/\r?\n/);
             const importLineSet = collectImportLineSet(fileLines, imports);
             const nonImportHits: number[] = [];

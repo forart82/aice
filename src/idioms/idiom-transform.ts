@@ -9,6 +9,7 @@
 import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { fastCloneAst } from "../cache/lru.js";
 import {
   AICE_DISABLED_MESSAGE,
   type AiceProjectConfig,
@@ -365,8 +366,7 @@ function substituteLayoutNode(
   subst: Map<string, Expr>,
   callSpan: Span,
 ): LayoutNode {
-  const cloned = structuredClone(tNode);
-  cloned.span = callSpan;
+  const cloned: LayoutNode = { ...tNode, span: callSpan };
   cloned.attributes = cloned.attributes.map((a) => ({
     ...a,
     value: substituteExpr(a.value, subst, callSpan),
@@ -387,7 +387,7 @@ function substituteLayoutNode(
       cloned.textLiteral = String(subExpr.value);
       cloned.childExpr = null;
     } else {
-      cloned.childExpr = structuredClone(subExpr);
+      cloned.childExpr = fastCloneAst(subExpr);
       cloned.textLiteral = null;
     }
   }
@@ -546,12 +546,11 @@ function substituteExpr(expr: Expr, subst: Map<string, Expr>, callSpan: Span): E
   if (!expr) return expr;
 
   if (expr.kind === "IdentifierExpr" && subst.has(expr.name)) {
-    const replacement = structuredClone(subst.get(expr.name)!);
+    const replacement = fastCloneAst(subst.get(expr.name)!);
     return stampSpan(replacement, callSpan);
   }
 
-  const cloned = structuredClone(expr);
-  cloned.span = callSpan;
+  const cloned: Expr = { ...expr, span: callSpan };
 
   switch (cloned.kind) {
     case "CallExpr":
@@ -659,8 +658,7 @@ function substituteExpr(expr: Expr, subst: Map<string, Expr>, callSpan: Span): E
  * Substitutes hole parameters in an AST statement.
  */
 function substituteStatement(stmt: Statement, subst: Map<string, Expr>, callSpan: Span): Statement {
-  const cloned = structuredClone(stmt);
-  cloned.span = callSpan;
+  const cloned: Statement = { ...stmt, span: callSpan };
 
   switch (cloned.kind) {
     case "ExprStmt":
@@ -704,46 +702,63 @@ function substituteStatement(stmt: Statement, subst: Map<string, Expr>, callSpan
       break;
     case "IfStmt":
       cloned.condition = substituteExpr(cloned.condition, subst, callSpan);
-      cloned.thenBranch.statements = cloned.thenBranch.statements.map((s) =>
-        substituteStatement(s, subst, callSpan),
-      );
-      for (const elif of cloned.elifBranches) {
-        elif.condition = substituteExpr(elif.condition, subst, callSpan);
-        elif.body.statements = elif.body.statements.map((s) =>
+      cloned.thenBranch = {
+        ...cloned.thenBranch,
+        statements: cloned.thenBranch.statements.map((s) =>
           substituteStatement(s, subst, callSpan),
-        );
-      }
+        ),
+      };
+      cloned.elifBranches = cloned.elifBranches.map((elif) => ({
+        ...elif,
+        condition: substituteExpr(elif.condition, subst, callSpan),
+        body: {
+          ...elif.body,
+          statements: elif.body.statements.map((s) => substituteStatement(s, subst, callSpan)),
+        },
+      }));
       if (cloned.elseBranch) {
-        cloned.elseBranch.statements = cloned.elseBranch.statements.map((s) =>
-          substituteStatement(s, subst, callSpan),
-        );
+        cloned.elseBranch = {
+          ...cloned.elseBranch,
+          statements: cloned.elseBranch.statements.map((s) =>
+            substituteStatement(s, subst, callSpan),
+          ),
+        };
       }
       break;
     case "WhileStmt":
       cloned.condition = substituteExpr(cloned.condition, subst, callSpan);
-      cloned.body.statements = cloned.body.statements.map((s) =>
-        substituteStatement(s, subst, callSpan),
-      );
+      cloned.body = {
+        ...cloned.body,
+        statements: cloned.body.statements.map((s) => substituteStatement(s, subst, callSpan)),
+      };
       break;
     case "ForStmt":
       cloned.iterable = substituteExpr(cloned.iterable, subst, callSpan);
-      cloned.body.statements = cloned.body.statements.map((s) =>
-        substituteStatement(s, subst, callSpan),
-      );
+      cloned.body = {
+        ...cloned.body,
+        statements: cloned.body.statements.map((s) => substituteStatement(s, subst, callSpan)),
+      };
       break;
     case "TryStmt":
-      cloned.tryBlock.statements = cloned.tryBlock.statements.map((s) =>
-        substituteStatement(s, subst, callSpan),
-      );
+      cloned.tryBlock = {
+        ...cloned.tryBlock,
+        statements: cloned.tryBlock.statements.map((s) => substituteStatement(s, subst, callSpan)),
+      };
       if (cloned.catchBlock) {
-        cloned.catchBlock.statements = cloned.catchBlock.statements.map((s) =>
-          substituteStatement(s, subst, callSpan),
-        );
+        cloned.catchBlock = {
+          ...cloned.catchBlock,
+          statements: cloned.catchBlock.statements.map((s) =>
+            substituteStatement(s, subst, callSpan),
+          ),
+        };
       }
       if (cloned.finallyBlock) {
-        cloned.finallyBlock.statements = cloned.finallyBlock.statements.map((s) =>
-          substituteStatement(s, subst, callSpan),
-        );
+        cloned.finallyBlock = {
+          ...cloned.finallyBlock,
+          statements: cloned.finallyBlock.statements.map((s) =>
+            substituteStatement(s, subst, callSpan),
+          ),
+        };
       }
       break;
     case "ThrowStmt":
@@ -796,7 +811,7 @@ function expandModuleIdiomsInternal(
     return mod;
   }
 
-  const clonedMod = structuredClone(mod);
+  const clonedMod = fastCloneAst(mod);
 
   function parseDefaultExpr(defaultVal: string): Expr {
     try {
@@ -1985,7 +2000,7 @@ export function collapseModuleIdioms(
     return { ast: mod, collapsedCount: 0 };
   }
 
-  const clonedMod = structuredClone(mod);
+  const clonedMod = fastCloneAst(mod);
   let collapsedCount = 0;
   let currentSymbol: string | undefined;
   const generator = new AiceGenerator();
@@ -3454,7 +3469,7 @@ export async function updateProjectIdiom(
         const singleMod: Module = {
           kind: "Module",
           path: mod.path,
-          items: [structuredClone(item)],
+          items: [fastCloneAst(item)],
           span: mod.span,
         };
         const { ast: collapsedSingle, collapsedCount } = collapseModuleIdioms(singleMod, {
@@ -3476,9 +3491,9 @@ export async function updateProjectIdiom(
       } else if (item.kind === "ClassDecl") {
         for (const m of item.methods) {
           const singleClass: ClassDecl = {
-            ...structuredClone(item),
+            ...fastCloneAst(item),
             properties: [],
-            methods: [structuredClone(m)],
+            methods: [fastCloneAst(m)],
             staticBlocks: [],
           };
           const singleMod: Module = {
@@ -3516,7 +3531,7 @@ export async function updateProjectIdiom(
         const singleMod: Module = {
           kind: "Module",
           path: mod.path,
-          items: [structuredClone(item)],
+          items: [fastCloneAst(item)],
           span: mod.span,
         };
         const { collapsedCount } = collapseModuleIdioms(singleMod, {

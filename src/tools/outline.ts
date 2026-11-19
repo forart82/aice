@@ -9,6 +9,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import postcss from "postcss";
+import { type BoundedCacheStats, FileStatLruCache } from "../cache/lru.js";
 import { getCachedTsSymbolIndex, type TsFileSymbolIndex } from "../compat/typescript.js";
 import {
   AICE_DISABLED_MESSAGE,
@@ -156,6 +157,26 @@ function getLeadingTriviaDoc(trivia: CstTriviaTable, nodeId: string): string | u
   return comments.length > 0 ? comments.join("\n") : undefined;
 }
 
+const MAX_OUTLINE_CACHE_ENTRIES = 256;
+const outlineResultCache = new FileStatLruCache<OutlineResult>(MAX_OUTLINE_CACHE_ENTRIES);
+
+export function clearOutlineCache(): void {
+  outlineResultCache.clear();
+}
+
+export function getOutlineCacheStats(): BoundedCacheStats {
+  return outlineResultCache.getStats();
+}
+
+function statFileOrUndefined(filePath: string): fs.Stats | undefined {
+  try {
+    const st = fs.statSync(filePath);
+    return st.isFile() ? st : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 export function generateOutline(
   sourceOrMod: string | Module,
   filePathOrOptions: string | OutlineOptions = {},
@@ -233,11 +254,13 @@ export function generateOutline(
   const hasActiveIdiomsForOutline = () =>
     idiomsActive && Boolean(idiomsConfig && Object.keys(idiomsConfig).length > 0);
 
+  let diskFileStatForCache: fs.Stats | undefined;
+  let diskOutlineCacheKey: string | undefined;
+
   if (typeof sourceOrMod === "object" && sourceOrMod !== null && sourceOrMod.kind === "Module") {
     ast = sourceOrMod;
     filePath = explicitFilePath || ast.path || "<anonymous>";
-    const isRealDisk =
-      filePath !== "<anonymous>" && fs.existsSync(filePath) && fs.statSync(filePath).isFile();
+    const isRealDisk = filePath !== "<anonymous>" && Boolean(statFileOrUndefined(filePath));
     ensureIdiomsResolved(filePath, isRealDisk);
     if (options.preReadSource !== undefined) {
       originalSource = options.preReadSource;
@@ -256,21 +279,33 @@ export function generateOutline(
       fs.existsSync(path.resolve(resolvedProjectRoot, sourceOrMod))
         ? path.resolve(resolvedProjectRoot, sourceOrMod)
         : sourceOrMod;
-    const isFile =
-      !sourceOrMod.includes("\n") &&
-      fs.existsSync(candidateFilePath) &&
-      fs.statSync(candidateFilePath).isFile();
-    if (isFile) {
+    const candidateStat = !sourceOrMod.includes("\n")
+      ? statFileOrUndefined(candidateFilePath)
+      : undefined;
+    const isFile = Boolean(candidateStat);
+    if (isFile && candidateStat) {
       filePath = candidateFilePath;
       ensureIdiomsResolved(filePath, true);
-      if (options.preReadSource === undefined && isLikelyBinaryDiskFile(filePath)) {
-        const sizeBytes = (() => {
-          try {
-            return fs.statSync(filePath).size;
-          } catch {
-            return 0;
-          }
-        })();
+      if (options.preReadSource === undefined) {
+        const idiomsSig =
+          idiomsActive && idiomsConfig && Object.keys(idiomsConfig).length > 0
+            ? Object.keys(idiomsConfig)
+                .sort()
+                .map((k) => `${k}=${idiomsConfig![k]?.templateAice ?? ""}`)
+                .join("|")
+            : "";
+        diskOutlineCacheKey = `${path.resolve(filePath)}:${filePath}|d=${maxDepth}|t=${includeTypes ? 1 : 0}|j=${isJson ? 1 : 0}|s=${options.stats ? 1 : 0}|lr=${options.lineRanges ?? "auto"}|c=${options.compact ? 1 : 0}|st=${options.skipTokenStats ? 1 : 0}|id=${idiomsActive ? 1 : 0}:${idiomsSig}`;
+        diskFileStatForCache = candidateStat;
+        const cachedOutline = outlineResultCache.getIfFresh(diskOutlineCacheKey, candidateStat);
+        if (cachedOutline) {
+          return { ...cachedOutline, file: filePath };
+        }
+      }
+      if (
+        options.preReadSource === undefined &&
+        isLikelyBinaryDiskFile(filePath, { stat: candidateStat })
+      ) {
+        const sizeBytes = candidateStat.size;
         const binaryText = `// [binary file skipped: ${path.basename(filePath)} (${sizeBytes} bytes)]`;
         const jsonPayload = { file: filePath, binary: true, bytes: sizeBytes, symbols: [] };
         return {
@@ -841,15 +876,19 @@ export function generateOutline(
   const annotatedOutlineLines: string[] = [];
   for (let i = 0; i < symbols.length; i++) {
     const sym = symbols[i];
+    const prevSym = i > 0 ? symbols[i - 1] : undefined;
     const symRangeSuffix = sym.lineRange ? ` # ${sym.lineRange}` : "";
+    const symIsMultiLine =
+      Boolean(sym.docstring) || Boolean(sym.children && sym.children.length > 0);
+    const prevWasMultiLine = Boolean(prevSym?.children && prevSym.children.length > 0);
     if (
       i > 0 &&
-      (sym.kind === "class" ||
-        sym.kind === "function" ||
+      (symIsMultiLine ||
+        prevWasMultiLine ||
+        sym.kind === "class" ||
         sym.kind === "enum" ||
         sym.kind === "interface" ||
-        sym.kind === "record" ||
-        sym.kind === "component")
+        sym.kind === "record")
     ) {
       baseOutlineLines.push("");
       annotatedOutlineLines.push("");
@@ -1055,7 +1094,7 @@ export function generateOutline(
     ...(options.stats ? { stats } : {}),
   };
 
-  return {
+  const result: OutlineResult = {
     file: filePath,
     text: isJson ? JSON.stringify(jsonPayload, null, 2) : outlineText,
     symbols,
@@ -1063,6 +1102,10 @@ export function generateOutline(
     json: jsonPayload,
     stats,
   };
+  if (diskOutlineCacheKey && diskFileStatForCache) {
+    outlineResultCache.setWithStat(diskOutlineCacheKey, diskFileStatForCache, result);
+  }
+  return result;
 }
 
 function escapeRegexForOutline(str: string): string {
@@ -2726,7 +2769,10 @@ export function isNonBinaryExtensionlessDiskFile(absPath: string): boolean {
   try {
     const st = fs.statSync(absPath);
     if (!st.isFile() || st.size > DEFAULT_MAX_TEXT_FILE_BYTES) return false;
-    return !isLikelyBinaryDiskFile(absPath, { maxTextBytes: DEFAULT_MAX_TEXT_FILE_BYTES });
+    return !isLikelyBinaryDiskFile(absPath, {
+      maxTextBytes: DEFAULT_MAX_TEXT_FILE_BYTES,
+      stat: st,
+    });
   } catch {
     return false;
   }

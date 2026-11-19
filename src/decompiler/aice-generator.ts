@@ -155,6 +155,7 @@ export function needsBinaryParentheses(
 export interface AiceGeneratorOptions {
   indent?: string;
   trivia?: CstTriviaTable;
+  omitModuleHeader?: boolean;
 }
 
 export class AiceGenerator {
@@ -162,11 +163,13 @@ export class AiceGenerator {
   private currentIndent = 0;
   private buffer: string[] = [];
   private trivia?: CstTriviaTable;
+  private omitModuleHeader: boolean;
   private inCurlyBlock = false;
 
   constructor(options: AiceGeneratorOptions = {}) {
     this.indentStr = options.indent ?? "  ";
     this.trivia = options.trivia;
+    this.omitModuleHeader = options.omitModuleHeader === true;
   }
 
   static generate(mod: Module, options?: AiceGeneratorOptions): string {
@@ -176,11 +179,16 @@ export class AiceGenerator {
   generate(mod: Module): string {
     this.buffer = [];
     this.currentIndent = 0;
+    const emitBlankSeparators = Boolean(this.trivia);
 
-    // Emit module declaration
-    this.emitLeadingTrivia("module");
-    this.writeLine(`module ${mod.path}`);
-    this.writeLine();
+    // Emit module declaration unless generating a scoped symbol slice
+    if (!this.omitModuleHeader) {
+      this.emitLeadingTrivia("module");
+      this.writeLine(`module ${mod.path}`);
+      if (emitBlankSeparators) {
+        this.writeLine();
+      }
+    }
 
     // Group items: imports first, then non-imports
     const imports = mod.items.filter((i) => i.kind === "ImportDecl") as ImportDecl[];
@@ -190,13 +198,13 @@ export class AiceGenerator {
       this.emitImport(imp);
     }
 
-    if (imports.length > 0 && nonImports.length > 0) {
+    if (emitBlankSeparators && imports.length > 0 && nonImports.length > 0) {
       this.writeLine();
     }
 
     for (let i = 0; i < nonImports.length; i++) {
       this.emitModuleItem(nonImports[i]);
-      if (i < nonImports.length - 1) {
+      if (emitBlankSeparators && i < nonImports.length - 1) {
         this.writeLine();
       }
     }
