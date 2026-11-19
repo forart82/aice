@@ -244,22 +244,17 @@ When operating on any native codebase (zero `.aice` files on disk, with `$idioms
 
 ## 6. Canonical Global & Workspace CLI Agent Directive (`aice enable` / `aice agents setup`)
 
-When `aice enable` configures a project workspace, `syncProjectWorkspaceRules` writes the compact **`<= 650`-BPE-token** (across both `cl100k_base` and `o200k_base`) directive block from `src/rules/mandatory-rules.ts` **only** to `AGENTS.md` (and `CLAUDE.md` only if already present without `@AGENTS.md`), while automatically purging legacy `GEMINI.md` / `.GEMINI.md` blocks and `.agents/rules/aice.md` duplicates. When `aice agents setup --global-rules` configures global home directories (`~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.aider/CONVENTIONS.md`), it idempotently syncs the exact same `MANDATORY_AGENT_RULES_MARKDOWN` cheat-card:
+When `aice enable` configures a project workspace, `syncProjectWorkspaceRules` writes the compact **`<= 300`-BPE-token** (across both `cl100k_base` and `o200k_base`) directive block from `src/rules/mandatory-rules.ts` **only** to `AGENTS.md` (and `CLAUDE.md` only if already present without `@AGENTS.md`), while automatically purging legacy `GEMINI.md` / `.GEMINI.md` blocks and `.agents/rules/aice.md` duplicates. When `aice agents setup --global-rules` configures global home directories (`~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.codex/AGENTS.md`, `~/.config/opencode/AGENTS.md`, `~/.aider/CONVENTIONS.md`), it idempotently syncs the exact same `MANDATORY_AGENT_RULES_MARKDOWN` cheat-card:
 
 ````markdown
-<!-- AICE:START -->
-<!-- AICE:START v0.9.51 -->
-## AICE (v0.9.51) — 2-Tool AST Cheat-Card
-**MANDATORY OVERRIDE**: Active across all 33 supported file extensions (code, .sh, .bash, .zsh, .ps1, .cmd, .bat, .md, .markdown, .aipl): use ONLY `aice read`/`search`/`find` (MCP `aice_read`) & `aice splice`/`aice write` (MCP `aice_splice`), never native file tools.
-### 1. Opt-In Activation Gate & Non-AICE Bypass
-- Gate: Active ONLY when `aice.config.json` has `"enabled": true`; skip if missing/false. `$idioms` OFF (`--idioms` opt-in).
-- Bypass: Board-only swarm monitors/coordinators & non-file Q&A have zero overhead.
-- Fallback: Crash/blocker -> `aice disable` -> native tools -> `aice enable`.
-### 2. Batch Read & Splice (No Shell Workarounds)
-- Ban: No shell writes (`python3 with open`, `cat << 'EOF' >`, `echo >`); NEVER run `sed -n` or grep/awk/head/tail/cat/ls/find on supported files.
-- Read (`<=9KB` / `~145L`/call on CLI & MCP): Prefer 1-turn numbered native `aice read src tests`, `aice read f1:sym f2:L1-L50` (Adaptive Sibling Outlining), `aice search <pat> [dir]` (4-tier ranked `aice read <fileOrDir> -s "/<searchPattern>/"`), `aice find [glob] [dir]` (or MCP `aice_read` with `search`, `contextLines`, `filesOnly`, `--dsl`); batch `:sym`/`:L` (`f:L1-L50,L200-L250`, `f:sym@kw`), read `>120L` solo, no daisy-chain `:L` (use `:symbol`/`search` or parallel 1-turn slices).
-- Splice: Prefer 1-call `aice splice --stdin << 'EOF'` (or MCP `aice_splice` `=== <file>:<sym> ===` in `code`, not `edits`) with `=== <file> ===` (creates/overwrites; `:overwrite` for empty), `:symbol` (`@clone(SourceSym)`, `@replace-docs`), `:Lstart-Lend` (inclusive; `--delete` to remove), `<<< === >>>`, `:eof`, `:imports`.
-### 3. Subagent Propagation
-- Coding subagents/`swarm add` briefs MUST state: `"Use AICE (aice read / aice splice) for all file exploration and edits."`
+<!-- AICE:START v0.9.52 -->
+## AICE (v0.9.52)
+- Gate: ONLY if `aice.config.json` has `"enabled": true`; blocker: `aice disable` / `aice enable`.
+### Batch Read & Splice
+- ONLY aice read/search/find (aice_read) & aice splice/aice write (aice_splice); no shell writes or `sed`/`grep`/`cat`/`find`.
+- Read: `aice read f1:sym f2:L1-L50`, quote 'f:/a|b/', `aice search <pat> [dir]`, `aice find -d 2`.
+- No paging: NEVER walk `:L1-L150` -> `:L151-L300` across turns; batch `f:sym1 f:sym2` (or multi-file) in 1 `aice read` or `aice search <pat> f`.
+- Splice: `aice splice --stdin << 'EOF'` (=== f:sym ===, === f:L1-L20 ===, --delete, === f ===), multi-line `<<< === >>>` (no 1L).
+- Briefs: "Use AICE (aice read / aice splice) for all file exploration and edits."
 <!-- AICE:END -->
 ````
