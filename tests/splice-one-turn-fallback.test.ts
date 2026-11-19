@@ -7,14 +7,23 @@ import { applyHunksToScope, spliceBatch, splice as spliceFile } from "../src/too
 
 describe("1-Turn Safe Splice Recovery & Zero-Corruption Guards", () => {
   let tmpDir: string;
+  let prevTelemetryDir: string | undefined;
+  let prevTelemetryPath: string | undefined;
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "aice-splice-1turn-"));
     saveProjectConfig(tmpDir, { enabled: true, idiomsEnabled: false });
+    prevTelemetryDir = process.env.AICE_TELEMETRY_DIR;
+    prevTelemetryPath = process.env.AICE_TELEMETRY_PATH;
     process.env.AICE_TELEMETRY_DIR = path.join(tmpDir, ".telemetry");
+    process.env.AICE_TELEMETRY_PATH = path.join(tmpDir, ".telemetry", "gains.jsonl");
   });
 
   afterEach(() => {
+    if (prevTelemetryDir === undefined) delete process.env.AICE_TELEMETRY_DIR;
+    else process.env.AICE_TELEMETRY_DIR = prevTelemetryDir;
+    if (prevTelemetryPath === undefined) delete process.env.AICE_TELEMETRY_PATH;
+    else process.env.AICE_TELEMETRY_PATH = prevTelemetryPath;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
@@ -272,6 +281,70 @@ describe("1-Turn Safe Splice Recovery & Zero-Corruption Guards", () => {
       const updatedWasm = fs.readFileSync(wasmFile, "utf-8");
       expect(updatedWasm).toContain("throw new Error('No wasm binary');");
       expect(updatedWasm).toContain("this.wasmInstance = instance;");
+
+      // Repro A: 4-line IIFE tail (L8-L11) spliced via L4-L9 (ds=+4, de=+2) inserting a new line right before `})();`
+      await spliceFile(wasmFile, {
+        symbol: "L4-L9",
+        projectRoot: tmpDir,
+        code: [
+          "      const { instance } = await WebAssembly.instantiate(bytes, {});",
+          "      this.wasmInstance = instance;",
+          "      this.isReady = true;",
+          "      this.bootTimestamp = Date.now();",
+          "    })();",
+        ].join("\n"),
+      });
+      const updatedWasm2 = fs.readFileSync(wasmFile, "utf-8");
+      expect(updatedWasm2).toContain("throw new Error('No wasm binary');");
+      expect(updatedWasm2).toContain("this.bootTimestamp = Date.now();\n    })();");
+
+      // Repro B: 9-line `function boot()` (L4-L12) spliced via L3-L9 (ds=+1, de=+3) across balanced call statements before `}`
+      const bootFile = path.join(tmpDir, "playground-boot.js");
+      fs.writeFileSync(
+        bootFile,
+        [
+          "(function (root) {",
+          "  root.AiplShowcaseApp = AiplShowcaseApp;",
+          "",
+          "  function boot() {",
+          "    if (root.__aiplCurrentLang === 'fr' || root.__aiplCurrentLang === 'en') {",
+          "      currentLang = root.__aiplCurrentLang;",
+          "    }",
+          "    initCompare();",
+          "    initPipelineExplorer();",
+          "    initStdlibAtlas();",
+          "    initPlayground();",
+          "  }",
+          "",
+          "  if (typeof document !== 'undefined') {",
+          "    boot();",
+          "  }",
+          "})(this);",
+          "",
+        ].join("\n"),
+        "utf-8",
+      );
+      await spliceFile(bootFile, {
+        symbol: "L3-L9",
+        projectRoot: tmpDir,
+        code: [
+          "  function boot() {",
+          "    if (root.__aiplCurrentLang === 'fr' || root.__aiplCurrentLang === 'en') {",
+          "      currentLang = root.__aiplCurrentLang;",
+          "    }",
+          "    initCompare();",
+          "    initPipelineExplorer();",
+          "    initStdlibAtlas();",
+          "    initPlayground();",
+          "    root.__aiplBooted = true;",
+          "  }",
+        ].join("\n"),
+      });
+      const updatedBoot = fs.readFileSync(bootFile, "utf-8");
+      expect(updatedBoot).toContain("root.AiplShowcaseApp = AiplShowcaseApp;\n\n  function boot()");
+      expect(updatedBoot).toContain(
+        "initPlayground();\n    root.__aiplBooted = true;\n  }\n\n  if (typeof document !== 'undefined') {",
+      );
     });
 
     it("refuses to guess when unwrap-vs-keep bare block boundary candidates are genuinely ambiguous", async () => {

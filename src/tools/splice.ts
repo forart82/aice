@@ -7684,11 +7684,26 @@ function resolveSingleNativeEditAgainstSource(
       }
     }
 
+    const hasShiftedClosingTailAnchor =
+      !isNonBraceRangeLang &&
+      !alreadyAnchoredAtStart &&
+      procFirstTrim.length >= 8 &&
+      procLastTrim.length > 0 &&
+      procDelims.braces <= 0 &&
+      procDelims.parens <= 0 &&
+      rawLines
+        .slice(Math.max(0, startLine - 5), Math.min(rawLines.length, startLine + 4))
+        .some((l) => l.trim() === procFirstTrim) &&
+      rawLines
+        .slice(Math.max(0, endLine - 4), Math.min(rawLines.length, endLine + 5))
+        .some((l) => l.trim() === procLastTrim);
+
     const isUnbalancedReplacementOnBalancedSpan =
       !isNonBraceRangeLang &&
       origDelims.braces === 0 &&
       origDelims.parens === 0 &&
-      (procDelims.braces !== 0 || procDelims.parens !== 0);
+      (procDelims.braces !== 0 || procDelims.parens !== 0) &&
+      !hasShiftedClosingTailAnchor;
 
     const extractSimilarityTokens = (text: string): Set<string> => {
       const toks = text.match(/[A-Za-z_$][A-Za-z0-9_$-]*|\d+/g) ?? [];
@@ -7734,6 +7749,26 @@ function resolveSingleNativeEditAgainstSource(
         return d.braces !== 0 || d.parens !== 0;
       };
 
+      const procTrimmedSet = new Set(procTrimmedLines.filter(Boolean));
+      const isBalancedVerbatimInProc = (lineNo: number): boolean => {
+        const lnTrim = (rawLines[lineNo - 1] ?? "").trim();
+        if (!lnTrim || !procTrimmedSet.has(lnTrim)) return false;
+        const d = getLineDelims(lineNo);
+        return d.braces === 0 && d.parens === 0;
+      };
+      const countInternalBlockClosures = (linesArr: string[]): number => {
+        if (isNonBraceRangeLang) return 0;
+        let b = 0;
+        let closuresBeforeEnd = 0;
+        for (let idx = 0; idx < linesArr.length - 1; idx++) {
+          const d = countNetDelims(linesArr[idx] ?? "");
+          const prev = b;
+          b += d.braces;
+          if (prev > 0 && b === 0) closuresBeforeEnd++;
+        }
+        return closuresBeforeEnd;
+      };
+
       const checkVerbatimBlockShift = (candStart: number, candEnd: number): boolean => {
         const candLen = candEnd - candStart + 1;
         if (candLen < 2 || procTrimmedLines.length < 2) return false;
@@ -7741,13 +7776,31 @@ function resolveSingleNativeEditAgainstSource(
         const substantialCount = candLinesTrim.filter((l) => l.length >= 8).length;
         if (substantialCount === 0) return false;
 
-        // Sub-case A: candStart..candEnd matches prefix or suffix of replacement verbatim (e.g. sibling append/prepend)
+        // Sub-case A: candStart..candEnd matches prefix, suffix, or prefix+suffix envelope of replacement verbatim
         if (candLen >= 3 && candLen < procTrimmedLines.length && substantialCount >= 2) {
           const matchesPrefix = candLinesTrim.every((l, i) => l === procTrimmedLines[i]);
           const matchesSuffix = candLinesTrim.every(
             (l, i) => l === procTrimmedLines[procTrimmedLines.length - candLen + i],
           );
-          if (matchesPrefix || matchesSuffix) {
+          let matchesPrefixSuffixEnvelope = false;
+          if (!matchesPrefix && !matchesSuffix) {
+            let kPref = 0;
+            while (kPref < candLen && candLinesTrim[kPref] === procTrimmedLines[kPref]) {
+              kPref++;
+            }
+            let kSuf = 0;
+            while (
+              kSuf < candLen - kPref &&
+              candLinesTrim[candLen - 1 - kSuf] ===
+                procTrimmedLines[procTrimmedLines.length - 1 - kSuf]
+            ) {
+              kSuf++;
+            }
+            if (kPref >= 1 && kSuf >= 1 && kPref + kSuf === candLen) {
+              matchesPrefixSuffixEnvelope = true;
+            }
+          }
+          if (matchesPrefix || matchesSuffix || matchesPrefixSuffixEnvelope) {
             const winMin = Math.max(1, Math.min(startLine, candStart) - 20);
             const winMax = Math.min(totalLines - candLen + 1, Math.max(endLine, candEnd) + 20);
             let occurrences = 0;
@@ -7782,9 +7835,18 @@ function resolveSingleNativeEditAgainstSource(
               penultProc.length >= 8 &&
               candLinesTrim[candLen - 2] === penultProc &&
               candLinesTrim[candLen - 1] === procLastTrim;
+        const matchedSubstantialBodyCount = candLinesTrim.filter(
+          (l) => l.length >= 8 && procTrimmedSet.has(l),
+        ).length;
+        const endMatchesWithSubstantialBody =
+          procLastTrim.length > 0 &&
+          candLinesTrim[candLen - 1] === procLastTrim &&
+          matchedSubstantialBodyCount >= 2 &&
+          countInternalBlockClosures(candLinesTrim) ===
+            countInternalBlockClosures(procTrimmedLines);
         if (
           startAnchorStrong &&
-          endAnchorStrong &&
+          (endAnchorStrong || endMatchesWithSubstantialBody) &&
           Math.abs(candLen - procTrimmedLines.length) <= 4
         ) {
           const winMin = Math.max(1, Math.min(startLine, candStart) - 20);
@@ -7884,10 +7946,13 @@ function resolveSingleNativeEditAgainstSource(
               if (!isCommaHeaderContinuation) {
                 let intermediatesClean = true;
                 for (let ln = candStart + 1; ln < startLine; ln++) {
-                  if (
-                    outerMatchesHeader || ds < -2
-                      ? !isPureDelimOrTriviaLine(ln)
-                      : !isBlankOrCommentOrDelimLine(ln)
+                  if (outerMatchesHeader) {
+                    if (!isPureDelimOrTriviaLine(ln) && !isBalancedVerbatimInProc(ln)) {
+                      intermediatesClean = false;
+                      break;
+                    }
+                  } else if (
+                    ds < -2 ? !isPureDelimOrTriviaLine(ln) : !isBlankOrCommentOrDelimLine(ln)
                   ) {
                     intermediatesClean = false;
                     break;
@@ -7962,7 +8027,11 @@ function resolveSingleNativeEditAgainstSource(
                 let intermediatesSafe = true;
                 for (let ln = endLine + 1; ln < candEnd; ln++) {
                   const d = getLineDelims(ln);
-                  if (d.braces > 0 || d.parens > 0 || !isBlankOrCommentOrDelimLine(ln)) {
+                  if (
+                    d.braces > 0 ||
+                    d.parens > 0 ||
+                    (!isBlankOrCommentOrDelimLine(ln) && !isBalancedVerbatimInProc(ln))
+                  ) {
                     intermediatesSafe = false;
                     break;
                   }
