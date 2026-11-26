@@ -227,17 +227,21 @@ fn r7_report_schema_and_exact_bpe_verification() {
         // (F-67 TSX destructured props in C-01 [+19/+21], F-69 Rust trait implements in C-02
         // [+10/+10], F-68 Go struct tags in C-04 [+114/+113], F-65 Kotlin sealed subtypes /
         // @interface / state field in C-07 [+273/+274], F-72 Twig attr expr in C-08 [+3/+3]),
-        // & Wave 7 fidelity fixes (F-74 C# subscript + F-87 Java field initializers in C-05
+        // Wave 7 fidelity fixes (F-74 C# subscript + F-87 Java field initializers in C-05
         // [+9/+11], F-82 C++ Grid ctor/method prototypes & Body2D& refs in C-06 [+32/+33],
-        // F-77 Dart SubmitPhase enum in C-07 [+20/+20], F-81 PHP concat `<>` in C-08 [+0/+0]).
-        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-7 counts.
+        // F-77 Dart SubmitPhase enum in C-07 [+20/+20], F-81 PHP concat `<>` in C-08 [+0/+0]),
+        // & Wave 8 fidelity fixes (F-101 TSX `default as React` import in C-01 [+2/+2],
+        // F-95 Rust `(crc & 1).wrapping_neg()` parens in C-02 [+2/+1], F-97 C/C++ `const`
+        // pointer/ref param & return qualifiers in C-06 [+8/+9], F-107 Dart FormController
+        // field initializers in C-07 [+10/+10]).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-8 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
-            "C-01" => (2153, 2191),
-            "C-02" => (1711, 1684),
+            "C-01" => (2155, 2193),
+            "C-02" => (1713, 1685),
             "C-04" => (1603, 1616),
             "C-05" => (1572, 1595),
-            "C-06" => (1502, 1510),
-            "C-07" => (1510, 1528),
+            "C-06" => (1510, 1519),
+            "C-07" => (1520, 1538),
             "C-08" => (1432, 1441),
             "C-09" => (1262, 1264),
             "C-10" => (1415, 1432),
