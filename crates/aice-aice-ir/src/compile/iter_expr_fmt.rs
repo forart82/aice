@@ -166,7 +166,11 @@ pub(crate) fn format_closure(
 
 pub(crate) fn format_record_entry(entry: &RecordEntry, val: String, lang: LanguageId) -> String {
     match entry {
-        RecordEntry::Spread(_) => if lang == LanguageId::Rust { format!("..{val}") } else { format!("...{val}") },
+        RecordEntry::Spread(_) => match lang {
+            LanguageId::Rust => format!("..{val}"),
+            LanguageId::Python | LanguageId::Ruby => format!("**{val}"),
+            _ => format!("...{val}"),
+        },
         RecordEntry::Field { key: None, .. } => val,
         RecordEntry::Field { key: Some(k), value } => match lang {
             LanguageId::Python | LanguageId::Dart => format!("\"{k}\": {val}"),

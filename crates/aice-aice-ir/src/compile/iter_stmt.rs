@@ -46,8 +46,13 @@ pub(crate) fn step_stmt_task<'a>(
         }
         CTask::BraceDestructure { names, is_mut } => {
             let rhs = st.vals.pop().unwrap();
-            let kw = if is_mut { "let" } else { "const" };
-            ec.line(&format!("{kw} [{}] = {rhs}{semi}", names.join(", ")));
+            if lang == LanguageId::Kotlin {
+                let kw = if is_mut { "var" } else { "val" };
+                ec.line(&format!("{kw} ({}) = {rhs}", names.join(", ")));
+            } else {
+                let kw = if is_mut { "let" } else { "const" };
+                ec.line(&format!("{kw} [{}] = {rhs}{semi}", names.join(", ")));
+            }
         }
         CTask::BraceAssign(op) => {
             let r = st.vals.pop().unwrap();
@@ -191,7 +196,7 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
             tasks.push(CTask::BraceStmts { stmts: body, tail: false }); tasks.push(CTask::BracePush);
             tasks.push(CTask::BraceForHdr(binding)); tasks.push(CTask::EvalExpr(iter));
         }
-        Stmt::Try { try_body, catches, finally_body, finally_trivia, trivia } => {
+        Stmt::Try { try_body, catches, else_body, finally_body, finally_trivia, trivia, .. } => {
             ec.emit_trivia(trivia, CommentStyle::Slash);
             if matches!(lang, LanguageId::Rust | LanguageId::Go) {
                 if let Some(fb) = finally_body {
@@ -200,6 +205,7 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
                     tasks.push(CTask::BraceLine("{ // finally")); tasks.push(CTask::BraceTrivia(finally_trivia));
                 }
                 tasks.push(CTask::BraceLine("}")); tasks.push(CTask::BracePop);
+                if let Some(eb) = else_body { tasks.push(CTask::BraceStmts { stmts: eb, tail: false }); }
                 tasks.push(CTask::BraceStmts { stmts: try_body, tail: false });
                 ec.line("{ // try"); ec.push();
                 return;
@@ -229,6 +235,16 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
                     LanguageId::CSharp | LanguageId::Java => format!("}} catch ({} {p}) {{", cc.ty.as_ref().map(|x| emit_type(x, lang)).unwrap_or_else(|| "Exception".into())),
                     LanguageId::Cpp if is_all => "} catch (...) {".into(),
                     LanguageId::Cpp => format!("}} catch ({} {p}) {{", cc.ty.as_ref().map(|x| emit_type(x, lang)).unwrap_or_else(|| "const std::exception&".into())),
+                    LanguageId::Php => {
+                        let ty_s = cc.ty.as_ref().map(|x| emit_type(x, lang)).unwrap_or_else(|| "\\Throwable".into());
+                        match p_raw {
+                            Some(pr) => {
+                                let vp = if pr.starts_with('$') { pr.to_string() } else { format!("${pr}") };
+                                format!("}} catch ({ty_s} {vp}) {{")
+                            }
+                            None => format!("}} catch ({ty_s}) {{"),
+                        }
+                    }
                     LanguageId::Dart => match (cc.ty.as_ref().map(|x| emit_type(x, lang)), p_raw) {
                         (Some(t), Some(pr)) => format!("}} on {t} catch ({pr}) {{"),
                         (Some(t), None) => format!("}} on {t} {{"),
@@ -241,9 +257,11 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
                 tasks.push(CTask::BracePush); tasks.push(CTask::BraceOwnedLine(hdr));
             }
             ec.line("try {"); ec.push();
-            tasks.push(CTask::BracePop); tasks.push(CTask::BraceStmts { stmts: try_body, tail: false });
+            tasks.push(CTask::BracePop);
+            if let Some(eb) = else_body { tasks.push(CTask::BraceStmts { stmts: eb, tail: false }); }
+            tasks.push(CTask::BraceStmts { stmts: try_body, tail: false });
         }
-        Stmt::Throw { expr, trivia } => { ec.emit_trivia(trivia, CommentStyle::Slash); tasks.push(CTask::BraceThrow); tasks.push(CTask::EvalExpr(expr)); }
+        Stmt::Throw { expr, trivia, .. } => { ec.emit_trivia(trivia, CommentStyle::Slash); tasks.push(CTask::BraceThrow); tasks.push(CTask::EvalExpr(expr)); }
         Stmt::Break { trivia, .. } => { ec.emit_trivia(trivia, CommentStyle::Slash); ec.line(&format!("break{semi}")); }
         Stmt::Continue { trivia, .. } => { ec.emit_trivia(trivia, CommentStyle::Slash); ec.line(&format!("continue{semi}")); }
         Stmt::Match { target, cases, trivia } => {

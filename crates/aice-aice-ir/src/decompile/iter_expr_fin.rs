@@ -152,20 +152,39 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             Expr::Conditional { cond, then_expr, else_expr }
         }
         ExprFin::Member { property, kind } => Expr::Member { object: Box::new(env.exprs.pop().expect("mem")), property, kind },
-        ExprFin::Index { is_optional } => {
-            let index = Box::new(env.exprs.pop().expect("idx"));
+        ExprFin::Index { is_optional, argc } => {
+            let index = if argc == 1 {
+                Box::new(env.exprs.pop().expect("idx"))
+            } else {
+                let args = env.exprs.split_off(env.exprs.len() - argc);
+                Box::new(Expr::Call {
+                    callee: Box::new(Expr::Ident("\0idx".into())), args,
+                    is_optional: false, is_tagged: false, is_new: false,
+                })
+            };
             let object = Box::new(env.exprs.pop().expect("obj"));
             Expr::Index { object, index, is_optional }
         }
+        ExprFin::Template { quasis } => {
+            let n = quasis.len().saturating_sub(1);
+            let exprs = env.exprs.split_off(env.exprs.len() - n);
+            Expr::Template { quasis, exprs }
+        }
+        ExprFin::TaggedTemplate => {
+            let tpl = env.exprs.pop().expect("tagged tpl");
+            let callee = Box::new(env.exprs.pop().expect("tagged callee"));
+            Expr::Call { callee, args: vec![tpl], is_optional: false, is_tagged: true, is_new: false }
+        }
         ExprFin::RubyNilCheck => Expr::Binary { op: BinaryOp::Eq, left: Box::new(env.exprs.pop().expect("nilchk")), right: Box::new(Expr::Literal(LiteralVal::Nil)) },
-        ExprFin::Call { has_callee_expr, callee_name, recv_prop, argc, has_ruby_blk, is_optional, is_new } => {
+        ExprFin::Call { has_callee_expr, callee_name, recv_prop, recv_safe, argc, has_ruby_blk, is_optional, is_new } => {
             let blk_expr = has_ruby_blk.then(|| env.exprs.pop().expect("rb blk"));
             let mut args = env.exprs.split_off(env.exprs.len() - argc);
             if let Some(b) = blk_expr { args.push(b); }
             let callee = if !has_callee_expr { Expr::Ident(callee_name) }
             else {
                 let c = env.exprs.pop().expect("callee");
-                if let Some(prop) = recv_prop { Expr::Member { object: Box::new(c), property: prop, kind: MemberKind::Dot } } else { c }
+                let kind = if recv_safe { MemberKind::SafeNav } else { MemberKind::Dot };
+                if let Some(prop) = recv_prop { Expr::Member { object: Box::new(c), property: prop, kind } } else { c }
             };
             Expr::Call { callee: Box::new(callee), args, is_optional, is_tagged: false, is_new }
         }

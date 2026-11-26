@@ -121,7 +121,11 @@ pub(crate) fn finish_stmt_task(env: &mut DecompEnv<'_>, f: StmtFin) {
             let recs = es.into_iter().map(|v| RecordEntry::Field { key: None, value: v }).collect();
             env.stmts.push(Stmt::Return { value: Some(Expr::Record(recs)), trivia: Trivia::default() });
         }
-        StmtFin::Throw => env.stmts.push(Stmt::Throw { expr: env.exprs.pop().expect("throw"), trivia: Trivia::default() }),
+        StmtFin::Throw(has_cause) => {
+            let cause = if has_cause { Some(env.exprs.pop().expect("throw cause")) } else { None };
+            let expr = env.exprs.pop().expect("throw");
+            env.stmts.push(Stmt::Throw { expr, cause, trivia: Trivia::default() });
+        }
         StmtFin::ExprStmt => env.stmts.push(Stmt::Expr { expr: env.exprs.pop().expect("expr stmt"), trivia: Trivia::default() }),
         StmtFin::Unless { has_else } => {
             let else_body = if has_else { Some(env.blocks.pop().unwrap_or_default()) } else { None };
@@ -162,6 +166,10 @@ pub(crate) fn finish_stmt_task(env: &mut DecompEnv<'_>, f: StmtFin) {
             let init = if has_init { env.exprs.pop().expect("var init") } else { Expr::Literal(LiteralVal::Nil) };
             env.stmts.push(Stmt::Let { name, is_mut, ty, init, trivia: Trivia::default() });
         }
+        StmtFin::Destructure { names, is_mut, has_init } => {
+            let init = if has_init { env.exprs.pop().expect("destr init") } else { Expr::Literal(LiteralVal::Nil) };
+            env.stmts.push(Stmt::Destructure { names, is_mut, ty: None, init, trivia: Trivia::default() });
+        }
         StmtFin::Assign { op } => {
             let value = env.exprs.pop().expect("as val");
             let target = env.exprs.pop().expect("as tgt");
@@ -183,11 +191,12 @@ pub(crate) fn finish_stmt_task(env: &mut DecompEnv<'_>, f: StmtFin) {
             let cond = env.exprs.pop().expect("if cond");
             env.stmts.push(Stmt::If { cond, then_body, elifs, elif_trivias, else_body, else_trivia, trivia });
         }
-        StmtFin::Try { catch_len, has_finally, finally_trivia, trivia } => {
+        StmtFin::Try { catch_len, has_else, else_trivia, has_finally, finally_trivia, trivia } => {
             let finally_body = if has_finally { Some(env.blocks.pop().unwrap_or_default()) } else { None };
+            let else_body = if has_else { Some(env.blocks.pop().unwrap_or_default()) } else { None };
             let catches = env.catches.split_off(env.catches.len() - catch_len);
             let try_body = env.blocks.pop().unwrap_or_default();
-            env.stmts.push(Stmt::Try { try_body, catches, finally_body, finally_trivia, trivia });
+            env.stmts.push(Stmt::Try { try_body, catches, else_body, else_trivia, finally_body, finally_trivia, trivia });
         }
         StmtFin::Catch { param, ty, has_body, trivia } => {
             let body = if has_body { env.blocks.pop().unwrap_or_default() } else { Vec::new() };

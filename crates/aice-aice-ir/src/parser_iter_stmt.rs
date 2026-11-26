@@ -6,7 +6,10 @@ use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_cf::step_cf_cont;
 use crate::parser_iter_expr::pop_expr;
 use crate::parser_iter_match::{start_match, step_match_cont};
-use crate::parser_stmt::{attach_stmt_trivia, eat_assign_op, is_destructure_ahead, is_obj_destructure_ahead, is_walrus_ahead};
+use crate::parser_stmt::{
+    attach_stmt_trivia, eat_assign_op, is_destructure_ahead, is_obj_destructure_ahead,
+    is_paren_destructure_ahead, is_walrus_ahead,
+};
 use crate::parser_types::parse_type_expr;
 
 fn pop_stmt(vals: &mut Vec<ParseVal>) -> Stmt {
@@ -57,7 +60,7 @@ pub(crate) fn step_stmt_cont(
         | ParseCont::StmtIfLoop { .. } | ParseCont::StmtElifAfterCond { .. }
         | ParseCont::StmtElifFinish { .. } | ParseCont::StmtElseFinish { .. }
         | ParseCont::StmtTryLoop { .. } | ParseCont::StmtCatchFinish { .. }
-        | ParseCont::StmtFinallyFinish { .. } => step_cf_cont(p, cont, stack, vals)?,
+        | ParseCont::StmtTryElseFinish { .. } | ParseCont::StmtFinallyFinish { .. } => step_cf_cont(p, cont, stack, vals)?,
         ParseCont::IndentedBlock(mut stmts) => {
             if p.at_eof() || p.peek_kind() == TokenKind::Dedent {
                 p.eat(TokenKind::Dedent);
@@ -108,7 +111,16 @@ pub(crate) fn step_stmt_cont(
         }
         ParseCont::StmtThrow => {
             let expr = pop_expr(vals);
-            vals.push(ParseVal::Stmt(Box::new(Stmt::Throw { expr, trivia: Trivia::default() })));
+            if p.eat(TokenKind::From) {
+                stack.push(ParseCont::StmtThrowCause { expr });
+                stack.push(ParseCont::Expr(1));
+            } else {
+                vals.push(ParseVal::Stmt(Box::new(Stmt::Throw { expr, cause: None, trivia: Trivia::default() })));
+            }
+        }
+        ParseCont::StmtThrowCause { expr } => {
+            let cause = pop_expr(vals);
+            vals.push(ParseVal::Stmt(Box::new(Stmt::Throw { expr, cause: Some(cause), trivia: Trivia::default() })));
         }
         ParseCont::StmtLet { name, is_mut, ty } => {
             let init = pop_expr(vals);
@@ -177,7 +189,9 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             p.advance();
             p.expect(TokenKind::Colon, "Expected ':'")?;
             let trailing = p.take_trailing_comment();
-            stack.push(ParseCont::StmtTryLoop { try_body: None, catches: Vec::new(), trailing });
+            stack.push(ParseCont::StmtTryLoop {
+                try_body: None, catches: Vec::new(), else_body: None, else_trivia: Trivia::default(), trailing,
+            });
             push_parse_block(p, stack, vals);
         }
         TokenKind::Throw => { p.advance(); stack.push(ParseCont::StmtThrow); stack.push(ParseCont::Expr(1)); }
@@ -209,6 +223,18 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
                 if !p.eat(TokenKind::Comma) { break; }
             }
             p.expect(TokenKind::RBracket, "Expected ']'")?;
+            let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
+            stack.push(ParseCont::StmtDestructure { names, is_mut });
+            stack.push(ParseCont::Expr(1));
+        }
+        TokenKind::LParen if is_paren_destructure_ahead(p) => {
+            p.expect(TokenKind::LParen, "Expected '('")?;
+            let mut names = Vec::new();
+            while p.peek_kind() != TokenKind::RParen && !p.at_eof() {
+                names.push(p.expect_ident_or_kw("Expected binding name")?.lexeme);
+                if !p.eat(TokenKind::Comma) { break; }
+            }
+            p.expect(TokenKind::RParen, "Expected ')'")?;
             let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
             stack.push(ParseCont::StmtDestructure { names, is_mut });
             stack.push(ParseCont::Expr(1));

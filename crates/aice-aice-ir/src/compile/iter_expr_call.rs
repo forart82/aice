@@ -7,12 +7,20 @@ use crate::ir_code::{Expr, FnBody, LiteralVal, RecordEntry};
 pub(crate) fn push_eval_call<'a>(
     callee: &'a Expr,
     args: &'a [Expr],
-    is_optional: bool,
-    is_new: bool,
+    flags: (bool, bool, bool),
     lang: LanguageId,
     ectx: &ExprEmitCtx,
     tasks: &mut Vec<CTask<'a>>,
 ) {
+    let (is_optional, is_tagged, is_new) = flags;
+    if is_tagged && args.len() == 1 {
+        tasks.push(CTask::MakeCall {
+            callee_lit: Some("\0tagged".into()), class_new: None, n_args: 1, is_optional: false, is_new: false,
+        });
+        tasks.push(CTask::EvalExpr(&args[0]));
+        tasks.push(CTask::EvalExpr(callee));
+        return;
+    }
     if lang == LanguageId::Tsx && let Expr::Ident(nm) = callee && nm == "__jsx" && args.len() >= 2 {
         let tag = match &args[0] { Expr::Literal(LiteralVal::Str { value, .. }) => value.as_str(), _ => "div" };
         let mut attr_exprs = Vec::new();
@@ -69,6 +77,61 @@ pub(crate) fn push_eval_call<'a>(
     tasks.push(CTask::MakeCall { callee_lit, class_new: None, n_args: args.len(), is_optional, is_new });
     for a in args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
     if need_eval { tasks.push(CTask::EvalExpr(callee)); }
+}
+
+pub(crate) fn push_eval_index<'a>(
+    object: &'a Expr,
+    index: &'a Expr,
+    is_optional: bool,
+    tasks: &mut Vec<CTask<'a>>,
+) {
+    tasks.push(CTask::MakeIndex { is_optional });
+    if let Expr::Call { callee, args, .. } = index
+        && matches!(callee.as_ref(), Expr::Ident(s) if s == "\0idx")
+    {
+        tasks.push(CTask::MakeCall {
+            callee_lit: Some("\0join_comma".into()), class_new: None,
+            n_args: args.len(), is_optional: false, is_new: false,
+        });
+        for a in args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
+    } else {
+        tasks.push(CTask::EvalExpr(index));
+    }
+    tasks.push(CTask::EvalExpr(object));
+}
+
+pub(crate) fn finish_make_call(
+    callee_lit: Option<String>,
+    class_new: Option<String>,
+    n_args: usize,
+    is_optional: bool,
+    is_new: bool,
+    lang: LanguageId,
+    st: &mut EvalState,
+) {
+    if callee_lit.as_deref() == Some("\0tagged") && n_args == 1 {
+        let tpl = st.vals.pop().unwrap();
+        let cs = st.vals.pop().unwrap();
+        if matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) {
+            st.vals.push(format!("{cs}{tpl}"));
+        } else {
+            st.vals.push(format!("{cs}({tpl})"));
+        }
+        return;
+    }
+    let start = st.vals.len() - n_args;
+    let ps: Vec<String> = st.vals.drain(start..).collect();
+    if callee_lit.as_deref() == Some("\0join_comma") {
+        st.vals.push(ps.join(", "));
+        return;
+    }
+    if let Some(nm) = class_new { st.vals.push(format!("new {nm}({})", ps.join(", "))); return; }
+    let cs = match callee_lit { Some(s) => s, None => st.vals.pop().unwrap() };
+    let op = if is_optional && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) { "?." } else { "" };
+    let pfx = if is_new && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::CSharp | LanguageId::Java | LanguageId::Php | LanguageId::Cpp) {
+        "new "
+    } else { "" };
+    st.vals.push(format!("{pfx}{cs}{op}({})", ps.join(", ")));
 }
 
 pub(crate) fn make_inline_jsx(

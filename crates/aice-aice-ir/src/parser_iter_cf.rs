@@ -89,7 +89,7 @@ pub(crate) fn step_cf_cont(
                 else_trivia, trivia: Trivia { trailing, ..Trivia::default() },
             })));
         }
-        ParseCont::StmtTryLoop { try_body, catches, trailing } => {
+        ParseCont::StmtTryLoop { try_body, catches, else_body, else_trivia, trailing } => {
             let tb = match try_body { Some(b) => b, None => pop_block(vals) };
             let saved = p.pos;
             let btr = p.collect_leading_trivia();
@@ -102,7 +102,11 @@ pub(crate) fn step_cf_cont(
                     } else if p.eat(TokenKind::Ellipsis) {
                         param = Some("...".to_string());
                     } else {
-                        let first = p.expect_ident_or_kw("Expected catch param")?.lexeme;
+                        let first = if p.eat(TokenKind::Dollar) {
+                            format!("${}", p.expect_ident_or_kw("Expected catch param")?.lexeme)
+                        } else {
+                            p.expect_ident_or_kw("Expected catch param")?.lexeme
+                        };
                         if has_paren && p.eat(TokenKind::Comma) {
                             let second = p.expect_ident_or_kw("Expected catch stack trace param")?.lexeme;
                             param = Some(format!("{first}, {second}"));
@@ -125,30 +129,47 @@ pub(crate) fn step_cf_cont(
                 p.expect(TokenKind::Colon, "Expected ':'")?;
                 let mut ctr = btr;
                 if ctr.trailing.is_none() { ctr.trailing = p.take_trailing_comment(); }
-                stack.push(ParseCont::StmtCatchFinish { try_body: tb, catches, trailing, param, ty, ctr });
+                stack.push(ParseCont::StmtCatchFinish {
+                    try_body: tb, catches, else_body, else_trivia, trailing, param, ty, ctr,
+                });
+                push_parse_block(p, stack, vals);
+            } else if else_body.is_none() && p.eat(TokenKind::Else) {
+                p.expect(TokenKind::Colon, "Expected ':'")?;
+                let mut etr = btr;
+                if etr.trailing.is_none() { etr.trailing = p.take_trailing_comment(); }
+                stack.push(ParseCont::StmtTryElseFinish { try_body: tb, catches, else_trivia: etr, trailing });
                 push_parse_block(p, stack, vals);
             } else if p.eat(TokenKind::Finally) {
                 p.expect(TokenKind::Colon, "Expected ':'")?;
                 let mut ftr = btr;
                 if ftr.trailing.is_none() { ftr.trailing = p.take_trailing_comment(); }
-                stack.push(ParseCont::StmtFinallyFinish { try_body: tb, catches, trailing, finally_trivia: ftr });
+                stack.push(ParseCont::StmtFinallyFinish {
+                    try_body: tb, catches, else_body, else_trivia, trailing, finally_trivia: ftr,
+                });
                 push_parse_block(p, stack, vals);
             } else {
                 p.pos = saved;
                 vals.push(ParseVal::Stmt(Box::new(Stmt::Try {
-                    try_body: tb, catches, finally_body: None, finally_trivia: Trivia::default(),
+                    try_body: tb, catches, else_body, else_trivia,
+                    finally_body: None, finally_trivia: Trivia::default(),
                     trivia: Trivia { trailing, ..Trivia::default() },
                 })));
             }
         }
-        ParseCont::StmtCatchFinish { try_body, mut catches, trailing, param, ty, ctr } => {
+        ParseCont::StmtCatchFinish { try_body, mut catches, else_body, else_trivia, trailing, param, ty, ctr } => {
             catches.push(CatchClause { param, ty, body: pop_block(vals), trivia: ctr });
-            stack.push(ParseCont::StmtTryLoop { try_body: Some(try_body), catches, trailing });
+            stack.push(ParseCont::StmtTryLoop { try_body: Some(try_body), catches, else_body, else_trivia, trailing });
         }
-        ParseCont::StmtFinallyFinish { try_body, catches, trailing, finally_trivia } => {
+        ParseCont::StmtTryElseFinish { try_body, catches, else_trivia, trailing } => {
+            let eb = pop_block(vals);
+            stack.push(ParseCont::StmtTryLoop {
+                try_body: Some(try_body), catches, else_body: Some(eb), else_trivia, trailing,
+            });
+        }
+        ParseCont::StmtFinallyFinish { try_body, catches, else_body, else_trivia, trailing, finally_trivia } => {
             let fb = pop_block(vals);
             vals.push(ParseVal::Stmt(Box::new(Stmt::Try {
-                try_body, catches, finally_body: Some(fb), finally_trivia,
+                try_body, catches, else_body, else_trivia, finally_body: Some(fb), finally_trivia,
                 trivia: Trivia { trailing, ..Trivia::default() },
             })));
         }

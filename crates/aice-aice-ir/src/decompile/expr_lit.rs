@@ -71,6 +71,38 @@ fn is_py_fstring(raw: &str) -> bool {
     matches!(pfx.as_str(), "f" | "fr" | "rf") && (rest.starts_with('"') || rest.starts_with('\''))
 }
 
+fn unescape_js_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars().peekable();
+    while let Some(c) = chars.next() {
+        if c != '\\' {
+            out.push(c);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => out.push('\\'),
+            Some('"') => out.push('"'),
+            Some('\'') => out.push('\''),
+            Some('n') => out.push('\n'),
+            Some('r') => out.push('\r'),
+            Some('t') => out.push('\t'),
+            Some('0') if chars.peek().is_none_or(|n| !n.is_ascii_digit()) => out.push('\0'),
+            Some('\n') => {}
+            Some('\r') => {
+                if chars.peek() == Some(&'\n') {
+                    chars.next();
+                }
+            }
+            Some(other) => {
+                out.push('\\');
+                out.push(other);
+            }
+            None => out.push('\\'),
+        }
+    }
+    out
+}
+
 pub(crate) fn decompile_string_lit(raw: &str, lang: LanguageId) -> Expr {
     let inner = strip_quotes_lit(raw);
     if lang == LanguageId::Python && is_py_fstring(raw) {
@@ -79,6 +111,10 @@ pub(crate) fn decompile_string_lit(raw: &str, lang: LanguageId) -> Expr {
         parse_dollar_interp(&inner)
     } else if lang == LanguageId::Ruby && raw.starts_with('"') && raw.contains("#{") {
         parse_interp_text(&inner, "#{", "}")
+    } else if matches!(lang, LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::Tsx) {
+        let multiline = inner.contains('\n');
+        let value = if inner.contains('\\') { unescape_js_str(&inner) } else { inner };
+        Expr::Literal(LiteralVal::Str { value, multiline })
     } else {
         let multiline = inner.contains('\n');
         Expr::Literal(LiteralVal::Str { value: inner, multiline })

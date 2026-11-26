@@ -32,7 +32,7 @@ pub(crate) fn step_member_infix(
         return Ok(());
     }
     if kind == TokenKind::QuestionDot && p.eat(TokenKind::LBracket) {
-        stack.push(ParseCont::ExprIndex { object: lhs, is_optional: true });
+        stack.push(ParseCont::ExprIndex { object: lhs, args: Vec::new(), is_optional: true });
         stack.push(ParseCont::Expr(1));
         return Ok(());
     }
@@ -41,13 +41,21 @@ pub(crate) fn step_member_infix(
         TokenKind::ColonColon => MemberKind::Scope,
         _ => MemberKind::Dot,
     };
-    let prop = if kind == TokenKind::Dot && p.eat(TokenKind::Hash) {
-        format!("#{}", p.expect_ident_or_kw("Expected private member name")?.lexeme)
-    } else if kind == TokenKind::Dot && p.peek_kind() == TokenKind::HexColor {
-        p.advance().lexeme
+    let (mut prop, prop_end) = if kind == TokenKind::Dot && p.eat(TokenKind::Hash) {
+        let t = p.expect_ident_or_kw("Expected private member name")?;
+        (format!("#{}", t.lexeme), t.span.end_byte)
+    } else if (kind == TokenKind::Dot && p.peek_kind() == TokenKind::HexColor)
+        || matches!(p.peek_kind(), TokenKind::Nil | TokenKind::Boolean)
+    {
+        let t = p.advance();
+        (t.lexeme, t.span.end_byte)
     } else {
-        p.expect_ident_or_kw("Expected member name")?.lexeme
+        let t = p.expect_ident_or_kw("Expected member name")?;
+        (t.lexeme, t.span.end_byte)
     };
+    if matches!(p.peek_kind(), TokenKind::Question | TokenKind::Bang)
+        && p.peek().span.start_byte == prop_end && p.peek_n(1).kind == TokenKind::LParen
+    { prop.push_str(&p.advance().lexeme); }
     vals.push(ParseVal::Expr(Expr::Member { object: Box::new(lhs), property: prop, kind: mk }));
     Ok(())
 }
@@ -64,7 +72,13 @@ pub(crate) fn parse_new_prefix(
         let prop = p.expect_ident_or_kw("Expected member name")?.lexeme;
         ctor = Expr::Member { object: Box::new(ctor), property: prop, kind: mk };
     }
-    if p.peek_kind() == TokenKind::Lt {
+    if p.eat(TokenKind::Concat) {
+        match &mut ctor {
+            Expr::Ident(s) => s.push_str("<>"),
+            Expr::Member { property, .. } => property.push_str("<>"),
+            _ => {}
+        }
+    } else if p.peek_kind() == TokenKind::Lt {
         let start = p.peek().span.start_byte;
         let (mut depth, mut end) = (0usize, start);
         while !p.at_eof() {
@@ -120,13 +134,14 @@ pub(crate) fn infix_prec(kind: TokenKind) -> Option<(u8, bool)> {
         TokenKind::Lt | TokenKind::LtEq | TokenKind::Gt | TokenKind::GtEq
         | TokenKind::Spaceship | TokenKind::In | TokenKind::Instanceof => Some((10, false)),
         TokenKind::Shl | TokenKind::Shr | TokenKind::Ushr => Some((11, false)),
-        TokenKind::Plus | TokenKind::Minus => Some((12, false)),
+        TokenKind::Plus | TokenKind::Minus | TokenKind::Concat => Some((12, false)),
         TokenKind::Star | TokenKind::Slash | TokenKind::TildeSlash
         | TokenKind::Percent | TokenKind::AmpCaret => Some((13, false)),
         TokenKind::StarStar => Some((14, true)),
         TokenKind::As => Some((15, false)),
         TokenKind::LParen | TokenKind::LBracket | TokenKind::Dot | TokenKind::QuestionDot
-        | TokenKind::ColonColon | TokenKind::PlusPlus | TokenKind::MinusMinus => Some((17, false)),
+        | TokenKind::ColonColon | TokenKind::PlusPlus | TokenKind::MinusMinus
+        | TokenKind::TemplateHead | TokenKind::TemplateNoSubst => Some((17, false)),
         _ => None,
     }
 }
@@ -262,7 +277,8 @@ pub(crate) fn assign_op_from_tok(kind: TokenKind) -> Option<AssignOp> {
 
 pub(crate) fn binary_op_from_tok(kind: TokenKind) -> BinaryOp {
     match kind {
-        TokenKind::Plus => BinaryOp::Add, TokenKind::Minus => BinaryOp::Sub,
+        TokenKind::Plus => BinaryOp::Add, TokenKind::Concat => BinaryOp::Concat,
+        TokenKind::Minus => BinaryOp::Sub,
         TokenKind::Star => BinaryOp::Mul, TokenKind::Slash => BinaryOp::Div,
         TokenKind::TildeSlash => BinaryOp::FloorDiv,
         TokenKind::Percent => BinaryOp::Mod, TokenKind::StarStar => BinaryOp::Pow,

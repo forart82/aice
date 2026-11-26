@@ -45,6 +45,11 @@ pub(crate) fn step_py_task<'a>(
         CTask::PyIfHdr => { let c = st.vals.pop().unwrap(); ec.line(&format!("if {c}:")); }
         CTask::PyElifHdr => { let c = st.vals.pop().unwrap(); ec.line(&format!("elif {c}:")); }
         CTask::PyWhileHdr => { let c = st.vals.pop().unwrap(); ec.line(&format!("while {c}:")); }
+        CTask::PyForHdr("\0raise_from") => {
+            let cause = st.vals.pop().unwrap();
+            let exc = st.vals.pop().unwrap();
+            ec.line(&format!("raise {exc} from {cause}"));
+        }
         CTask::PyForHdr(b) => { let it = st.vals.pop().unwrap(); ec.line(&format!("for {b} in {it}:")); }
         CTask::PyThrow => { let e = st.vals.pop().unwrap(); ec.line(&format!("raise {e}")); }
         CTask::PyMatchStmt { target, cases } => push_py_match_stmt(target, cases, st, tasks),
@@ -114,23 +119,44 @@ fn push_py_stmt<'a>(stmt: &'a Stmt, st: &mut EvalState, tasks: &mut Vec<CTask<'a
             tasks.push(CTask::PyPop); tasks.push(CTask::PyStmtsOrPass(body));
             tasks.push(CTask::PyPush); tasks.push(CTask::PyForHdr(binding)); tasks.push(CTask::EvalExpr(iter));
         }
-        Stmt::Try { try_body, catches, finally_body, finally_trivia, trivia } => {
+        Stmt::Try { try_body, catches, else_body, else_trivia, finally_body, finally_trivia, trivia } => {
             ec.emit_trivia(trivia, CommentStyle::Hash);
             if let Some(fb) = finally_body {
                 tasks.push(CTask::PyPop); tasks.push(CTask::PyStmtsOrPass(fb));
                 tasks.push(CTask::PyPush); tasks.push(CTask::PyLine("finally:")); tasks.push(CTask::PyTrivia(finally_trivia));
             }
+            if let Some(eb) = else_body {
+                tasks.push(CTask::PyPop); tasks.push(CTask::PyStmtsOrPass(eb));
+                tasks.push(CTask::PyPush); tasks.push(CTask::PyLine("else:")); tasks.push(CTask::PyTrivia(else_trivia));
+            }
             for cc in catches.iter().rev() {
-                let p = cc.param.as_deref().filter(|s| *s != "...")
-                    .and_then(|s| s.split(',').next()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("err");
+                let p_opt = cc.param.as_deref().filter(|s| *s != "...")
+                    .and_then(|s| s.split(',').next()).map(str::trim).filter(|s| !s.is_empty());
+                let ty_opt = cc.ty.as_ref().map(|t| emit_type(t, LanguageId::Python));
+                let hdr = match (ty_opt, p_opt) {
+                    (Some(t), Some(p)) => format!("except {t} as {p}:"),
+                    (Some(t), None) => format!("except {t}:"),
+                    (None, Some(p)) => format!("except Exception as {p}:"),
+                    (None, None) => "except:".to_string(),
+                };
                 tasks.push(CTask::PyPop); tasks.push(CTask::PyStmtsOrPass(&cc.body));
-                tasks.push(CTask::PyPush); tasks.push(CTask::PyOwnedLine(format!("except Exception as {p}:")));
+                tasks.push(CTask::PyPush); tasks.push(CTask::PyOwnedLine(hdr));
                 tasks.push(CTask::PyTrivia(&cc.trivia));
             }
             ec.line("try:"); ec.push();
             tasks.push(CTask::PyPop); tasks.push(CTask::PyStmtsOrPass(try_body));
         }
-        Stmt::Throw { expr, .. } => { tasks.push(CTask::PyThrow); tasks.push(CTask::EvalExpr(expr)); }
+        Stmt::Throw { expr, cause: Some(c), trivia } => {
+            ec.emit_trivia(trivia, CommentStyle::Hash);
+            tasks.push(CTask::PyForHdr("\0raise_from"));
+            tasks.push(CTask::EvalExpr(c));
+            tasks.push(CTask::EvalExpr(expr));
+        }
+        Stmt::Throw { expr, cause: None, trivia } => {
+            ec.emit_trivia(trivia, CommentStyle::Hash);
+            tasks.push(CTask::PyThrow);
+            tasks.push(CTask::EvalExpr(expr));
+        }
         Stmt::Break { .. } => ec.line("break"),
         Stmt::Continue { .. } => ec.line("continue"),
         Stmt::Match { target, cases, trivia } => {

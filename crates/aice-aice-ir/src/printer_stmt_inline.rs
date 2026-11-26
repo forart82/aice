@@ -67,11 +67,16 @@ pub(crate) fn push_inline_stmt<'a>(tasks: &mut Vec<PTask<'a>>, st: &'a Stmt, out
             tasks.push(PTask::Expr(iter));
             out.push_str(&format!("for {binding} in "));
         }
-        Stmt::Try { try_body, catches, finally_body, .. } => {
+        Stmt::Try { try_body, catches, else_body, finally_body, .. } => {
             if let Some(fb) = finally_body {
                 tasks.push(PTask::Lit(" }"));
                 tasks.push(PTask::InlineStmts(fb));
                 tasks.push(PTask::Lit(" finally: { "));
+            }
+            if let Some(eb) = else_body {
+                tasks.push(PTask::Lit(" }"));
+                tasks.push(PTask::InlineStmts(eb));
+                tasks.push(PTask::Lit(" else: { "));
             }
             for cc in catches.iter().rev() {
                 let p = match (&cc.param, &cc.ty) {
@@ -117,7 +122,14 @@ pub(crate) fn push_inline_stmt<'a>(tasks: &mut Vec<PTask<'a>>, st: &'a Stmt, out
             tasks.push(PTask::Expr(target));
             out.push_str("match ");
         }
-        Stmt::Throw { expr, .. } => { out.push_str("throw "); tasks.push(PTask::Expr(expr)); }
+        Stmt::Throw { expr, cause, .. } => {
+            if let Some(c) = cause {
+                tasks.push(PTask::Expr(c));
+                tasks.push(PTask::Lit(" from "));
+            }
+            out.push_str("throw ");
+            tasks.push(PTask::Expr(expr));
+        }
         Stmt::Break { label, .. } => {
             if let Some(l) = label { out.push_str(&format!("break {l}")); } else { out.push_str("break"); }
         }

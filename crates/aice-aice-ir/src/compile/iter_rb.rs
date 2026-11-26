@@ -101,11 +101,15 @@ fn push_rb_stmt<'a>(stmt: &'a Stmt, st: &mut EvalState, tasks: &mut Vec<CTask<'a
             tasks.push(CTask::RbStmts(body)); tasks.push(CTask::RbPush);
             tasks.push(CTask::RbForHdr(binding)); tasks.push(CTask::EvalExpr(iter));
         }
-        Stmt::Try { try_body, catches, finally_body, .. } => {
+        Stmt::Try { try_body, catches, else_body, finally_body, .. } => {
             tasks.push(CTask::RbLine("end"));
             if let Some(fb) = finally_body {
                 tasks.push(CTask::RbPop); tasks.push(CTask::RbStmts(fb));
                 tasks.push(CTask::RbPush); tasks.push(CTask::RbLine("ensure"));
+            }
+            if let Some(eb) = else_body {
+                tasks.push(CTask::RbPop); tasks.push(CTask::RbStmts(eb));
+                tasks.push(CTask::RbPush); tasks.push(CTask::RbLine("else"));
             }
             for cc in catches.iter().rev() {
                 let ty_s = cc.ty.as_ref().map(|t| emit_type(t, LanguageId::Ruby)).unwrap_or_default();

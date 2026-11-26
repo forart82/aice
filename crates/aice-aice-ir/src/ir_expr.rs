@@ -117,6 +117,7 @@ pub enum LiteralVal {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BinaryOp {
     Add,
+    Concat,
     Sub,
     Mul,
     Div,

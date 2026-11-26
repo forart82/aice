@@ -82,7 +82,11 @@ pub(crate) fn drain_stmt(s: &mut Stmt, work: &mut Vec<DropWork>) {
             push_expr(value, work);
         }
         Stmt::Return { value, .. } => push_opt_expr(value, work),
-        Stmt::Expr { expr, .. } | Stmt::Throw { expr, .. } => push_expr(expr, work),
+        Stmt::Expr { expr, .. } => push_expr(expr, work),
+        Stmt::Throw { expr, cause, .. } => {
+            push_expr(expr, work);
+            push_opt_expr(cause, work);
+        }
         Stmt::If { cond, then_body, elifs, else_body, .. } => {
             push_expr(cond, work);
             work.extend(std::mem::take(then_body).into_iter().map(DropWork::Stmt));
@@ -107,9 +111,12 @@ pub(crate) fn drain_stmt(s: &mut Stmt, work: &mut Vec<DropWork>) {
             work.extend(std::mem::take(body).into_iter().map(DropWork::Stmt));
         }
         Stmt::Loop { body, .. } => work.extend(std::mem::take(body).into_iter().map(DropWork::Stmt)),
-        Stmt::Try { try_body, catches, finally_body, .. } => {
+        Stmt::Try { try_body, catches, else_body, finally_body, .. } => {
             work.extend(std::mem::take(try_body).into_iter().map(DropWork::Stmt));
             work.extend(std::mem::take(catches).into_iter().map(DropWork::Catch));
+            if let Some(eb) = else_body.take() {
+                work.extend(eb.into_iter().map(DropWork::Stmt));
+            }
             if let Some(fb) = finally_body.take() {
                 work.extend(fb.into_iter().map(DropWork::Stmt));
             }

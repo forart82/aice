@@ -1,3 +1,5 @@
+use aice_lang_registry::LanguageId;
+
 use crate::ir::Trivia;
 use crate::ir_code::{FnBody, MatchCase, Stmt};
 use crate::printer::{PrintCtx, assign_op_str};
@@ -86,7 +88,8 @@ pub(crate) fn print_block_stmts(c: &mut PrintCtx<'_>, init_stmts: &[Stmt], init_
                 Stmt::Destructure { names, is_mut, init, trivia, .. } => {
                     c.emit_trivia(trivia, d);
                     let op = if *is_mut { "::=" } else { ":=" };
-                    c.line_tr(d, &format!("[{}] {op} {}", names.join(", "), print_expr(init)), trivia);
+                    let (l, r) = if c.lang == LanguageId::Kotlin { ("(", ")") } else { ("[", "]") };
+                    c.line_tr(d, &format!("{l}{}{r} {op} {}", names.join(", "), print_expr(init)), trivia);
                 }
                 Stmt::Assign { target, op, value, trivia } => {
                     c.emit_trivia(trivia, d);
@@ -133,16 +136,18 @@ pub(crate) fn print_block_stmts(c: &mut PrintCtx<'_>, init_stmts: &[Stmt], init_
                     c.line_tr(d, "loop:", trivia);
                     tasks.push(Task::Block(body, d + 1));
                 }
-                Stmt::Try { try_body, catches, finally_body, finally_trivia, trivia } => {
+                Stmt::Try { try_body, catches, else_body, else_trivia, finally_body, finally_trivia, trivia } => {
                     c.emit_trivia(trivia, d);
                     c.line_tr(d, "try:", trivia);
                     if let Some(fb) = finally_body { tasks.push(Task::Finally(fb, finally_trivia, d)); }
+                    if let Some(eb) = else_body { tasks.push(Task::Else(eb, else_trivia, d)); }
                     for cc in catches.iter().rev() { tasks.push(Task::Catch(cc, d)); }
                     tasks.push(Task::Block(try_body, d + 1));
                 }
-                Stmt::Throw { expr, trivia } => {
+                Stmt::Throw { expr, cause, trivia } => {
                     c.emit_trivia(trivia, d);
-                    c.line_tr(d, &format!("throw {}", print_expr(expr)), trivia);
+                    let tail = cause.as_ref().map(|e| format!(" from {}", print_expr(e))).unwrap_or_default();
+                    c.line_tr(d, &format!("throw {}{tail}", print_expr(expr)), trivia);
                 }
                 Stmt::Break { label, trivia } => {
                     c.emit_trivia(trivia, d);

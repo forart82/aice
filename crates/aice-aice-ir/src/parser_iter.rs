@@ -22,7 +22,8 @@ pub(crate) enum ParseCont {
     ExprAwait,
     ExprParenClose,
     ExprCallArg { callee: Expr, args: Vec<Expr>, is_optional: bool, is_new: bool },
-    ExprIndex { object: Expr, is_optional: bool },
+    ExprTaggedTemplate { callee: Expr },
+    ExprIndex { object: Expr, args: Vec<Expr>, is_optional: bool },
     ExprTernaryThen { cond: Expr, next_prec: u8 },
     ExprTernaryElse { cond: Expr, then_expr: Expr },
     ExprAssign { target: Expr, op: AssignOp },
@@ -42,6 +43,7 @@ pub(crate) enum ParseCont {
     StmtParse,
     StmtRet,
     StmtThrow,
+    StmtThrowCause { expr: Expr },
     StmtLet { name: String, is_mut: bool, ty: Option<AiceType> },
     StmtDestructure { names: Vec<String>, is_mut: bool },
     StmtExprOrAssign,
@@ -69,14 +71,22 @@ pub(crate) enum ParseCont {
         elif_trivias: Vec<Trivia>, trailing: Option<String>, else_trivia: Trivia,
     },
     StmtTryLoop {
-        try_body: Option<Vec<Stmt>>, catches: Vec<CatchClause>, trailing: Option<String>,
+        try_body: Option<Vec<Stmt>>, catches: Vec<CatchClause>,
+        else_body: Option<Vec<Stmt>>, else_trivia: Trivia, trailing: Option<String>,
     },
     StmtCatchFinish {
-        try_body: Vec<Stmt>, catches: Vec<CatchClause>, trailing: Option<String>,
+        try_body: Vec<Stmt>, catches: Vec<CatchClause>,
+        else_body: Option<Vec<Stmt>>, else_trivia: Trivia, trailing: Option<String>,
         param: Option<String>, ty: Option<AiceType>, ctr: Trivia,
     },
+    StmtTryElseFinish {
+        try_body: Vec<Stmt>, catches: Vec<CatchClause>,
+        else_trivia: Trivia, trailing: Option<String>,
+    },
     StmtFinallyFinish {
-        try_body: Vec<Stmt>, catches: Vec<CatchClause>, trailing: Option<String>, finally_trivia: Trivia,
+        try_body: Vec<Stmt>, catches: Vec<CatchClause>,
+        else_body: Option<Vec<Stmt>>, else_trivia: Trivia,
+        trailing: Option<String>, finally_trivia: Trivia,
     },
     StmtMatchAfterTarget,
     StmtMatchLoop { target: Expr, cases: Vec<MatchCase>, trailing: Option<String>, is_curly: bool },
@@ -108,7 +118,8 @@ pub(crate) fn run_parse_loop(p: &mut Parser<'_>, init: ParseCont) -> Result<Pars
         match cont {
             ParseCont::Expr(_) | ParseCont::ExprInfix(_) | ParseCont::ExprUnary { .. }
             | ParseCont::ExprDblRef { .. } | ParseCont::ExprAwait | ParseCont::ExprParenClose
-            | ParseCont::ExprCallArg { .. } | ParseCont::ExprIndex { .. }
+            | ParseCont::ExprCallArg { .. } | ParseCont::ExprTaggedTemplate { .. }
+            | ParseCont::ExprIndex { .. }
             | ParseCont::ExprTernaryThen { .. } | ParseCont::ExprTernaryElse { .. }
             | ParseCont::ExprAssign { .. } | ParseCont::ExprBinary { .. }
             | ParseCont::ExprTemplate { .. } | ParseCont::ExprArray(_)

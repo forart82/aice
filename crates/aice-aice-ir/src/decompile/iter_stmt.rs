@@ -7,10 +7,10 @@ use crate::decompile::iter_match::{push_match_task, push_select_task};
 use crate::decompile::iter_stmt_cf::{push_if_task, push_ruby_begin, push_try_task};
 use crate::decompile::iter_stmt_fin::push_for_stmt;
 use crate::decompile::op_map::find_assign_parts;
+use crate::decompile::stmt_cf_util::push_var_decl_stmt;
 use crate::decompile::stmt_common::find_body_node;
 use crate::decompile::stmt_for::{extract_c_for_parts, is_single_stmt_node};
-use crate::decompile::stmt_vars::find_var_decls;
-use crate::decompile::trivia::{collect_header_trailing, collect_trivia};
+use crate::decompile::trivia::{collect_header_trailing, collect_trivia, is_comment_kind};
 use crate::ir::Trivia;
 use crate::ir_code::{AssignOp, Expr, Pattern, Stmt};
 use crate::ir_expr::LiteralVal;
@@ -20,7 +20,7 @@ pub(crate) enum StmtFin {
     ForClause { has_cond: bool, has_body: bool, upd_count: usize, is_loop: bool, trivia: Trivia },
     Return(bool),
     ReturnRecord(usize),
-    Throw,
+    Throw(bool),
     ExprStmt,
     Unless { has_else: bool },
     Modifier { is_unless: bool },
@@ -28,6 +28,7 @@ pub(crate) enum StmtFin {
     Loop { has_body: bool, trivia: Trivia },
     For { binding: String, has_body: bool, has_iter: bool, fallback_iter: String, trivia: Trivia },
     VarDecl { name: String, is_mut: bool, ty: Option<AiceType>, has_init: bool },
+    Destructure { names: Vec<String>, is_mut: bool, has_init: bool },
     Assign { op: AssignOp },
     If {
         elif_count: usize,
@@ -38,7 +39,7 @@ pub(crate) enum StmtFin {
         has_thens: Vec<bool>,
         has_else_body: bool,
     },
-    Try { catch_len: usize, has_finally: bool, finally_trivia: Trivia, trivia: Trivia },
+    Try { catch_len: usize, has_else: bool, else_trivia: Trivia, has_finally: bool, finally_trivia: Trivia, trivia: Trivia },
     Catch { param: Option<String>, ty: Option<AiceType>, has_body: bool, trivia: Trivia },
     Match { is_expr: bool, case_len: usize, hdr_tr: Option<String> },
     MatchArm { pat: Pattern, has_guard: bool, trivia: Trivia },
@@ -131,10 +132,10 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 if let Some(c) = first { env.tasks.push(DTask::Expr(c)); }
             } else if raw.starts_with("throw") {
                 if let Some(c) = first {
-                    env.tasks.push(DTask::FinishStmt(StmtFin::Throw));
+                    env.tasks.push(DTask::FinishStmt(StmtFin::Throw(false)));
                     env.tasks.push(DTask::Expr(c));
                 } else {
-                    env.stmts.push(Stmt::Throw { expr: Expr::Ident("err".into()), trivia: Trivia::default() });
+                    env.stmts.push(Stmt::Throw { expr: Expr::Ident("err".into()), cause: None, trivia: Trivia::default() });
                 }
             } else if raw.starts_with("break") {
                 env.stmts.push(Stmt::Break { label: None, trivia: Trivia::default() });
@@ -211,11 +212,18 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "try_statement" | "try_expression" => push_try_task(env, node),
         "rethrow_statement" => env.stmts.push(Stmt::Expr { expr: Expr::Ident("rethrow".into()), trivia: Trivia::default() }),
         "throw_statement" | "throw_expression" | "raise_statement" => {
-            if let Some(c) = named_children(node).into_iter().next() {
-                env.tasks.push(DTask::FinishStmt(StmtFin::Throw));
+            let cause = (env.lang == LanguageId::Python)
+                .then(|| node.child_by_field_name("cause"))
+                .flatten();
+            let exc = named_children(node)
+                .into_iter()
+                .find(|c| Some(*c) != cause && !is_comment_kind(c.kind()));
+            if let Some(c) = exc {
+                env.tasks.push(DTask::FinishStmt(StmtFin::Throw(cause.is_some())));
+                if let Some(ca) = cause { env.tasks.push(DTask::Expr(ca)); }
                 env.tasks.push(DTask::Expr(c));
             } else {
-                env.stmts.push(Stmt::Throw { expr: Expr::Ident("err".into()), trivia: Trivia::default() });
+                env.stmts.push(Stmt::Throw { expr: Expr::Ident("err".into()), cause: None, trivia: Trivia::default() });
             }
         }
         "break_statement" | "break_expression" | "break" => env.stmts.push(Stmt::Break { label: None, trivia: Trivia::default() }),
@@ -226,47 +234,7 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "lexical_declaration" | "variable_declaration" | "let_declaration"
         | "short_var_declaration" | "local_variable_declaration" | "local_declaration_statement"
         | "initialized_variable_definition" | "property_declaration" | "declaration" => {
-            let decls = find_var_decls(node, env.src, env.lang);
-            let split_tr = if decls.len() > 1
-                && matches!(env.tasks.last(), Some(DTask::AttachTrivia(_)))
-                && let Some(DTask::AttachTrivia(mut tr)) = env.tasks.pop()
-            {
-                let lead = Trivia {
-                    leading: std::mem::take(&mut tr.leading),
-                    trailing: None,
-                    blank_lines_before: std::mem::take(&mut tr.blank_lines_before),
-                };
-                let trail = Trivia {
-                    leading: Vec::new(),
-                    trailing: tr.trailing.take(),
-                    blank_lines_before: 0,
-                };
-                Some((lead, trail))
-            } else {
-                None
-            };
-            if let Some((_, ref trail)) = split_tr
-                && !trail.is_empty()
-            {
-                env.tasks.push(DTask::AttachTrivia(trail.clone()));
-            }
-            for (idx, (name, is_mut, ty, init_n)) in decls.into_iter().enumerate().rev() {
-                if idx == 0
-                    && let Some((ref lead, _)) = split_tr
-                    && !lead.is_empty()
-                {
-                    env.tasks.push(DTask::AttachTrivia(lead.clone()));
-                }
-                env.tasks.push(DTask::FinishStmt(StmtFin::VarDecl {
-                    name,
-                    is_mut,
-                    ty,
-                    has_init: init_n.is_some(),
-                }));
-                if let Some(v) = init_n {
-                    env.tasks.push(DTask::Expr(v));
-                }
-            }
+            push_var_decl_stmt(env, node);
         }
         "assignment_expression" | "augmented_assignment_expression"
         | "compound_assignment_expr" | "augmented_assignment"

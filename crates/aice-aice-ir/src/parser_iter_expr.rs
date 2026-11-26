@@ -81,10 +81,22 @@ pub(crate) fn step_expr_cont(
                 }));
             }
         }
-        ParseCont::ExprIndex { object, is_optional } => {
-            let idx = pop_expr(vals);
-            p.expect(TokenKind::RBracket, "Expected ']'")?;
-            vals.push(ParseVal::Expr(Expr::Index { object: Box::new(object), index: Box::new(idx), is_optional }));
+        ParseCont::ExprTaggedTemplate { callee } => {
+            let tpl = pop_expr(vals);
+            vals.push(ParseVal::Expr(Expr::Call { callee: Box::new(callee), args: vec![tpl], is_optional: false, is_tagged: true, is_new: false }));
+        }
+        ParseCont::ExprIndex { object, mut args, is_optional } => {
+            args.push(pop_expr(vals));
+            if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RBracket && !p.at_eof() {
+                stack.push(ParseCont::ExprIndex { object, args, is_optional });
+                stack.push(ParseCont::Expr(1));
+            } else {
+                p.expect(TokenKind::RBracket, "Expected ']'")?;
+                let idx = if args.len() == 1 { args.pop().unwrap() } else {
+                    Expr::Call { callee: Box::new(Expr::Ident("\0idx".into())), args, is_optional: false, is_tagged: false, is_new: false }
+                };
+                vals.push(ParseVal::Expr(Expr::Index { object: Box::new(object), index: Box::new(idx), is_optional }));
+            }
         }
         ParseCont::ExprTernaryThen { cond, next_prec } => {
             let then_expr = pop_expr(vals);
@@ -191,6 +203,10 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             let name = p.expect_ident_or_kw("Expected identifier after '$'")?.lexeme;
             vals.push(ParseVal::Expr(Expr::Ident(format!("${name}"))));
         }
+        TokenKind::Colon if tok.span.end_byte == p.peek_n(1).span.start_byte && (p.peek_n(1).kind == TokenKind::Ident || p.peek_n(1).is_keyword()) => {
+            p.advance();
+            vals.push(ParseVal::Expr(Expr::Ident(format!(":{}", p.advance().lexeme))));
+        }
         TokenKind::Ident if tok.lexeme == "new" && p.peek_n(1).kind == TokenKind::Ident => {
             parse_new_prefix(p, stack, vals)?;
         }
@@ -232,7 +248,17 @@ fn step_infix(
         }
         TokenKind::LBracket => {
             p.advance();
-            stack.push(ParseCont::ExprIndex { object: lhs, is_optional: false });
+            stack.push(ParseCont::ExprIndex { object: lhs, args: Vec::new(), is_optional: false });
+            stack.push(ParseCont::Expr(1));
+        }
+        TokenKind::TemplateNoSubst => {
+            let tpl = Expr::Template { quasis: vec![p.advance().lexeme], exprs: Vec::new() };
+            vals.push(ParseVal::Expr(Expr::Call { callee: Box::new(lhs), args: vec![tpl], is_optional: false, is_tagged: true, is_new: false }));
+        }
+        TokenKind::TemplateHead => {
+            let head = p.advance();
+            stack.push(ParseCont::ExprTaggedTemplate { callee: lhs });
+            stack.push(ParseCont::ExprTemplate { quasis: vec![head.lexeme], exprs: Vec::new() });
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon => {

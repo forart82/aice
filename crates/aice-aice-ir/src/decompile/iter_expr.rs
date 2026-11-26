@@ -2,7 +2,8 @@ use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
-use crate::decompile::expr_lit::{decompile_string_lit, parse_interp_text};
+use crate::decompile::expr_common::{push_index_task, push_template_task};
+use crate::decompile::expr_lit::decompile_string_lit;
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task};
 use crate::decompile::iter_expr_fin::{
@@ -23,8 +24,10 @@ pub(crate) enum ObjSlot {
 pub(crate) enum ExprFin {
     Conditional,
     Member { property: String, kind: MemberKind },
-    Index { is_optional: bool },
-    Call { has_callee_expr: bool, callee_name: String, recv_prop: Option<String>, argc: usize, has_ruby_blk: bool, is_optional: bool, is_new: bool },
+    Index { is_optional: bool, argc: usize },
+    Call { has_callee_expr: bool, callee_name: String, recv_prop: Option<String>, recv_safe: bool, argc: usize, has_ruby_blk: bool, is_optional: bool, is_new: bool },
+    Template { quasis: Vec<String> },
+    TaggedTemplate,
     RubyNilCheck,
     Binary(BinaryOp),
     BinaryIdentRhs(BinaryOp, String),
@@ -100,10 +103,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         | "char_literal" | "character_literal" => {
             env.exprs.push(decompile_string_lit(raw, env.lang));
         }
-        "template_string" => {
-            let inner = raw.strip_prefix('`').and_then(|s| s.strip_suffix('`')).unwrap_or(raw);
-            env.exprs.push(parse_interp_text(inner, "${", "}"));
-        }
+        "template_string" => push_template_task(env, node, false),
         "identifier" | "type_identifier" | "property_identifier" | "field_identifier"
         | "private_property_identifier" | "simple_identifier" | "this" | "self"
         | "super" | "variable_name" | "constant" | "shorthand_property_identifier"
@@ -170,27 +170,20 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 let last = kids[kids.len() - 1];
                 let property = node_text(last, env.src).trim().trim_start_matches('.').to_string();
                 let gap = env.src.get(kids[0].end_byte()..last.start_byte()).unwrap_or("");
-                let is_opt = child_by_kind(node, "optional_chain").is_some() || gap.contains("?.");
+                let is_opt = child_by_kind(node, "optional_chain").is_some()
+                    || gap.contains("?.")
+                    || (env.lang == LanguageId::Ruby && gap.contains("&."))
+                    || (env.lang == LanguageId::Php && gap.contains("?->"));
                 let kind = if is_opt { MemberKind::SafeNav } else if gap.contains("::") { MemberKind::Scope } else { MemberKind::Dot };
                 env.tasks.push(DTask::FinishExpr(ExprFin::Member { property, kind }));
                 env.tasks.push(DTask::Expr(kids[0]));
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }
         "subscript_expression" | "index_expression" | "element_access_expression" | "array_access" => {
-            let is_optional = child_by_kind(node, "optional_chain").is_some();
-            let (obj_n, idx_n) = match (node.child_by_field_name("object"), node.child_by_field_name("index")) {
-                (Some(o), Some(i)) => (Some(o), Some(i)),
-                _ => {
-                    let kids: Vec<_> = named_children(node).into_iter()
-                        .filter(|c| c.kind() != "optional_chain").collect();
-                    (kids.first().copied(), kids.get(1).copied())
-                }
-            };
-            if let (Some(o), Some(i)) = (obj_n, idx_n) {
-                env.tasks.push(DTask::FinishExpr(ExprFin::Index { is_optional }));
-                env.tasks.push(DTask::Expr(i));
-                env.tasks.push(DTask::Expr(o));
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            push_index_task(env, node, raw);
+        }
+        "conditional_access_expression" if child_by_kind(node, "element_binding_expression").is_some() => {
+            push_index_task(env, node, raw);
         }
         "call_expression" | "call" | "invocation_expression" | "method_invocation"
         | "function_call_expression" | "member_call_expression" | "object_creation_expression"

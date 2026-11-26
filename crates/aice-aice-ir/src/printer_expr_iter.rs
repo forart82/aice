@@ -101,7 +101,12 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             tasks.push(PTask::Expr(e));
             if wrap { out.push('('); }
         }
-        Expr::Call { callee, args, is_optional, is_new, .. } => {
+        Expr::Call { callee, args, is_optional, is_tagged, is_new } => {
+            if *is_tagged && args.len() == 1 {
+                tasks.push(PTask::Expr(&args[0]));
+                tasks.push(PTask::Expr(callee));
+                return;
+            }
             tasks.push(PTask::Lit(")"));
             for (i, a) in args.iter().enumerate().rev() {
                 tasks.push(PTask::Expr(a));
@@ -118,7 +123,16 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
         }
         Expr::Index { object, index, is_optional } => {
             tasks.push(PTask::Lit("]"));
-            tasks.push(PTask::Expr(index));
+            if let Expr::Call { callee, args, .. } = index.as_ref()
+                && matches!(callee.as_ref(), Expr::Ident(s) if s == "\0idx")
+            {
+                for (i, a) in args.iter().enumerate().rev() {
+                    tasks.push(PTask::Expr(a));
+                    if i > 0 { tasks.push(PTask::Lit(", ")); }
+                }
+            } else {
+                tasks.push(PTask::Expr(index));
+            }
             tasks.push(PTask::Lit(if *is_optional { "?.[" } else { "[" }));
             tasks.push(PTask::Expr(object));
         }

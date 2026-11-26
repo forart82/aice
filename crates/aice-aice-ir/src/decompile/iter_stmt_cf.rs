@@ -102,6 +102,8 @@ pub(crate) fn push_try_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     let try_bn = find_body_node(node);
     let try_hdr = try_bn.and_then(|b| collect_header_trailing(b, env.src, env.opts));
     let mut catches = Vec::new();
+    let mut else_bn = None;
+    let mut else_trivia = Trivia::default();
     let mut finally_bn = None;
     let mut finally_trivia = Trivia::default();
     if env.lang == LanguageId::Dart {
@@ -141,6 +143,10 @@ pub(crate) fn push_try_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         for ch in named_children(node) {
             if matches!(ch.kind(), "catch_clause" | "except_clause" | "catch_block") {
                 catches.push(find_catch_parts(ch, env.src, env.lang, env.opts));
+            } else if ch.kind() == "else_clause" {
+                let ebn = find_body_node(ch);
+                else_trivia.trailing = ebn.and_then(|b| collect_header_trailing(b, env.src, env.opts));
+                else_bn = ebn;
             } else if matches!(ch.kind(), "finally_clause" | "finally_block") {
                 let fbn = find_body_node(ch);
                 finally_trivia.trailing = fbn.and_then(|b| collect_header_trailing(b, env.src, env.opts));
@@ -150,11 +156,14 @@ pub(crate) fn push_try_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     }
     env.tasks.push(DTask::FinishStmt(StmtFin::Try {
         catch_len: catches.len(),
+        has_else: else_bn.is_some(),
+        else_trivia,
         has_finally: finally_bn.is_some(),
         finally_trivia,
         trivia: Trivia { trailing: try_hdr, ..Trivia::default() },
     }));
     if let Some(fb) = finally_bn { env.tasks.push(DTask::Block(fb)); }
+    if let Some(eb) = else_bn { env.tasks.push(DTask::Block(eb)); }
     for (param, ty, tr, bn) in catches.into_iter().rev() {
         env.tasks.push(DTask::FinishStmt(StmtFin::Catch { param, ty, has_body: bn.is_some(), trivia: tr }));
         if let Some(b) = bn { env.tasks.push(DTask::Block(b)); }
@@ -168,21 +177,23 @@ pub(crate) fn push_ruby_begin<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     for ch in named_children(node) { if ch.kind() != "body_statement" { nodes_to_scan.push(ch); } }
     let mut try_nodes = Vec::new();
     let mut rescues = Vec::new();
+    let mut else_n = None;
     let mut ensure_n = None;
     for ch in nodes_to_scan {
         if is_comment_kind(ch.kind()) { continue; }
         match ch.kind() {
             "rescue" => rescues.push(ch),
             "ensure" => ensure_n = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "then")).or(Some(ch)),
-            "else" => {}
+            "else" => else_n = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "then")).or(Some(ch)),
             _ => try_nodes.push(ch),
         }
     }
     env.tasks.push(DTask::FinishStmt(StmtFin::Try {
-        catch_len: rescues.len(), has_finally: ensure_n.is_some(),
-        finally_trivia: Trivia::default(), trivia: Trivia::default(),
+        catch_len: rescues.len(), has_else: else_n.is_some(), else_trivia: Trivia::default(),
+        has_finally: ensure_n.is_some(), finally_trivia: Trivia::default(), trivia: Trivia::default(),
     }));
     if let Some(eb) = ensure_n { env.tasks.push(DTask::Block(eb)); }
+    if let Some(elb) = else_n { env.tasks.push(DTask::Block(elb)); }
     for ch in rescues.into_iter().rev() {
         let var_node = ch.child_by_field_name("variable").or_else(|| child_by_kind(ch, "exception_variable"));
         let param = var_node.and_then(|v| named_children(v).into_iter().last().or(Some(v)))

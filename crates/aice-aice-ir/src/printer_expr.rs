@@ -54,7 +54,7 @@ fn bin_prec(op: BinaryOp) -> u8 {
         BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq | BinaryOp::Spaceship
         | BinaryOp::In | BinaryOp::NotIn | BinaryOp::Is | BinaryOp::IsNot | BinaryOp::Instanceof => 10,
         BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Ushr => 11,
-        BinaryOp::Add | BinaryOp::Sub => 12,
+        BinaryOp::Add | BinaryOp::Concat | BinaryOp::Sub => 12,
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::FloorDiv | BinaryOp::Mod | BinaryOp::BitClear => 13,
         BinaryOp::Pow => 14,
         BinaryOp::As => 15,
@@ -87,7 +87,7 @@ pub(crate) fn needs_binary_parens(child: &Expr, parent_op: BinaryOp, is_right: b
 
 pub(crate) fn bin_op_str(op: BinaryOp) -> &'static str {
     match op {
-        BinaryOp::Add => "+", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
+        BinaryOp::Add => "+", BinaryOp::Concat => "<>", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
         BinaryOp::Div => "/", BinaryOp::FloorDiv => "~/", BinaryOp::Mod => "%", BinaryOp::Pow => "**",
         BinaryOp::Eq => "==", BinaryOp::NotEq => "!=",
         BinaryOp::Lt => "<", BinaryOp::LtEq => "<=", BinaryOp::Gt => ">", BinaryOp::GtEq => ">=",

@@ -2,7 +2,7 @@ use aice_lang_registry::LanguageId;
 
 use crate::compile::expr_emit::{ExprEmitCtx, assign_native, bin_op_native, emit_ident, emit_lit, is_str_like};
 use crate::compile::iter_emit::{CTask, EvalState, body_kind_of};
-use crate::compile::iter_expr_call::{make_inline_jsx, push_eval_call};
+use crate::compile::iter_expr_call::{finish_make_call, make_inline_jsx, push_eval_call, push_eval_index};
 use crate::compile::iter_expr_fmt::{
     format_closure, format_closure_param, format_record_entry, format_template,
     needs_walrus_parens, unary_op_native,
@@ -57,6 +57,7 @@ pub(crate) fn step_expr_task<'a>(
                 (BinaryOp::Or, _) => "||",
                 (BinaryOp::Eq, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Php) => "===",
                 (BinaryOp::NotEq, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Php) => "!==",
+                (BinaryOp::Concat, LanguageId::Php) => ".",
                 (BinaryOp::Add, LanguageId::Php) if is_str => ".",
                 (BinaryOp::FloorDiv, LanguageId::Python) => "//",
                 (BinaryOp::FloorDiv, LanguageId::Dart) => "~/",
@@ -134,16 +135,24 @@ pub(crate) fn step_expr_task<'a>(
         CTask::MakeIndex { is_optional } => {
             let idx = st.vals.pop().unwrap();
             let obj = st.vals.pop().unwrap();
-            let op = if is_optional && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) { "?." } else { "" };
+            let op = if !is_optional { "" }
+                else if lang == LanguageId::CSharp { "?" }
+                else if matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) { "?." }
+                else { "" };
             st.vals.push(format!("{obj}{op}[{idx}]"));
         }
         CTask::MakeMember { property, kind } => {
             let obj = st.vals.pop().unwrap();
-            if lang == LanguageId::Php && obj == "$this" { st.vals.push(format!("$this->{property}")); return; }
-            if lang == LanguageId::Ruby && obj == "self" { st.vals.push(format!("@{property}")); return; }
+            if lang == LanguageId::Ruby && obj == "self" && kind == MemberKind::Dot {
+                st.vals.push(format!("@{property}"));
+                return;
+            }
             let sep = match kind {
+                MemberKind::SafeNav if lang == LanguageId::Ruby => "&.",
+                MemberKind::SafeNav if lang == LanguageId::Php => "?->",
                 MemberKind::SafeNav => "?.",
                 MemberKind::Scope if matches!(lang, LanguageId::Rust | LanguageId::Cpp | LanguageId::Php) => "::",
+                MemberKind::Dot if lang == LanguageId::Php => "->",
                 MemberKind::Scope | MemberKind::Dot => ".",
             };
             st.vals.push(format!("{obj}{sep}{property}"));
@@ -155,15 +164,7 @@ pub(crate) fn step_expr_task<'a>(
         }
         CTask::MakeAwait => { let v = st.vals.pop().unwrap(); st.vals.push(format!("await {v}")); }
         CTask::MakeCall { callee_lit, class_new, n_args, is_optional, is_new } => {
-            let start = st.vals.len() - n_args;
-            let ps: Vec<String> = st.vals.drain(start..).collect();
-            if let Some(nm) = class_new { st.vals.push(format!("new {nm}({})", ps.join(", "))); return; }
-            let cs = match callee_lit { Some(s) => s, None => st.vals.pop().unwrap() };
-            let op = if is_optional && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) { "?." } else { "" };
-            let pfx = if is_new && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::CSharp | LanguageId::Java | LanguageId::Php | LanguageId::Cpp) {
-                "new "
-            } else { "" };
-            st.vals.push(format!("{pfx}{cs}{op}({})", ps.join(", ")));
+            finish_make_call(callee_lit, class_new, n_args, is_optional, is_new, lang, st);
         }
         CTask::MakeRustStructCall => {
             let rec = st.vals.pop().unwrap();
@@ -237,16 +238,12 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             tasks.push(CTask::EvalExpr(cond));
         }
         Expr::PostfixTry(inner) => { tasks.push(CTask::MakePostfixTry); tasks.push(CTask::EvalExpr(inner)); }
-        Expr::Call { callee, args, is_optional, is_new, .. } => push_eval_call(callee, args, *is_optional, *is_new, lang, ectx, tasks),
+        Expr::Call { callee, args, is_optional, is_tagged, is_new } => push_eval_call(callee, args, (*is_optional, *is_tagged, *is_new), lang, ectx, tasks),
         Expr::Member { object, property, kind } => {
             tasks.push(CTask::MakeMember { property, kind: *kind });
             tasks.push(CTask::EvalExpr(object));
         }
-        Expr::Index { object, index, is_optional } => {
-            tasks.push(CTask::MakeIndex { is_optional: *is_optional });
-            tasks.push(CTask::EvalExpr(index));
-            tasks.push(CTask::EvalExpr(object));
-        }
+        Expr::Index { object, index, is_optional } => push_eval_index(object, index, *is_optional, tasks),
         Expr::Array(items) => {
             tasks.push(CTask::MakeArray(items.len()));
             for it in items.iter().rev() { tasks.push(CTask::EvalExpr(it)); }

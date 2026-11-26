@@ -89,7 +89,8 @@ pub(crate) fn find_assign_parts<'a>(
 
 pub(crate) fn map_binary_op(op_str: &str, lang: LanguageId) -> Option<BinaryOp> {
     Some(match op_str {
-        "+" | "." if op_str == "+" || lang == LanguageId::Php => BinaryOp::Add,
+        "+" => BinaryOp::Add,
+        "." if lang == LanguageId::Php => BinaryOp::Concat,
         "-" => BinaryOp::Sub,
         "*" => BinaryOp::Mul,
         "/" => BinaryOp::Div,

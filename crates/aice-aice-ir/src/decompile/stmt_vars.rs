@@ -7,23 +7,37 @@ use crate::decompile::trivia::{collect_header_trailing, is_comment_kind};
 use crate::ir::{TranspileOpts, Trivia};
 use crate::ir_types::AiceType;
 
-fn unwrap_c_decl_name(mut decl: Node<'_>, src: &str) -> String {
+fn unwrap_c_decl(mut decl: Node<'_>, src: &str) -> (String, String) {
+    let mut ptrs = String::new();
     loop {
-        if matches!(
-            decl.kind(),
-            "init_declarator" | "pointer_declarator" | "array_declarator"
-        ) {
-            if let Some(inner) = decl.child_by_field_name("declarator") {
-                decl = inner;
-                continue;
+        match decl.kind() {
+            "init_declarator" | "array_declarator" => {
+                if let Some(inner) = decl.child_by_field_name("declarator") {
+                    decl = inner;
+                    continue;
+                }
             }
-        } else if matches!(
-            decl.kind(),
-            "reference_declarator" | "parenthesized_declarator"
-        ) && let Some(inner) = named_children(decl).into_iter().last()
-        {
-            decl = inner;
-            continue;
+            "pointer_declarator" => {
+                ptrs.push('*');
+                if let Some(inner) = decl.child_by_field_name("declarator") {
+                    decl = inner;
+                    continue;
+                }
+            }
+            "reference_declarator" => {
+                ptrs.push_str(if node_text(decl, src).trim_start().starts_with("&&") { "&&" } else { "&" });
+                if let Some(inner) = named_children(decl).into_iter().last() {
+                    decl = inner;
+                    continue;
+                }
+            }
+            "parenthesized_declarator" => {
+                if let Some(inner) = named_children(decl).into_iter().last() {
+                    decl = inner;
+                    continue;
+                }
+            }
+            _ => break,
         }
         break;
     }
@@ -31,11 +45,8 @@ fn unwrap_c_decl_name(mut decl: Node<'_>, src: &str) -> String {
         .trim()
         .trim_start_matches(['*', '&'])
         .trim();
-    if txt.is_empty() {
-        "x".to_string()
-    } else {
-        txt.to_string()
-    }
+    let name = if txt.is_empty() { "x".to_string() } else { txt.to_string() };
+    (name, ptrs)
 }
 
 fn find_eq_rhs<'a>(decl: Node<'a>) -> Option<Node<'a>> {
@@ -118,13 +129,20 @@ pub(crate) fn find_var_decls<'a>(
         if ds.is_empty() { vec![inner_node] } else { ds }
     };
     let shared_ty = field_text(inner_node, "type", src).map(|t| map_type_str(t, lang));
+    let c_decl_base = (inner_node.kind() == "declaration").then(|| {
+        let base = field_text(inner_node, "type", src)?.trim();
+        let has_const = named_children(inner_node)
+            .into_iter()
+            .any(|c| c.kind() == "type_qualifier" && node_text(c, src).trim() == "const");
+        Some((base.to_string(), has_const))
+    }).flatten();
     decls
         .into_iter()
         .map(|decl| {
-            let name = if inner_node.kind() == "declaration" {
-                unwrap_c_decl_name(decl, src)
+            let (name, c_ptrs) = if inner_node.kind() == "declaration" {
+                unwrap_c_decl(decl, src)
             } else {
-                field_text(decl, "name", src)
+                let nm = field_text(decl, "name", src)
                     .or_else(|| field_text(decl, "pattern", src))
                     .or_else(|| field_text(decl, "declarator", src))
                     .or_else(|| {
@@ -146,20 +164,28 @@ pub(crate) fn find_var_decls<'a>(
                     .trim()
                     .trim_start_matches(['*', '&'])
                     .trim()
-                    .to_string()
+                    .to_string();
+                (nm, String::new())
             };
-            let ty = field_text(decl, "type", src)
-                .map(|t| map_type_str(t, lang))
-                .or_else(|| {
-                    if is_kt_prop {
-                        child_by_kind(decl, "user_type")
-                            .or_else(|| child_by_kind(decl, "type"))
-                            .map(|t| map_type_str(node_text(t, src), lang))
-                    } else {
-                        None
-                    }
-                })
-                .or_else(|| shared_ty.clone());
+            let ty = if !c_ptrs.is_empty()
+                && let Some((ref base, has_const)) = c_decl_base
+            {
+                let pfx = if has_const && !base.starts_with("const ") { "const " } else { "" };
+                Some(map_type_str(&format!("{pfx}{base}{c_ptrs}"), lang))
+            } else {
+                field_text(decl, "type", src)
+                    .map(|t| map_type_str(t, lang))
+                    .or_else(|| {
+                        if is_kt_prop {
+                            child_by_kind(decl, "user_type")
+                                .or_else(|| child_by_kind(decl, "type"))
+                                .map(|t| map_type_str(node_text(t, src), lang))
+                        } else {
+                            None
+                        }
+                    })
+                    .or_else(|| shared_ty.clone())
+            };
             let init = decl
                 .child_by_field_name("value")
                 .or_else(|| decl.child_by_field_name("right"))
@@ -198,8 +224,17 @@ pub(crate) fn find_catch_parts<'a>(
     lang: LanguageId,
     opts: &TranspileOpts,
 ) -> (Option<String>, Option<AiceType>, Trivia, Option<Node<'a>>) {
-    let mut param = field_text(ch, "parameter", src).map(str::to_string);
-    let mut ty = field_text(ch, "type", src).map(|t| map_type_str(t, lang));
+    let (mut param, mut ty) = if lang == LanguageId::Python && ch.kind() == "except_clause" {
+        crate::decompile::stmt_cf_util::extract_py_except_parts(ch, src)
+    } else {
+        let p = field_text(ch, "parameter", src)
+            .or_else(|| (lang == LanguageId::Php).then(|| field_text(ch, "name", src)).flatten())
+            .or_else(|| (lang == LanguageId::Php).then(|| child_by_kind(ch, "variable_name").map(|n| node_text(n, src))).flatten())
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+        let t = field_text(ch, "type", src).map(|t| map_type_str(t, lang));
+        (p, t)
+    };
     if param.is_none() {
         if let Some(pl) = child_by_kind(ch, "parameter_list") {
             if let Some(pd) = named_children(pl).into_iter().find(|n| n.kind() == "parameter_declaration") {

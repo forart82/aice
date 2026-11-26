@@ -14,7 +14,7 @@ pub enum TokenKind {
     If, Elif, Else, Match, For, In, Instanceof, While, Loop,
     Ret, Try, Catch, Finally, Throw, Break, Continue, Pass, And, Or, Not,
     // Operators & Delimiters
-    Plus, Minus, PlusPlus, MinusMinus, Tilde, Star, Slash, TildeSlash, Percent, StarStar,
+    Plus, Minus, Concat, PlusPlus, MinusMinus, Tilde, Star, Slash, TildeSlash, Percent, StarStar,
     Amp, AmpCaret, Caret, Pipe, Shl, Shr, Ushr, EqEq, NotEq, Lt, LtEq, Gt, GtEq, Spaceship,
     AmpAmp, PipePipe, QuestionQuestion, QuestionDot,
     Equal, PlusEq, MinusEq, StarEq, SlashEq, SlashSlashEq, TildeSlashEq, PercentEq, StarStarEq,
@@ -39,6 +39,7 @@ pub(crate) const MULTI_PUNCT: &[(&str, TokenKind)] = &[
     ("&^=", TokenKind::AmpCaretEq),
     ("~/=", TokenKind::TildeSlashEq),
     ("<=>", TokenKind::Spaceship),
+    ("<>", TokenKind::Concat),
     ("::", TokenKind::ColonColon),
     (":=", TokenKind::ColonEqual),
     ("->", TokenKind::Arrow),

@@ -8,7 +8,7 @@ pub(crate) enum StmtFinish {
     Assign { op: AssignOp, trivia: Trivia },
     Return { has_val: bool, trivia: Trivia },
     Expr(Trivia),
-    Throw(Trivia),
+    Throw { has_cause: bool, trivia: Trivia },
     If {
         then_len: usize,
         elif_lens: Vec<usize>,
@@ -24,6 +24,8 @@ pub(crate) enum StmtFinish {
     Try {
         try_len: usize,
         catch_len: usize,
+        else_len: Option<usize>,
+        else_trivia: Trivia,
         finally_len: Option<usize>,
         finally_trivia: Trivia,
         trivia: Trivia,
@@ -61,8 +63,12 @@ pub(crate) fn push_stmt<'a>(env: &mut CloneEnv<'a>, s: &'a Stmt) {
             env.tasks.push(CloneTask::FinishStmt(StmtFinish::Expr(trivia.clone())));
             env.tasks.push(CloneTask::Expr(expr));
         }
-        Stmt::Throw { expr, trivia } => {
-            env.tasks.push(CloneTask::FinishStmt(StmtFinish::Throw(trivia.clone())));
+        Stmt::Throw { expr, cause, trivia } => {
+            env.tasks.push(CloneTask::FinishStmt(StmtFinish::Throw {
+                has_cause: cause.is_some(),
+                trivia: trivia.clone(),
+            }));
+            if let Some(c) = cause { env.tasks.push(CloneTask::Expr(c)); }
             env.tasks.push(CloneTask::Expr(expr));
         }
         Stmt::If { cond, then_body, elifs, elif_trivias, else_body, else_trivia, trivia } => {
@@ -105,16 +111,21 @@ pub(crate) fn push_stmt<'a>(env: &mut CloneEnv<'a>, s: &'a Stmt) {
             env.tasks.push(CloneTask::FinishStmt(StmtFinish::Loop { len: body.len(), trivia: trivia.clone() }));
             for st in body.iter().rev() { env.tasks.push(CloneTask::Stmt(st)); }
         }
-        Stmt::Try { try_body, catches, finally_body, finally_trivia, trivia } => {
+        Stmt::Try { try_body, catches, else_body, else_trivia, finally_body, finally_trivia, trivia } => {
             env.tasks.push(CloneTask::FinishStmt(StmtFinish::Try {
                 try_len: try_body.len(),
                 catch_len: catches.len(),
+                else_len: else_body.as_ref().map(Vec::len),
+                else_trivia: else_trivia.clone(),
                 finally_len: finally_body.as_ref().map(Vec::len),
                 finally_trivia: finally_trivia.clone(),
                 trivia: trivia.clone(),
             }));
             if let Some(fb) = finally_body {
                 for st in fb.iter().rev() { env.tasks.push(CloneTask::Stmt(st)); }
+            }
+            if let Some(eb) = else_body {
+                for st in eb.iter().rev() { env.tasks.push(CloneTask::Stmt(st)); }
             }
             for cc in catches.iter().rev() { env.tasks.push(CloneTask::Catch(cc)); }
             for st in try_body.iter().rev() { env.tasks.push(CloneTask::Stmt(st)); }
@@ -148,7 +159,11 @@ pub(crate) fn finish_stmt(env: &mut CloneEnv<'_>, f: StmtFinish) {
             Stmt::Return { value, trivia }
         }
         StmtFinish::Expr(trivia) => Stmt::Expr { expr: env.exprs.pop().expect("stmt expr"), trivia },
-        StmtFinish::Throw(trivia) => Stmt::Throw { expr: env.exprs.pop().expect("throw expr"), trivia },
+        StmtFinish::Throw { has_cause, trivia } => {
+            let cause = if has_cause { Some(env.exprs.pop().expect("throw cause")) } else { None };
+            let expr = env.exprs.pop().expect("throw expr");
+            Stmt::Throw { expr, cause, trivia }
+        }
         StmtFinish::If { then_len, elif_lens, elif_trivias, else_len, else_trivia, trivia } => {
             let else_body = else_len.map(|n| env.stmts.split_off(env.stmts.len() - n));
             let mut elifs = Vec::with_capacity(elif_lens.len());
@@ -180,11 +195,12 @@ pub(crate) fn finish_stmt(env: &mut CloneEnv<'_>, f: StmtFinish) {
         StmtFinish::Loop { len, trivia } => {
             Stmt::Loop { body: env.stmts.split_off(env.stmts.len() - len), trivia }
         }
-        StmtFinish::Try { try_len, catch_len, finally_len, finally_trivia, trivia } => {
+        StmtFinish::Try { try_len, catch_len, else_len, else_trivia, finally_len, finally_trivia, trivia } => {
             let finally_body = finally_len.map(|n| env.stmts.split_off(env.stmts.len() - n));
+            let else_body = else_len.map(|n| env.stmts.split_off(env.stmts.len() - n));
             let catches = env.catches.split_off(env.catches.len() - catch_len);
             let try_body = env.stmts.split_off(env.stmts.len() - try_len);
-            Stmt::Try { try_body, catches, finally_body, finally_trivia, trivia }
+            Stmt::Try { try_body, catches, else_body, else_trivia, finally_body, finally_trivia, trivia }
         }
     };
     env.stmts.push(s);

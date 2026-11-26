@@ -2,6 +2,7 @@ use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
+use crate::decompile::expr_common::push_template_task;
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::{ExprFin, ObjSlot};
 use crate::decompile::trivia::is_comment_kind;
@@ -16,7 +17,7 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
             .map(named_children)
             .unwrap_or_default();
         env.tasks.push(DTask::FinishExpr(ExprFin::Call {
-            has_callee_expr: false, callee_name: "new".into(), recv_prop: None,
+            has_callee_expr: false, callee_name: "new".into(), recv_prop: None, recv_safe: false,
             argc: arg_nodes.len(), has_ruby_blk: false, is_optional: false, is_new: false,
         }));
         for a in arg_nodes.into_iter().rev() { env.tasks.push(DTask::Expr(a)); }
@@ -34,7 +35,7 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
             && matches!(cn.kind(), "identifier" | "member_expression" | "subscript_expression" | "call_expression")
         {
             env.tasks.push(DTask::FinishExpr(ExprFin::Call {
-                has_callee_expr: true, callee_name: String::new(), recv_prop: None,
+                has_callee_expr: true, callee_name: String::new(), recv_prop: None, recv_safe: false,
                 argc: arg_nodes.len(), has_ruby_blk: false, is_optional: false, is_new: true,
             }));
             for a in arg_nodes.into_iter().rev() { env.tasks.push(DTask::Expr(a)); }
@@ -45,7 +46,7 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
             .or_else(|| named_children(node).first().map(|c| node_text(*c, env.src)))
             .unwrap_or("Object").trim().to_string();
         env.tasks.push(DTask::FinishExpr(ExprFin::Call {
-            has_callee_expr: false, callee_name: cls, recv_prop: None,
+            has_callee_expr: false, callee_name: cls, recv_prop: None, recv_safe: false,
             argc: arg_nodes.len(), has_ruby_blk: false, is_optional: false, is_new: true,
         }));
         for a in arg_nodes.into_iter().rev() { env.tasks.push(DTask::Expr(a)); }
@@ -56,9 +57,23 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
     let args_node = node.child_by_field_name("arguments")
         .or_else(|| named_children(node).into_iter().find(|c| c.kind().contains("argument")));
     let Some(cn) = callee_node else { env.exprs.push(Expr::Ident(raw.to_string())); return; };
+    if let Some(an) = args_node && an.kind() == "template_string" {
+        env.tasks.push(DTask::FinishExpr(ExprFin::TaggedTemplate));
+        push_template_task(env, an, true);
+        env.tasks.push(DTask::Expr(cn));
+        return;
+    }
     let obj = node.child_by_field_name("object").or_else(|| node.child_by_field_name("receiver"));
     let prop = node_text(cn, env.src).trim().to_string();
-    if let Some(o) = obj && env.lang == LanguageId::Ruby && prop == "nil?" && args_node.is_none() {
+    let recv_safe = obj.is_some_and(|o| {
+        let op_hit = node.child_by_field_name("operator").map(|op| node_text(op, env.src).trim())
+            .is_some_and(|t| matches!(t, "&." | "?." | "?->"));
+        op_hit || env.src.get(o.end_byte()..cn.start_byte()).is_some_and(|g| {
+            g.contains("?.") || (env.lang == LanguageId::Ruby && g.contains("&."))
+                || (env.lang == LanguageId::Php && g.contains("?->"))
+        })
+    });
+    if let Some(o) = obj && env.lang == LanguageId::Ruby && prop == "nil?" && args_node.is_none() && !recv_safe {
         env.tasks.push(DTask::FinishExpr(ExprFin::RubyNilCheck));
         env.tasks.push(DTask::Expr(o));
         return;
@@ -72,7 +87,7 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
             env.src.get(cn.end_byte()..an.start_byte()).is_some_and(|g| g.contains("?."))
         });
     env.tasks.push(DTask::FinishExpr(ExprFin::Call {
-        has_callee_expr: true, callee_name: String::new(), recv_prop: obj.map(|_| prop),
+        has_callee_expr: true, callee_name: String::new(), recv_prop: obj.map(|_| prop), recv_safe,
         argc: arg_nodes.len(), has_ruby_blk: ruby_blk.is_some(), is_optional, is_new: false,
     }));
     if let Some(blk) = ruby_blk { push_ruby_block_task(env, blk); }
@@ -168,7 +183,7 @@ pub(crate) fn push_object_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw:
                     vals.push(*ch);
                 }
             }
-            "spread_element" => {
+            "spread_element" | "dictionary_splat" => {
                 if let Some(inner) = named_children(*ch).into_iter().next() {
                     slots.push(ObjSlot::Spread);
                     vals.push(inner);

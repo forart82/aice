@@ -173,12 +173,15 @@ pub enum Stmt {
     Try {
         try_body: Vec<Stmt>,
         catches: Vec<CatchClause>,
+        else_body: Option<Vec<Stmt>>,
+        else_trivia: Trivia,
         finally_body: Option<Vec<Stmt>>,
         finally_trivia: Trivia,
         trivia: Trivia,
     },
     Throw {
         expr: Expr,
+        cause: Option<Expr>,
         trivia: Trivia,
     },
     Break {

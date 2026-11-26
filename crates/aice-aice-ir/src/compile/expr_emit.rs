@@ -73,7 +73,7 @@ pub(crate) fn is_str_like(e: &Expr) -> bool {
 
 pub(crate) fn bin_op_native(op: BinaryOp) -> &'static str {
     match op {
-        BinaryOp::Add => "+", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
+        BinaryOp::Add | BinaryOp::Concat => "+", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
         BinaryOp::Div => "/", BinaryOp::FloorDiv => "/", BinaryOp::Mod => "%", BinaryOp::Pow => "**",
         BinaryOp::Eq => "==", BinaryOp::NotEq => "!=",
         BinaryOp::Lt => "<", BinaryOp::LtEq => "<=", BinaryOp::Gt => ">", BinaryOp::GtEq => ">=",
