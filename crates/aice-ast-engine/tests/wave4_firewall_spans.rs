@@ -228,3 +228,77 @@ fn f41_genuine_line_1_errors_still_report_line_1() {
     let diags = assert_invalid_diags(LanguageId::Rust, "src/top.rs", None, "@@@\nfn ok() -> i32 { 1 }\n");
     assert_eq!(diags[0].line, 1, "Genuine line 1 col 1 token error stays on line 1: {diags:?}");
 }
+
+#[test]
+fn f70_cypher_create_constraint_and_l4_error_never_prepends_line_1_1() {
+    let base = concat!(
+        "CREATE CONSTRAINT account_id IF NOT EXISTS FOR (a:Account) REQUIRE a.id IS UNIQUE;\n",
+        "\n",
+        "MATCH (src:Account)-[tx:TRANSFERRED]->(dst:Account)\n",
+        "WHERE tx.amount > 100 AND src.active = true\n",
+        "WITH src, dst, sum(tx.amount) AS moved\n",
+        "RETURN src.id, dst.id, moved\n",
+        "ORDER BY moved DESC\n",
+        "LIMIT 10;\n",
+    );
+
+    // 1. Unclosed '(' and '[' on L4 (standalone & incremental) must pinpoint L4, NEVER prepend L1:1
+    let bad_delim = base.replace(
+        "WHERE tx.amount > 100 AND src.active = true",
+        "WHERE   (tx.amount >  [100 AND src.active = true",
+    );
+    for (mode, baseline) in [("standalone", None), ("incremental", Some(base))] {
+        let diags = assert_invalid_diags(LanguageId::Cypher, "edge_graph.cypher", baseline, &bad_delim);
+        assert_eq!(diags[0].line, 4, "Cypher ({mode}) L4 delim error must report line 4 first: {diags:?}");
+        assert!(
+            diags.iter().all(|d| d.line > 1),
+            "Cypher ({mode}) must NEVER prepend misleading Line 1:1 on valid L1 CREATE CONSTRAINT: {diags:?}"
+        );
+    }
+
+    // 2. Balanced-delimiter L4 syntax error (dangling operator) must pinpoint L4, NEVER L1:1
+    let bad_balanced = base.replace(
+        "WHERE tx.amount > 100 AND src.active = true",
+        "WHERE tx.amount > AND src.active = true",
+    );
+    for (mode, baseline) in [("standalone", None), ("incremental", Some(base))] {
+        let diags = assert_invalid_diags(LanguageId::Cypher, "edge_graph.cypher", baseline, &bad_balanced);
+        assert_eq!(diags[0].line, 4, "Cypher ({mode}) L4 balanced error must report line 4 first: {diags:?}");
+        assert!(
+            diags.iter().all(|d| d.line > 1),
+            "Cypher ({mode}) balanced L4 error must NEVER report Line 1:1: {diags:?}"
+        );
+    }
+
+    // 3. Tree-sitter-only L4 error (not flagged by cypher_rd) after valid L1 CREATE CONSTRAINT
+    let bad_ts_only = base.replace(
+        "WHERE tx.amount > 100 AND src.active = true",
+        "WHERE tx.amount === 100",
+    );
+    for (mode, baseline) in [("standalone", None), ("incremental", Some(base))] {
+        let diags = assert_invalid_diags(LanguageId::Cypher, "edge_graph.cypher", baseline, &bad_ts_only);
+        assert!(
+            diags[0].line >= 3 && diags.iter().all(|d| d.line > 1),
+            "Cypher ({mode}) tree-sitter-only L4 error must report L3-4, NEVER L1:1: {diags:?}"
+        );
+    }
+
+    // 4. Pre-broken Cypher baseline (genuinely broken L1 + NEW L4 error) must NOT prepend broad L1:1 wrapper
+    let prebroken_base = concat!(
+        "MATCH (bad:Account) WHERE ;\n",
+        "\n",
+        "MATCH (src:Account)-[tx:TRANSFERRED]->(dst:Account)\n",
+        "WHERE tx.amount > 100 AND src.active = true\n",
+        "RETURN src.id;\n",
+    );
+    let prebroken_cand = prebroken_base.replace(
+        "WHERE tx.amount > 100 AND src.active = true",
+        "WHERE (tx.amount > [100 AND src.active = true",
+    );
+    let diags = assert_invalid_diags(LanguageId::Cypher, "prebroken.cypher", Some(prebroken_base), &prebroken_cand);
+    assert_eq!(diags[0].line, 4, "Pre-broken Cypher L4 edit must report line 4 first: {diags:?}");
+    assert!(
+        diags.iter().all(|d| d.line > 1),
+        "Pre-broken Cypher L4 edit must NOT prepend Line 1:1 wrapper: {diags:?}"
+    );
+}

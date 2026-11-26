@@ -1,6 +1,4 @@
 use std::collections::BTreeMap;
-use std::fs::OpenOptions;
-use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use aice_governance::{JsonValue, escape_json_str, find_project_root, parse_json};
@@ -10,7 +8,7 @@ use crate::env::{
     is_ephemeral_workspace_with, is_explicit_project_path_query, resolve_errors_path_with,
     resolve_project_filter_target, std_env,
 };
-use crate::ledger::is_telemetry_suppressed;
+use crate::ledger::{append_jsonl_line, is_telemetry_suppressed};
 use crate::time_hash::{current_epoch_ms, epoch_ms_to_iso, parse_iso_to_epoch_ms};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,11 +112,7 @@ pub fn append_error_event(event: &TelemetryErrorEvent) -> std::io::Result<PathBu
 }
 
 pub fn append_error_event_to(path: &Path, event: &TelemetryErrorEvent) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    writeln!(file, "{}", event.to_json_line())
+    append_jsonl_line(path, event.to_json_line())
 }
 
 pub fn record_error_event(input: &RecordTelemetryErrorInput<'_>) -> Option<TelemetryErrorEvent> {

@@ -1998,3 +1998,78 @@ fn regression_wave3_f43_mysql_collate_charset_clauses_and_prebroken_delta_isolat
         FirewallVerdict::Valid => panic!("malformed COLLATE NOT NULL edit must fail"),
     }
 }
+
+#[test]
+fn wave6_f70_cypher_neo4j5_ddl_constraints_indexes_and_rejections() {
+    let fw = DefaultSyntaxFirewall;
+
+    // 1. Exact V6-POLY-08 repro file (edge_graph.cypher): Neo4j 5 CREATE CONSTRAINT + MATCH query
+    let edge_graph = concat!(
+        "CREATE CONSTRAINT account_id IF NOT EXISTS FOR (a:Account) REQUIRE a.id IS UNIQUE;\n",
+        "\n",
+        "MATCH (src:Account)-[tx:TRANSFERRED]->(dst:Account)\n",
+        "WHERE tx.amount > 100 AND src.active = true\n",
+        "WITH src, dst, sum(tx.amount) AS moved\n",
+        "RETURN src.id, dst.id, moved\n",
+        "ORDER BY moved DESC\n",
+        "LIMIT 10;\n",
+    );
+    assert_valid(LanguageId::Cypher, "edge_graph.cypher", edge_graph);
+
+    // Valid incremental splice on edge_graph.cypher passes cleanly
+    let edge_graph_edited = edge_graph.replace("LIMIT 10;", "LIMIT 25;");
+    assert!(
+        fw.verify_incremental(Some(edge_graph), &edge_graph_edited, Path::new("edge_graph.cypher"), LanguageId::Cypher)
+            .is_valid(),
+        "valid edit on Neo4j 5 Cypher file must pass incremental firewall"
+    );
+
+    // 2. Broad valid Neo4j 5 & Neo4j 4 schema DDL coverage (standalone DDL and mixed DDL+DML)
+    for (name, src) in [
+        ("c_standalone.cypher", "CREATE CONSTRAINT account_id IF NOT EXISTS FOR (a:Account) REQUIRE a.id IS UNIQUE;"),
+        ("c_unnamed.cypher", "CREATE CONSTRAINT FOR (a:Account) REQUIRE a.id IS UNIQUE;"),
+        ("c_node_key.cypher", "CREATE OR REPLACE CONSTRAINT acc_key FOR (a:Account) REQUIRE (a.org, a.id) IS NODE KEY;"),
+        ("c_rel_nn.cypher", "CREATE CONSTRAINT tx_amt IF NOT EXISTS FOR ()-[r:TRANSFERRED]-() REQUIRE r.amount IS NOT NULL;"),
+        ("c_rel_opts.cypher", "CREATE CONSTRAINT tx_rel FOR ()-[r:TRANSFERRED]->() REQUIRE r.id IS RELATIONSHIP UNIQUE OPTIONS { indexProvider: 'range-1.0' };"),
+        ("c_type.cypher", "CREATE CONSTRAINT acc_type FOR (a:Account) REQUIRE a.id IS :: STRING NOT NULL;"),
+        ("c_type_list.cypher", "CREATE CONSTRAINT acc_vec FOR (a:Account) REQUIRE a.emb IS :: LIST<FLOAT NOT NULL>;"),
+        ("c_typed_union.cypher", "CREATE CONSTRAINT acc_u FOR (a:Account) REQUIRE a.v IS TYPED INTEGER | FLOAT;"),
+        ("c_neo4j4.cypher", "CREATE CONSTRAINT account_id IF NOT EXISTS ON (a:Account) ASSERT a.id IS UNIQUE;"),
+        ("c_neo4j4_exists.cypher", "CREATE CONSTRAINT ON (a:Account) ASSERT exists(a.id);"),
+        ("i_range.cypher", "CREATE RANGE INDEX acc_email IF NOT EXISTS FOR (a:Account) ON (a.email);"),
+        ("i_fulltext.cypher", "CREATE FULLTEXT INDEX tx_notes IF NOT EXISTS FOR ()-[r:TRANSFERRED]-() ON EACH [r.note];"),
+        ("i_lookup.cypher", "CREATE LOOKUP INDEX node_lbl IF NOT EXISTS FOR (n) ON EACH labels(n);"),
+        ("i_legacy.cypher", "CREATE INDEX ON :Account(id);"),
+        ("d_drop_con.cypher", "DROP CONSTRAINT account_id IF EXISTS;"),
+        ("d_drop_idx.cypher", "DROP INDEX acc_email IF EXISTS;"),
+        ("mixed_dml_ddl_dml.cypher", "MATCH (a:Account) RETURN a;\nCREATE CONSTRAINT c1 FOR (a:Account) REQUIRE a.id IS UNIQUE;\nMATCH (b:Account) RETURN b;"),
+    ] {
+        assert_valid(LanguageId::Cypher, name, src);
+    }
+
+    // 3. Malformed Cypher DDL MUST still be rejected
+    for (name, bad) in [
+        ("bad_c_empty.cypher", "CREATE CONSTRAINT;"),
+        ("bad_c_no_for.cypher", "CREATE CONSTRAINT account_id;"),
+        ("bad_c_if_exists.cypher", "CREATE CONSTRAINT account_id IF EXISTS FOR (a:Account) REQUIRE a.id IS UNIQUE;"),
+        ("bad_c_or_rep_ine.cypher", "CREATE OR REPLACE CONSTRAINT account_id IF NOT EXISTS FOR (a:Account) REQUIRE a.id IS UNIQUE;"),
+        ("bad_c_no_req.cypher", "CREATE CONSTRAINT account_id FOR (a:Account);"),
+        ("bad_c_empty_req.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE;"),
+        ("bad_c_no_is.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE a.id;"),
+        ("bad_c_dangling_is.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE a.id IS;"),
+        ("bad_c_bogus_pred.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE a.id IS BOGUS;"),
+        ("bad_c_empty_type.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE a.id IS :: ;"),
+        ("bad_c_bogus_type.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE a.id IS :: BOGUS;"),
+        ("bad_c_trail_comma.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE (a.id, ) IS UNIQUE;"),
+        ("bad_c_trailing_tok.cypher", "CREATE CONSTRAINT account_id FOR (a:Account) REQUIRE a.id IS UNIQUE EXTRA;"),
+        ("bad_c_empty_node.cypher", "CREATE CONSTRAINT account_id FOR () REQUIRE a.id IS UNIQUE;"),
+        ("bad_i_empty.cypher", "CREATE INDEX;"),
+        ("bad_i_empty_on.cypher", "CREATE INDEX idx FOR (a:Account) ON ();"),
+        ("bad_i_trailing.cypher", "CREATE INDEX idx FOR (a:Account) ON (a.id) EXTRA;"),
+        ("bad_drop_empty.cypher", "DROP CONSTRAINT;"),
+        ("bad_drop_ine.cypher", "DROP CONSTRAINT account_id IF NOT EXISTS;"),
+        ("bad_drop_extra.cypher", "DROP INDEX idx EXTRA;"),
+    ] {
+        assert_invalid(LanguageId::Cypher, name, bad);
+    }
+}

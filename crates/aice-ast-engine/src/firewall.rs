@@ -1,7 +1,7 @@
 use std::path::Path;
 
 use aice_lang_registry::{FirewallDiagnostic, FirewallVerdict, LanguageId, SyntaxFirewall};
-use crate::firewall_span::refine_error_spans;
+use crate::firewall_span::{drop_shadowed_root_wrappers, refine_error_spans};
 use crate::r5::checks::{
     ErrorSpan, collect_r5_error_spans_with_tree, collect_r5_with_base_edit, format_context, spans_to_diagnostics,
 };
@@ -81,7 +81,7 @@ fn collect_lang_spans_with_tree(
     match lang {
         PlainText | Aice => (Vec::new(), None),
         AnsiSql | PostgreSql | MySql | Sqlite | TSql | Prisma | GraphQl | Cypher
-        | DbMigration => (crate::r6::collect_r6_error_spans(lang, src, pool), None),
+        | DbMigration => crate::r6::collect_r6_error_spans_with_tree(lang, src, pool),
         _ => match collect_r5_error_spans_with_tree(lang, src, path, pool) {
             Ok(res) => res,
             Err(span) => (vec![span], None),
@@ -151,9 +151,8 @@ fn verify_prebroken_delta(
     let (mut checked_edit_slice, mut need_edit_check) = (false, false);
     if cand_spans.len() > base_spans.len() {
         if !delta_ctx.allow_span_split(raw_cand_slice, cand_spans, path, pool) {
-            return FirewallVerdict::Invalid {
-                diagnostics: spans_to_diagnostics(cand, delta_ctx.select_delta_error_spans(cand_spans)),
-            };
+            let delta = drop_shadowed_root_wrappers(delta_ctx.select_delta_error_spans(cand_spans));
+            return FirewallVerdict::Invalid { diagnostics: spans_to_diagnostics(cand, delta) };
         }
         need_edit_check = true;
     }
@@ -163,9 +162,8 @@ fn verify_prebroken_delta(
         if delta_ctx.try_midfile_split(raw_cand_slice, cand_spans, path, pool) {
             need_edit_check = true;
         } else {
-            return FirewallVerdict::Invalid {
-                diagnostics: spans_to_diagnostics(cand, delta_ctx.select_delta_error_spans(cand_spans)),
-            };
+            let delta = drop_shadowed_root_wrappers(delta_ctx.select_delta_error_spans(cand_spans));
+            return FirewallVerdict::Invalid { diagnostics: spans_to_diagnostics(cand, delta) };
         }
     }
     let mut pfx_cache: Option<PrefixCache> = None;

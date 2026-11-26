@@ -1,28 +1,49 @@
 use crate::r5::checks::ErrorSpan;
+use crate::r6::cypher_ddl::{is_cypher_ddl, validate_cypher_ddl};
 use crate::r6::sql_lex::{LineIndex, sp};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum CK {
+pub(super) enum CK {
     Word, Str, Backtick, Num, Param, Op, LP, RP, LB, RB, LC, RC, Comma, Semi,
 }
 
 #[derive(Debug, Clone, Copy)]
-struct CTok { kind: CK, start: usize, end: usize, line: usize, col: usize }
-
-impl CTok {
-    fn sl<'a>(&self, s: &'a str) -> &'a str { s.get(self.start..self.end).unwrap_or("") }
-    fn kw(&self, s: &str, k: &str) -> bool { self.kind == CK::Word && self.sl(s).eq_ignore_ascii_case(k) }
+pub(super) struct CTok {
+    pub(super) kind: CK,
+    pub(super) start: usize,
+    pub(super) end: usize,
+    pub(super) line: usize,
+    pub(super) col: usize,
 }
 
-pub fn verify_cypher_rd(src: &str) -> Vec<ErrorSpan> {
+impl CTok {
+    pub(super) fn sl<'a>(&self, s: &'a str) -> &'a str { s.get(self.start..self.end).unwrap_or("") }
+    pub(super) fn kw(&self, s: &str, k: &str) -> bool { self.kind == CK::Word && self.sl(s).eq_ignore_ascii_case(k) }
+}
+
+pub(super) struct CypherRdResult {
+    pub(super) errs: Vec<ErrorSpan>,
+    pub(super) ddl_masks: Vec<(usize, usize)>,
+    pub(super) has_dml: bool,
+}
+
+pub(super) fn verify_cypher_rd_and_mask(src: &str) -> CypherRdResult {
     let (toks, mut errs) = lex_cypher(src);
     check_cypher_delims(&toks, &mut errs);
-    for stmt in split_semi(&toks) {
-        for seg in split_union(stmt, src) {
-            validate_segment(seg, src, &mut errs);
+    let mut ddl_masks = Vec::new();
+    let mut has_dml = false;
+    for (stmt, byte_start, byte_end) in split_semi_ranges(&toks) {
+        if is_cypher_ddl(stmt, src) {
+            validate_cypher_ddl(stmt, src, &mut errs);
+            ddl_masks.push((byte_start, byte_end));
+        } else {
+            has_dml = true;
+            for seg in split_union(stmt, src) {
+                validate_segment(seg, src, &mut errs);
+            }
         }
     }
-    errs
+    CypherRdResult { errs, ddl_masks, has_dml }
 }
 
 fn lex_cypher(src: &str) -> (Vec<CTok>, Vec<ErrorSpan>) {
@@ -124,17 +145,24 @@ fn check_cypher_delims(toks: &[CTok], errs: &mut Vec<ErrorSpan>) {
     }
 }
 
-fn split_semi(toks: &[CTok]) -> Vec<&[CTok]> {
+fn split_semi_ranges(toks: &[CTok]) -> Vec<(&[CTok], usize, usize)> {
     let (mut out, mut start, mut d) = (Vec::new(), 0usize, 0usize);
     for (i, t) in toks.iter().enumerate() {
         match t.kind {
             CK::LP | CK::LB | CK::LC => d += 1,
             CK::RP | CK::RB | CK::RC => d = d.saturating_sub(1),
-            CK::Semi if d == 0 => { if start < i { out.push(&toks[start..i]); } start = i + 1; }
+            CK::Semi if d == 0 => {
+                if start < i {
+                    out.push((&toks[start..i], toks[start].start, t.end));
+                }
+                start = i + 1;
+            }
             _ => {}
         }
     }
-    if start < toks.len() { out.push(&toks[start..]); }
+    if start < toks.len() {
+        out.push((&toks[start..], toks[start].start, toks[toks.len() - 1].end));
+    }
     out
 }
 

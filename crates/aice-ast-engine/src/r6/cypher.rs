@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::HashSet;
 
 use aice_lang_registry::{
@@ -9,7 +10,7 @@ use crate::r5::checks::{ErrorSpan, collect_ts_error_spans};
 use crate::r5::cst_helpers::{
     node_text, outline_from_symbols, push_sym, slice_symbol_from_list, with_ts_root,
 };
-use crate::r6::cypher_rd::verify_cypher_rd;
+use crate::r6::cypher_rd::verify_cypher_rd_and_mask;
 use crate::r6::sql_lex::sp;
 use crate::ts_pool::{GrammarSlot, ParserPool, with_parser_pool};
 
@@ -120,10 +121,42 @@ fn first_cypher_label(stmt: tree_sitter::Node<'_>, src: &str) -> Option<String> 
 }
 
 pub fn verify_cypher_spans(src: &str, pool: &mut ParserPool) -> Vec<ErrorSpan> {
-    let mut spans = match pool.parse_slot(GrammarSlot::Cypher, src) {
-        Ok(tree) => collect_ts_error_spans(&tree, src),
-        Err(e) => vec![sp(e.line, e.column, e.message)],
-    };
-    spans.extend(verify_cypher_rd(src));
-    spans
+    verify_cypher_spans_with_tree(src, pool).0
+}
+
+pub(crate) fn verify_cypher_spans_with_tree(
+    src: &str,
+    pool: &mut ParserPool,
+) -> (Vec<ErrorSpan>, Option<tree_sitter::Tree>) {
+    let rd = verify_cypher_rd_and_mask(src);
+    let mut spans = Vec::new();
+    let mut ts_tree = None;
+    if rd.has_dml || rd.ddl_masks.is_empty() {
+        let masked = mask_cypher_ddl(src, &rd.ddl_masks);
+        match pool.parse_slot(GrammarSlot::Cypher, &masked) {
+            Ok(tree) => {
+                spans.extend(collect_ts_error_spans(&tree, &masked));
+                ts_tree = Some(tree);
+            }
+            Err(e) => spans.push(sp(e.line, e.column, e.message)),
+        }
+    }
+    spans.extend(rd.errs);
+    (spans, ts_tree)
+}
+
+fn mask_cypher_ddl<'a>(src: &'a str, ranges: &[(usize, usize)]) -> Cow<'a, str> {
+    if ranges.is_empty() {
+        return Cow::Borrowed(src);
+    }
+    let mut bytes = src.as_bytes().to_vec();
+    let len = bytes.len();
+    for &(start, end) in ranges {
+        for b in &mut bytes[start.min(len)..end.min(len)] {
+            if *b != b'\n' {
+                *b = b' ';
+            }
+        }
+    }
+    Cow::Owned(String::from_utf8(bytes).unwrap_or_else(|_| src.to_string()))
 }

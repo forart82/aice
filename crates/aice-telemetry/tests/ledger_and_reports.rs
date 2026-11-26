@@ -1226,3 +1226,141 @@ fn wave3_f49_error_only_session_surfaces_in_gain_and_honors_project_filter() {
     let _ = fs::remove_dir_all(&tmp);
     let _ = fs::remove_dir_all(&tmp_norm);
 }
+
+#[test]
+fn f60_concurrent_16_thread_64_op_jsonl_append_has_zero_corruption_or_drops() {
+    use std::sync::{Arc, Barrier};
+    use std::thread;
+
+    use aice_telemetry::error_log::TelemetryErrorEvent;
+    use aice_telemetry::TelemetryEvent;
+
+    let tmp = unique_temp_dir("w6_f60_concurrent");
+    let gains = tmp.join("gains.jsonl");
+    let errors = tmp.join("errors.jsonl");
+    let proj = PathBuf::from("/home/test/w6_f60_concurrent_ws");
+
+    const THREADS: usize = 16;
+    const OPS_PER_THREAD: usize = 4;
+    const TOTAL_OPS: usize = THREADS * OPS_PER_THREAD;
+
+    let barrier = Arc::new(Barrier::new(THREADS));
+    let mut handles = Vec::with_capacity(THREADS);
+
+    for tid in 0..THREADS {
+        let b = Arc::clone(&barrier);
+        let g_path = gains.clone();
+        let p_root = proj.clone();
+        handles.push(thread::spawn(move || {
+            let env_empty = |_: &str| -> Option<String> { None };
+            b.wait();
+            for op in 0..OPS_PER_THREAD {
+                // On the last op per thread, emit >4 KiB JSONL rows to verify File::lock()
+                // serialization beyond POSIX PIPE_BUF (4 KiB).
+                let big_multi: Vec<String> = if op + 1 == OPS_PER_THREAD {
+                    (0..16)
+                        .map(|k| format!("src/deep_module_{tid:02}_{op}_{k:02}_{}.rs", "x".repeat(260)))
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let label = format!("src/mod_{tid:02}_{op}.rs");
+                meter_rich_payload_with(
+                    &TelemetryRichInput {
+                        project_root: &p_root,
+                        file_label: &label,
+                        op_kind: TelemetryOpKind::Read,
+                        surface_label: "cli",
+                        raw_baseline: "pub fn compute(x: i32) -> i32 { x + 1 }\n",
+                        emitted_payload: "pub fn compute(x:i32) -> i32 = x + 1",
+                        realistic_native_payload: None,
+                        multi_files: &big_multi,
+                        language: Some("Rust"),
+                        agent: Some("cli"),
+                        is_search_mode: false,
+                        preserved_trivia_tokens: 0,
+                        wasted_input_tokens: None,
+                        explicit_telemetry_path: Some(&g_path),
+                        record_ledger: true,
+                        should_meter_bpe: false,
+                    },
+                    &env_empty,
+                );
+
+                let err_msg = if op + 1 == OPS_PER_THREAD {
+                    format!("SyntaxFirewall rejected tid={tid} op={op}: {}", "E".repeat(900))
+                } else {
+                    format!("SyntaxFirewall rejected tid={tid} op={op}")
+                };
+                let recorded = record_error_event_with(
+                    &RecordTelemetryErrorInput {
+                        target_path: None,
+                        project_root: Some(&p_root),
+                        file_path: Some(&label),
+                        operation: "splice",
+                        surface: "cli",
+                        agent: Some("cli"),
+                        error_message: &err_msg,
+                        wasted_input_tokens: Some(12),
+                        explicit_telemetry_path: Some(&g_path),
+                    },
+                    &env_empty,
+                );
+                assert!(recorded.is_some(), "expected error event to be recorded for tid={tid} op={op}");
+            }
+        }));
+    }
+
+    for h in handles {
+        h.join().expect("worker thread panicked");
+    }
+
+    // 1. Validate raw gains.jsonl: exact 64 lines, 0 blank lines, 0 malformed lines, incl. >4 KiB rows
+    let raw_gains = fs::read_to_string(&gains).expect("read gains.jsonl");
+    assert!(raw_gains.ends_with('\n'), "gains.jsonl must end with newline");
+    let gain_lines: Vec<&str> = raw_gains.strip_suffix('\n').unwrap().split('\n').collect();
+    assert_eq!(gain_lines.len(), TOTAL_OPS, "expected exact {TOTAL_OPS} lines in gains.jsonl");
+    let mut saw_large_gain_line = false;
+    for (idx, line) in gain_lines.iter().enumerate() {
+        assert!(!line.trim().is_empty(), "blank line at gains.jsonl:{idx}");
+        assert!(parse_json(line).is_ok(), "malformed JSON at gains.jsonl:{idx}: {line}");
+        assert!(
+            TelemetryEvent::from_json_line(line).is_some(),
+            "failed TelemetryEvent parse at gains.jsonl:{idx}: {line}"
+        );
+        if line.len() > 4096 {
+            saw_large_gain_line = true;
+        }
+    }
+    assert!(saw_large_gain_line, "expected >4 KiB JSONL rows in stress test");
+
+    // 2. Validate raw errors.jsonl: exact 64 lines, 0 blank lines, 0 malformed lines
+    let raw_errors = fs::read_to_string(&errors).expect("read errors.jsonl");
+    assert!(raw_errors.ends_with('\n'), "errors.jsonl must end with newline");
+    let err_lines: Vec<&str> = raw_errors.strip_suffix('\n').unwrap().split('\n').collect();
+    assert_eq!(err_lines.len(), TOTAL_OPS, "expected exact {TOTAL_OPS} lines in errors.jsonl");
+    for (idx, line) in err_lines.iter().enumerate() {
+        assert!(!line.trim().is_empty(), "blank line at errors.jsonl:{idx}");
+        assert!(parse_json(line).is_ok(), "malformed JSON at errors.jsonl:{idx}: {line}");
+        assert!(
+            TelemetryErrorEvent::from_json_line(line).is_some(),
+            "failed TelemetryErrorEvent parse at errors.jsonl:{idx}: {line}"
+        );
+    }
+
+    // 3. Validate ledger loader & gain report see all 64/64 rows with zero silent drops
+    assert_eq!(load_telemetry_events(&gains, false).len(), TOTAL_OPS);
+    let err_by_proj = load_non_benign_errors_by_project(&gains, false);
+    let err_total: usize = err_by_proj.values().map(Vec::len).sum();
+    assert_eq!(err_total, TOTAL_OPS);
+    let report = build_gain_report(&GainQuery {
+        project: None,
+        unique: false,
+        telemetry_path: Some(gains),
+        drop_ephemeral: false,
+    });
+    assert_eq!(report.total_operations, TOTAL_OPS);
+    assert_eq!(report.economics.failed_retry_turns, TOTAL_OPS);
+
+    let _ = fs::remove_dir_all(&tmp);
+}

@@ -1,4 +1,6 @@
 pub mod cypher;
+mod cypher_ddl;
+mod cypher_ddl_expr;
 mod cypher_rd;
 pub mod graphql;
 pub(crate) mod mig_detect;
@@ -124,16 +126,29 @@ pub(crate) fn collect_r6_error_spans(
     }
 }
 
+pub(crate) fn collect_r6_error_spans_with_tree(
+    lang: LanguageId,
+    src: &str,
+    pool: &mut ParserPool,
+) -> (Vec<ErrorSpan>, Option<tree_sitter::Tree>) {
+    match lang {
+        LanguageId::Cypher => cypher::verify_cypher_spans_with_tree(src, pool),
+        _ => (collect_r6_error_spans(lang, src, pool), None),
+    }
+}
+
 pub fn verify_r6_firewall(
     lang: LanguageId,
     src: &str,
     pool: &mut ParserPool,
 ) -> Result<(), Vec<SyntaxIssue>> {
-    let spans = collect_r6_error_spans(lang, src, pool);
+    let (spans, tree) = collect_r6_error_spans_with_tree(lang, src, pool);
     if spans.is_empty() {
         Ok(())
     } else {
-        let refined = crate::firewall_span::refine_error_spans(lang, src, std::path::Path::new(""), None, None, spans, pool);
+        let refined = crate::firewall_span::refine_error_spans(
+            lang, src, std::path::Path::new(""), None, tree.as_ref(), spans, pool,
+        );
         Err(spans_to_diagnostics(src, refined))
     }
 }

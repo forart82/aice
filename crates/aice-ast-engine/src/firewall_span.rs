@@ -55,6 +55,10 @@ fn is_broad_root_error(sp: &ErrorSpan) -> bool {
     sp.line == 1 && (sp.column == 1 || sp.end_line > 1) && is_generic_syntax_msg(&sp.message)
 }
 
+fn is_broad_multiline_wrapper(sp: &ErrorSpan) -> bool {
+    sp.end_line > sp.line && is_generic_syntax_msg(&sp.message)
+}
+
 fn is_refinable_span(sp: &ErrorSpan) -> bool {
     is_generic_syntax_msg(&sp.message)
         && ((sp.line == 1 && (sp.column == 1 || sp.end_line > 1)) || sp.end_line > sp.line)
@@ -64,10 +68,14 @@ fn is_generic_syntax_msg(msg: &str) -> bool {
     msg.starts_with("Syntax error:") || msg.starts_with("Malformed syntax near")
 }
 
-fn drop_shadowed_root_wrappers(spans: Vec<ErrorSpan>) -> Vec<ErrorSpan> {
+pub(crate) fn drop_shadowed_root_wrappers(spans: Vec<ErrorSpan>) -> Vec<ErrorSpan> {
     let specific: Vec<&ErrorSpan> = spans
         .iter()
-        .filter(|s| !is_broad_root_error(s) && (s.line > 1 || s.column > 1))
+        .filter(|s| {
+            !is_broad_root_error(s)
+                && !is_broad_multiline_wrapper(s)
+                && (s.line > 1 || s.column > 1)
+        })
         .collect();
     if specific.is_empty() {
         return spans;
@@ -75,11 +83,22 @@ fn drop_shadowed_root_wrappers(spans: Vec<ErrorSpan>) -> Vec<ErrorSpan> {
     let kept: Vec<ErrorSpan> = spans
         .iter()
         .filter(|sp| {
-            !is_broad_root_error(sp)
-                || !specific.iter().any(|o| {
+            let root_shadowed = is_broad_root_error(sp)
+                && specific.iter().any(|o| {
                     (o.line > 1 && sp.end_line >= o.line)
-                        || (o.line == 1 && o.column > 1 && sp.line == 1 && sp.column == 1 && sp.end_line == 1)
-                })
+                        || (o.line == 1
+                            && o.column > 1
+                            && sp.line == 1
+                            && sp.column == 1
+                            && sp.end_line == 1)
+                });
+            let multi_shadowed = is_broad_multiline_wrapper(sp)
+                && specific.iter().any(|o| {
+                    o.line >= sp.line
+                        && o.end_line <= sp.end_line
+                        && (o.line > sp.line || o.column > sp.column)
+                });
+            !(root_shadowed || multi_shadowed)
         })
         .cloned()
         .collect();

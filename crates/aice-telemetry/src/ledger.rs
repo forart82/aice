@@ -111,23 +111,37 @@ pub fn should_exclude_from_global_ledger_with(
     is_ephemeral_workspace_with(None, Some(project_root), None, explicit_telemetry, env_fn)
 }
 
-pub fn append_record(record: &CompactTelemetryRecord) -> std::io::Result<PathBuf> {
-    let path = resolve_gains_path();
-    if let Some(parent) = path.parent() {
+pub(crate) fn append_jsonl_line(path: &Path, mut json_line: String) -> std::io::Result<()> {
+    if let Some(parent) = path.parent()
+        && !parent.as_os_str().is_empty()
+    {
         std::fs::create_dir_all(parent)?;
     }
-    let mut file = OpenOptions::new().create(true).append(true).open(&path)?;
-    writeln!(file, "{}", record.to_json_line())?;
+    json_line.push('\n');
+    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
+    let locked = loop {
+        match file.lock() {
+            Ok(()) => break true,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == std::io::ErrorKind::Unsupported => break false,
+            Err(e) => return Err(e),
+        }
+    };
+    let write_res = file.write_all(json_line.as_bytes());
+    if locked {
+        let _ = file.unlock();
+    }
+    write_res
+}
+
+pub fn append_record(record: &CompactTelemetryRecord) -> std::io::Result<PathBuf> {
+    let path = resolve_gains_path();
+    append_jsonl_line(&path, record.to_json_line())?;
     Ok(path)
 }
 
 pub fn append_event(path: &Path, event: &TelemetryEvent) -> std::io::Result<()> {
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    let mut file = OpenOptions::new().create(true).append(true).open(path)?;
-    writeln!(file, "{}", event.to_compact_json_line())?;
-    Ok(())
+    append_jsonl_line(path, event.to_compact_json_line())
 }
 
 pub fn load_telemetry_events(ledger_path: &Path, drop_ephemeral: bool) -> Vec<TelemetryEvent> {
