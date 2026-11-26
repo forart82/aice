@@ -486,7 +486,8 @@ fn f28_markdown_search_fast_path_no_latency_cliff() {
     assert_eq!(pack.exit_code, 0, "stderr: {}", pack.stderr_output);
     assert!(pack.emitted_output.contains("GAME_DESIGN.md:"), "out:\n{}", pack.emitted_output);
     assert!(pack.emitted_output.contains("dungeon boss spawns"), "out:\n{}", pack.emitted_output);
-    assert!(elapsed_ms < 500, "512KB MD search took {elapsed_ms}ms (expected <500ms)");
+    let max_ms: u128 = if cfg!(debug_assertions) { 3_000 } else { 500 };
+    assert!(elapsed_ms < max_ms, "512KB MD search took {elapsed_ms}ms (expected <{max_ms}ms)");
 }
 
 #[test]
