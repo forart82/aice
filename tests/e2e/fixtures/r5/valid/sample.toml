@@ -1,0 +1,7 @@
+[package]
+name = "aice-fixture"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+bpe_core = "0.3.2"

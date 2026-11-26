@@ -1,0 +1,20 @@
+{
+  "enabled": true,
+  "idiomsEnabled": true,
+  "idioms": {
+    "$clamp": {
+      "name": "$clamp",
+      "kind": "expr",
+      "params": [
+        { "name": "$0" },
+        { "name": "$1" },
+        { "name": "$2" }
+      ],
+      "templateAice": "Math.min(Math.max($0, $1), $2)",
+      "occurrences": 4,
+      "tokensPerOccurrenceSaved": 8,
+      "netTokenSavings": 24,
+      "description": "Clamp numeric value between min and max"
+    }
+  }
+}

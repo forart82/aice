@@ -1,0 +1,19 @@
+[package]
+name = "aice-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aice-governance.workspace = true
+aice-telemetry.workspace = true
+aice-lang-registry.workspace = true
+aice-ast-engine.workspace = true
+aice-aice-ir.workspace = true
+aice-find-engine.workspace = true
+aice-batch-read.workspace = true
+aice-batch-write.workspace = true
+
+[[test]]
+name = "w2_m4_firewall_incremental"
+path = "../../tests/integration/w2_m4_firewall_incremental.rs"

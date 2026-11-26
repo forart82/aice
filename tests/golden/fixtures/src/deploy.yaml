@@ -1,0 +1,7 @@
+service: aice-golden
+runtime:
+  workers: 4
+  strict_firewall: true
+routes:
+  - path: /health
+    method: GET

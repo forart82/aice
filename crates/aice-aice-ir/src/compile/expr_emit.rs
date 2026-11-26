@@ -1,0 +1,95 @@
+use std::collections::HashSet;
+
+use aice_lang_registry::LanguageId;
+
+use crate::ir::{AiceItem, AiceModule};
+use crate::ir_code::{AssignOp, BinaryOp, Expr, LiteralVal};
+
+pub(crate) struct ExprEmitCtx {
+    pub class_names: HashSet<String>,
+}
+
+impl ExprEmitCtx {
+    pub fn from_module(m: &AiceModule) -> Self {
+        let mut class_names = HashSet::new();
+        for it in &m.items {
+            match it {
+                AiceItem::Class(c) => { class_names.insert(c.name.clone()); }
+                AiceItem::Import(imp) => {
+                    for sp in &imp.specifiers {
+                        if sp.name.chars().next().is_some_and(char::is_uppercase) {
+                            class_names.insert(sp.alias.clone().unwrap_or_else(|| sp.name.clone()));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        Self { class_names }
+    }
+}
+
+pub(crate) fn emit_expr(e: &Expr, lang: LanguageId, ctx: &ExprEmitCtx) -> String {
+    crate::compile::iter_emit::run_expr(e, lang, ctx)
+}
+
+pub(crate) fn emit_ident(s: &str, lang: LanguageId) -> String {
+    match (s, lang) {
+        ("this", LanguageId::Python | LanguageId::Rust | LanguageId::Ruby) => "self".into(),
+        ("this", LanguageId::Php) => "$this".into(),
+        ("self", LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Java | LanguageId::CSharp | LanguageId::Dart) => "this".into(),
+        _ if lang == LanguageId::Php && !s.starts_with('$') && !s.contains("::") && s.chars().next().is_some_and(|c| c.is_ascii_lowercase()) => {
+            format!("${s}")
+        }
+        _ => s.to_string(),
+    }
+}
+
+pub(crate) fn emit_lit(l: &LiteralVal, lang: LanguageId) -> String {
+    match l {
+        LiteralVal::Int(s) | LiteralVal::Float(s) | LiteralVal::Regex(s) => s.clone(),
+        LiteralVal::HexColor(s) => format!("\"{s}\""),
+        LiteralVal::Bool(b) => match (b, lang) {
+            (true, LanguageId::Python) => "True".into(),
+            (false, LanguageId::Python) => "False".into(),
+            (true, _) => "true".into(),
+            (false, _) => "false".into(),
+        },
+        LiteralVal::Nil => match lang {
+            LanguageId::Python => "None".into(),
+            LanguageId::Rust => "None".into(),
+            LanguageId::Go | LanguageId::Ruby => "nil".into(),
+            LanguageId::Cpp => "nullptr".into(),
+            LanguageId::C => "NULL".into(),
+            _ => "null".into(),
+        },
+        LiteralVal::Str { value, .. } => format!("\"{}\"", crate::printer_expr::escape_str(value)),
+    }
+}
+
+pub(crate) fn is_str_like(e: &Expr) -> bool {
+    matches!(e, Expr::Literal(LiteralVal::Str { .. }) | Expr::Template { .. })
+}
+
+pub(crate) fn bin_op_native(op: BinaryOp) -> &'static str {
+    match op {
+        BinaryOp::Add => "+", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
+        BinaryOp::Div => "/", BinaryOp::Mod => "%", BinaryOp::Pow => "**",
+        BinaryOp::Eq => "==", BinaryOp::NotEq => "!=",
+        BinaryOp::Lt => "<", BinaryOp::LtEq => "<=", BinaryOp::Gt => ">", BinaryOp::GtEq => ">=",
+        BinaryOp::And => "&&", BinaryOp::Or => "||", BinaryOp::Coalesce => "??",
+        BinaryOp::BitAnd => "&", BinaryOp::BitOr => "|", BinaryOp::BitXor => "^",
+        BinaryOp::Shl => "<<", BinaryOp::Shr => ">>", BinaryOp::Ushr => ">>>",
+        BinaryOp::In => "in", BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as",
+    }
+}
+
+pub(crate) fn assign_native(op: AssignOp) -> &'static str {
+    match op {
+        AssignOp::Assign => "=", AssignOp::AddAssign => "+=", AssignOp::SubAssign => "-=",
+        AssignOp::MulAssign => "*=", AssignOp::DivAssign => "/=", AssignOp::ModAssign => "%=",
+        AssignOp::PowAssign => "**=", AssignOp::BitAndAssign => "&=", AssignOp::BitOrAssign => "|=",
+        AssignOp::BitXorAssign => "^=", AssignOp::ShlAssign => "<<=", AssignOp::ShrAssign => ">>=",
+        AssignOp::UshrAssign => ">>>=",
+    }
+}

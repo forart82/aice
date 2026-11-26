@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ==============================================================================
 # AICE Universal Linux Installer & In-Place Updater (install.sh)
-# Idempotent setup & update for AICE CLI, MCP Server, CLI Agents, & Workspaces
+# Pure-Rust native release build, MCP schemas, CLI agents, & workspace sync
 # ==============================================================================
 set -euo pipefail
 
@@ -44,11 +44,11 @@ while [[ $# -gt 0 ]]; do
       NO_UPDATE=1
       shift
       ;;
-    --no-cheatsheet)
+    --no-cheatsheet|--skip-cheatsheet)
       NO_CHEATSHEET=1
       shift
       ;;
-    --no-agents)
+    --no-agents|--skip-agents)
       NO_AGENTS=1
       shift
       ;;
@@ -84,11 +84,17 @@ done
 
 SCRIPT_SOURCE="${BASH_SOURCE[0]:-}"
 STANDALONE_TMP_DIR=""
+cleanup_tmp() {
+  if [[ -n "${STANDALONE_TMP_DIR:-}" ]] && [[ -d "$STANDALONE_TMP_DIR" ]]; then
+    rm -rf "$STANDALONE_TMP_DIR"
+  fi
+}
+trap cleanup_tmp EXIT
+
 if [[ -n "$SCRIPT_SOURCE" ]] && [[ -e "$SCRIPT_SOURCE" ]]; then
   SCRIPT_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
 else
   STANDALONE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aice-install.XXXXXX")"
-  trap '[[ -n "${STANDALONE_TMP_DIR:-}" ]] && rm -rf "$STANDALONE_TMP_DIR"' EXIT
   SCRIPT_DIR="$STANDALONE_TMP_DIR"
 fi
 cd "$SCRIPT_DIR"
@@ -104,6 +110,18 @@ run_cmd() {
     return 0
   fi
   "$@"
+}
+
+extract_cargo_version() {
+  awk '
+    /^\[/ { in_pkg = ($0 ~ /^\[(workspace\.)?package\]/) ? 1 : 0; next }
+    in_pkg && /^[[:space:]]*version[[:space:]]*=[[:space:]]*"/ {
+      sub(/^[^"]*"/, "")
+      sub(/".*$/, "")
+      print
+      exit
+    }
+  '
 }
 
 # ── Substep 2.1: Detect Linux Distro & Package Manager ────────────────────────
@@ -179,31 +197,42 @@ install_sys_packages() {
   esac
 }
 
-get_node_major() {
-  if ! command -v node >/dev/null 2>&1; then
-    echo 0
-    return
-  fi
-  local ver
-  ver="$(node -v 2>/dev/null || echo "v0.0.0")"
-  ver="${ver#v}"
-  echo "${ver%%.*}"
-}
+CARGO_ENV_FILE="${CARGO_HOME:-${HOME}/.cargo}/env"
+if [[ -s "$CARGO_ENV_FILE" ]]; then
+  # shellcheck disable=SC1090
+  . "$CARGO_ENV_FILE"
+fi
+
+LOCAL_REPO=0
+if [[ -f "${SCRIPT_DIR}/Cargo.toml" && -f "${SCRIPT_DIR}/crates/aice-cli/src/main.rs" ]]; then
+  LOCAL_REPO=1
+fi
 
 MISSING_PKGS=()
 command -v git >/dev/null 2>&1 || MISSING_PKGS+=(git)
 command -v curl >/dev/null 2>&1 || MISSING_PKGS+=(curl)
 
-NODE_MAJOR="$(get_node_major)"
-NEED_NODE=0
-if [[ "$NODE_MAJOR" -lt 20 ]] || ! command -v npm >/dev/null 2>&1; then
-  NEED_NODE=1
+if [[ "$LOCAL_REPO" -eq 1 ]]; then
+  if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+    case "$PKG_MGR" in
+      apt-get) MISSING_PKGS+=(build-essential) ;;
+      pacman)  MISSING_PKGS+=(base-devel) ;;
+      *)       MISSING_PKGS+=(gcc) ;;
+    esac
+  fi
 fi
 
-if [[ ${#MISSING_PKGS[@]} -gt 0 ]] || [[ "$NEED_NODE" -eq 1 ]]; then
-  log_warn "Missing or outdated prerequisites (git/curl/node>=20/npm)."
+NEED_RUST=0
+if [[ "$LOCAL_REPO" -eq 1 ]]; then
+  if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+    NEED_RUST=1
+  fi
+fi
+
+if [[ ${#MISSING_PKGS[@]} -gt 0 ]] || [[ "$NEED_RUST" -eq 1 ]]; then
+  log_warn "Missing prerequisites (missing_pkgs=${MISSING_PKGS[*]:-none}, need_rust=${NEED_RUST})."
   if [[ "$AUTO_YES" -eq 0 ]] && [[ "$DRY_RUN" -eq 0 ]] && [[ -t 0 ]]; then
-    printf 'Install missing system prerequisites now? [Y/n] '
+    printf 'Install missing prerequisites now? [Y/n] '
     read -r confirm || confirm="y"
     case "$confirm" in
       [nN]|[nN][oO])
@@ -217,31 +246,25 @@ if [[ ${#MISSING_PKGS[@]} -gt 0 ]] || [[ "$NEED_NODE" -eq 1 ]]; then
     install_sys_packages "${MISSING_PKGS[@]}"
   fi
 
-  if [[ "$NEED_NODE" -eq 1 ]]; then
-    log_info "Installing Node.js >= 20 and npm..."
+  if [[ "$NEED_RUST" -eq 1 ]]; then
+    log_info "Installing Rust toolchain via rustup..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf '  [dry-run] install nodejs >= 20 and npm via %s or NodeSource/nvm\n' "$PKG_MGR"
+      printf '  [dry-run] curl --proto =https --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y\n'
     else
-      if [[ "$PKG_MGR" == "apt-get" ]] && [[ ${#SUDO_CMD[@]} -gt 0 || "${EUID:-$(id -u)}" -eq 0 ]]; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | "${SUDO_CMD[@]}" -E bash -
-        "${SUDO_CMD[@]}" apt-get install -y nodejs
-      elif [[ "$PKG_MGR" == "dnf" || "$PKG_MGR" == "yum" ]] && [[ ${#SUDO_CMD[@]} -gt 0 || "${EUID:-$(id -u)}" -eq 0 ]]; then
-        curl -fsSL https://rpm.nodesource.com/setup_20.x | "${SUDO_CMD[@]}" bash -
-        "${SUDO_CMD[@]}" "$PKG_MGR" install -y nodejs
-      else
-        export NVM_DIR="${HOME}/.nvm"
-        mkdir -p "$NVM_DIR"
-        curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.1/install.sh | bash
-        # shellcheck disable=SC1091
-        [[ -s "$NVM_DIR/nvm.sh" ]] && . "$NVM_DIR/nvm.sh"
-        nvm install 20
-        nvm use 20
+      curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+      if [[ -s "$CARGO_ENV_FILE" ]]; then
+        # shellcheck disable=SC1090
+        . "$CARGO_ENV_FILE"
       fi
     fi
   fi
 fi
 
-log_ok "Prerequisites verified: git ($(git --version 2>/dev/null | head -n1 || echo ok)), curl, node ($(node -v 2>/dev/null || echo '>=20')), npm ($(npm -v 2>/dev/null || echo 'ok'))"
+if [[ "$LOCAL_REPO" -eq 1 ]]; then
+  log_ok "Prerequisites verified: git ($(git --version 2>/dev/null | head -n1 || echo ok)), curl, cargo ($(cargo --version 2>/dev/null || echo 'ok')), rustc ($(rustc --version 2>/dev/null || echo 'ok'))"
+else
+  log_ok "Prerequisites verified: git ($(git --version 2>/dev/null | head -n1 || echo ok)), curl"
+fi
 
 # ── Substep 2.2b: Detect Installed / Local / Remote Versions & In-Place Update ─
 LOCAL_BIN="${HOME}/.local/bin"
@@ -253,7 +276,11 @@ elif command -v aice >/dev/null 2>&1; then
   INSTALLED_VER="$(aice --version 2>/dev/null | head -n1 | tr -d '[:space:]' || echo "none")"
 fi
 
-LOCAL_VER="$(node -e 'try{console.log(require(process.argv[1]).version)}catch{console.log("unknown")}' "${SCRIPT_DIR}/package.json" 2>/dev/null || echo "unknown")"
+LOCAL_VER="unknown"
+if [[ -f "${SCRIPT_DIR}/Cargo.toml" ]]; then
+  LOCAL_VER="$(extract_cargo_version < "${SCRIPT_DIR}/Cargo.toml" 2>/dev/null || true)"
+  [[ -z "$LOCAL_VER" ]] && LOCAL_VER="unknown"
+fi
 REMOTE_VER="$LOCAL_VER"
 
 if [[ "$INSTALLED_VER" != "none" ]]; then
@@ -269,7 +296,8 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
   else
     git -C "$SCRIPT_DIR" fetch --quiet origin main --tags 2>/dev/null || true
     BEHIND_COUNT="$(git -C "$SCRIPT_DIR" rev-list HEAD..origin/main --count 2>/dev/null || echo 0)"
-    REMOTE_VER="$(git -C "$SCRIPT_DIR" show origin/main:package.json 2>/dev/null | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).version)}catch{console.log("latest")}})' 2>/dev/null || echo "$LOCAL_VER")"
+    REMOTE_VER="$(git -C "$SCRIPT_DIR" show origin/main:Cargo.toml 2>/dev/null | extract_cargo_version 2>/dev/null || true)"
+    [[ -z "$REMOTE_VER" ]] && REMOTE_VER="$LOCAL_VER"
     if [[ "$BEHIND_COUNT" =~ ^[0-9]+$ ]] && { [[ "$BEHIND_COUNT" -gt 0 ]] || [[ "$FORCE_UPDATE" -eq 1 ]]; }; then
       if [[ "$BEHIND_COUNT" -gt 0 ]]; then
         log_warn "Remote git repository (origin/main) is ahead by ${BEHIND_COUNT} commit(s) (installed: v${INSTALLED_VER}, local: v${LOCAL_VER} -> remote: v${REMOTE_VER})."
@@ -306,7 +334,8 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
           fi
         fi
         if git -C "$SCRIPT_DIR" pull --ff-only origin main; then
-          LOCAL_VER="$(node -e 'try{console.log(require(process.argv[1]).version)}catch{console.log("unknown")}' "${SCRIPT_DIR}/package.json" 2>/dev/null || echo "$REMOTE_VER")"
+          LOCAL_VER="$(extract_cargo_version < "${SCRIPT_DIR}/Cargo.toml" 2>/dev/null || true)"
+          [[ -z "$LOCAL_VER" ]] && LOCAL_VER="$REMOTE_VER"
           log_ok "Updated AICE git repository to newest version (v${LOCAL_VER})."
         else
           log_warn "Could not fast-forward pull from origin/main; continuing with current working tree (v${LOCAL_VER})."
@@ -325,46 +354,57 @@ if [[ "$NO_UPDATE" -eq 0 ]] && [[ -e "${SCRIPT_DIR}/.git" ]] && command -v git >
   fi
 fi
 
-# ── Substep 2.3: Build & Global Standalone Binary Registration ────────
-if [[ -f "${SCRIPT_DIR}/package.json" ]] && { [[ -f "${SCRIPT_DIR}/bin/aice.ts" ]] || [[ -f "${SCRIPT_DIR}/dist/aice.mjs" ]] || [[ -f "${SCRIPT_DIR}/bin/aice.mjs" ]]; }; then
-  log_info "Installing npm dependencies in ${SCRIPT_DIR} (v${LOCAL_VER})..."
-  run_cmd npm install --no-fund --no-audit
-
-  if grep -q '"build"' "${SCRIPT_DIR}/package.json"; then
-    log_info "Building standalone AICE executable bundle (npm run build)..."
-    run_cmd npm run build
-  fi
-
-  aice_src="${SCRIPT_DIR}/dist/aice.mjs"
-  if [[ ! -f "$aice_src" && -f "${SCRIPT_DIR}/bin/aice.mjs" ]]; then
-    aice_src="${SCRIPT_DIR}/bin/aice.mjs"
-  fi
-
-  run_cmd mkdir -p "$LOCAL_BIN"
-  run_cmd rm -f "${LOCAL_BIN}/aice"
-  run_cmd cp -f "$aice_src" "${LOCAL_BIN}/aice"
-  run_cmd chmod +x "${LOCAL_BIN}/aice"
-  log_ok "Installed standalone binary: ${LOCAL_BIN}/aice (v${LOCAL_VER})"
-else
-  # Running in standalone mode (e.g. curl https://.../install.sh | bash)
-  run_cmd mkdir -p "$LOCAL_BIN"
-  run_cmd rm -f "${LOCAL_BIN}/aice"
-  STANDALONE_URL="https://raw.githubusercontent.com/forart82/aice/main/dist/aice.mjs"
-  log_info "Downloading standalone AICE binary from ${STANDALONE_URL}..."
-  if command -v curl >/dev/null 2>&1; then
-    run_cmd curl -fsSL "$STANDALONE_URL" -o "${LOCAL_BIN}/aice"
-  elif command -v wget >/dev/null 2>&1; then
-    run_cmd wget -qO "${LOCAL_BIN}/aice" "$STANDALONE_URL"
+# ── Substep 2.3: Build & Install Native Rust Release Binary ───────────────────
+if [[ "$LOCAL_REPO" -eq 1 ]]; then
+  log_info "Building native Rust release binary (v${LOCAL_VER})..."
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '  [dry-run] cargo build --release --manifest-path %s/Cargo.toml --offline\n' "$SCRIPT_DIR"
   else
-    log_err "Neither curl nor wget found. Please install curl or wget."
-    exit 1
+    if ! cargo build --release --manifest-path "${SCRIPT_DIR}/Cargo.toml" --offline; then
+      cargo build --release --manifest-path "${SCRIPT_DIR}/Cargo.toml"
+    fi
   fi
-  run_cmd chmod +x "${LOCAL_BIN}/aice"
-  LOCAL_VER="$("${LOCAL_BIN}/aice" --version 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
-  LOCAL_VER="${LOCAL_VER#v}"
-  [[ -z "$LOCAL_VER" ]] && LOCAL_VER="latest"
+
+  run_cmd mkdir -p "$LOCAL_BIN"
+  run_cmd rm -f "${LOCAL_BIN}/aice"
+  run_cmd install -m 755 "${SCRIPT_DIR}/target/release/aice" "${LOCAL_BIN}/aice"
+  log_ok "Installed native Rust binary: ${LOCAL_BIN}/aice (v${LOCAL_VER})"
+else
+  ARCH="$(uname -m)"
+  RELEASE_URL="https://github.com/forart82/aice/releases/latest/download/aice-linux-${ARCH}"
+  run_cmd mkdir -p "$LOCAL_BIN"
+  run_cmd rm -f "${LOCAL_BIN}/aice"
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '  [dry-run] curl -fsSL %s -o %s/aice (fallback: git clone + cargo build --release)\n' "$RELEASE_URL" "$LOCAL_BIN"
+  else
+    log_info "Downloading standalone AICE binary from ${RELEASE_URL}..."
+    if curl -fsSL "$RELEASE_URL" -o "${LOCAL_BIN}/aice" 2>/dev/null; then
+      chmod 755 "${LOCAL_BIN}/aice"
+    else
+      log_warn "Prebuilt release asset unavailable for ${ARCH}; cloning and building from source..."
+      [[ -z "$STANDALONE_TMP_DIR" ]] && STANDALONE_TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/aice-install.XXXXXX")"
+      if ! command -v cc >/dev/null 2>&1 && ! command -v gcc >/dev/null 2>&1 && ! command -v clang >/dev/null 2>&1; then
+        case "$PKG_MGR" in
+          apt-get) install_sys_packages build-essential ;;
+          pacman)  install_sys_packages base-devel ;;
+          *)       install_sys_packages gcc ;;
+        esac
+      fi
+      if ! command -v cargo >/dev/null 2>&1 || ! command -v rustc >/dev/null 2>&1; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+        [[ -s "$CARGO_ENV_FILE" ]] && . "$CARGO_ENV_FILE"
+      fi
+      git clone --depth 1 https://github.com/forart82/aice.git "${STANDALONE_TMP_DIR}/aice"
+      cargo build --release --manifest-path "${STANDALONE_TMP_DIR}/aice/Cargo.toml"
+      install -m 755 "${STANDALONE_TMP_DIR}/aice/target/release/aice" "${LOCAL_BIN}/aice"
+    fi
+    LOCAL_VER="$("${LOCAL_BIN}/aice" --version 2>/dev/null | head -n1 | tr -d '[:space:]' || true)"
+    LOCAL_VER="${LOCAL_VER#v}"
+    [[ -z "$LOCAL_VER" ]] && LOCAL_VER="latest"
+  fi
   log_ok "Installed standalone binary: ${LOCAL_BIN}/aice (v${LOCAL_VER})"
 fi
+
 # Ensure $HOME/.local/bin is in PATH
 if [[ ":${PATH}:" != *":${LOCAL_BIN}:"* ]]; then
   export PATH="${LOCAL_BIN}:${PATH}"
@@ -391,6 +431,21 @@ if [[ "${SHELL:-}" == */zsh ]] || [[ -n "${ZSH_VERSION:-}" ]]; then
   IS_ZSH=1
 fi
 
+strip_cheatsheet_block() {
+  local rc_file="$1"
+  local tmp_file
+  tmp_file="$(mktemp "${rc_file}.tmp.XXXXXX")"
+  awk '
+    BEGIN { in_blk = 0; blank_pending = 0 }
+    /^# >>> aice-cheatsheet >>>[[:space:]]*$/ { in_blk = 1; next }
+    in_blk && /^# <<< aice-cheatsheet <<<[[:space:]]*$/ { in_blk = 0; blank_pending = 1; next }
+    in_blk { next }
+    blank_pending && /^[[:space:]]*$/ { blank_pending = 0; next }
+    { blank_pending = 0; print }
+  ' "$rc_file" > "$tmp_file"
+  mv "$tmp_file" "$rc_file"
+}
+
 inject_zsh_cheatsheet() {
   local zshrc="${HOME}/.zshrc"
   if [[ "$DRY_RUN" -eq 1 ]]; then
@@ -400,16 +455,27 @@ inject_zsh_cheatsheet() {
 
   touch "$zshrc"
   if grep -Fq "# >>> aice-cheatsheet >>>" "$zshrc" 2>/dev/null; then
-    node -e '
-      const fs = require("fs");
-      const p = process.argv[1];
-      let c = fs.readFileSync(p, "utf-8");
-      c = c.replace(/\n?# >>> aice-cheatsheet >>>[\s\S]*?# <<< aice-cheatsheet <<<\n?/g, "\n");
-      fs.writeFileSync(p, c, "utf-8");
-    ' "$zshrc"
+    strip_cheatsheet_block "$zshrc"
   fi
 
-  cat <<'CHEATSHEET_EOF' >> "$zshrc"
+  local ver="${LOCAL_VER}"
+  if [[ -z "$ver" || "$ver" == "unknown" ]]; then
+    ver="$("$AICE_BIN" --version 2>/dev/null | head -n1 | tr -d '[:space:]' || echo "0.9.53")"
+  fi
+  ver="${ver#v}"
+  [[ -z "$ver" ]] && ver="0.9.53"
+
+  local title_pad_len=$(( 77 - 66 - ${#ver} ))
+  (( title_pad_len < 1 )) && title_pad_len=1
+  local title_pad
+  title_pad="$(printf '%*s' "$title_pad_len" '')"
+
+  local inspect_pad_len=$(( 7 - ${#ver} ))
+  (( inspect_pad_len < 0 )) && inspect_pad_len=0
+  local inspect_pad
+  inspect_pad="$(printf '%*s' "$inspect_pad_len" '')"
+
+  cat >> "$zshrc" <<CHEATSHEET_EOF
 
 # >>> aice-cheatsheet >>>
 aice_cheatsheet() {
@@ -420,18 +486,18 @@ aice_cheatsheet() {
   local C_MAGENTA="\033[1;35m"
   local C_BOLD="\033[1m"
   local C_GRAY="\033[0;90m"
-  printf "\n${C_CYAN}${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_BOLD}AICE v0.9.53 — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)${C_RESET}     ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_YELLOW}${C_BOLD}[1] STRICT 2-TOOL AI SURFACE${C_RESET}          ${C_CYAN}${C_BOLD}│${C_RESET} ${C_MAGENTA}${C_BOLD}[2] SELECTORS, AGENTS & TELEMETRY${C_RESET}    ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice read <target>${C_RESET}  ${C_GRAY}dirs, files, :sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice gain [project]${C_RESET}  ${C_GRAY}Token savings${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice read <target>${C_RESET}  ${C_GRAY}:L10-50, :/pat/  ${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice analyze [dir]${C_RESET}   ${C_GRAY}Session audit${C_RESET}   ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice splice <file>${C_RESET}  ${C_GRAY}auto-create, :sym${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents setup${C_RESET}    ${C_GRAY}Wire CLI agents${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice write <file>${C_RESET}   ${C_GRAY}<<< === >>>/stdin${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice agents status${C_RESET}   ${C_GRAY}Inspect v0.9.53${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice read src tests${C_RESET}  ${C_GRAY}Auto-outline dir${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET} ${C_GREEN}aice enable|disable${C_RESET}  ${C_GRAY}Toggle project${C_RESET}  ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}│${C_RESET} ${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0${C_RESET} ${C_CYAN}${C_BOLD}│${C_RESET}\n"
-  printf "${C_CYAN}${C_BOLD}╰──────────────────────────────────────────────────────────────────────────────╯${C_RESET}\n"
+  printf "\n\${C_CYAN}\${C_BOLD}╭──────────────────────────────────────────────────────────────────────────────╮\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_BOLD}AICE v${ver} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)\${C_RESET}${title_pad}\${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}├───────────────────────────────────────┬──────────────────────────────────────┤\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_YELLOW}\${C_BOLD}[1] UNIFIED READ/SEARCH/FIND/SPLICE\${C_RESET}   \${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_MAGENTA}\${C_BOLD}[2] SELECTORS, AGENTS & TELEMETRY\${C_RESET}    \${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice read <target>\${C_RESET}  \${C_GRAY}AICE IR / :sym\${C_RESET}    \${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice gain [project]\${C_RESET}  \${C_GRAY}BPE savings\${C_RESET}     \${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice find | search\${C_RESET}  \${C_GRAY}<pat> [dir]\${C_RESET}       \${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice analyze [dir]\${C_RESET}   \${C_GRAY}Session audit\${C_RESET}   \${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice splice <file>\${C_RESET}  \${C_GRAY}create, :sym, #\${C_RESET}   \${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice agents setup\${C_RESET}    \${C_GRAY}Wire CLI agents\${C_RESET} \${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice write <file>\${C_RESET}   \${C_GRAY}<<< === >>>/stdin\${C_RESET} \${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice agents status\${C_RESET}   \${C_GRAY}Inspect v${ver}${inspect_pad}\${C_RESET}\${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice read src tests\${C_RESET} \${C_GRAY}Auto-outline dir\${C_RESET}  \${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GREEN}aice enable|disable\${C_RESET}  \${C_GRAY}Toggle project\${C_RESET}  \${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}├───────────────────────────────────────┴──────────────────────────────────────┤\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}│\${C_RESET} \${C_GRAY}GitHub: https://github.com/forart82/aice •  Alias: aice-cheat  •  Apache-2.0\${C_RESET} \${C_CYAN}\${C_BOLD}│\${C_RESET}\n"
+  printf "\${C_CYAN}\${C_BOLD}╰──────────────────────────────────────────────────────────────────────────────╯\${C_RESET}\n"
 }
 alias aice-cheat="aice_cheatsheet"
 if [[ -o interactive ]]; then
@@ -439,26 +505,6 @@ if [[ -o interactive ]]; then
 fi
 # <<< aice-cheatsheet <<<
 CHEATSHEET_EOF
-  if [[ -n "${LOCAL_VER:-}" ]] && [[ "${LOCAL_VER}" != "unknown" ]]; then
-    node -e '
-      const fs = require("fs");
-      const [p, ver] = process.argv.slice(1);
-      let c = fs.readFileSync(p, "utf-8");
-      const title = `AICE v${ver} — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET (@forart82)`;
-      const titlePad = " ".repeat(Math.max(1, 77 - [...title].length));
-      c = c.replace(
-        /AICE v[^ ]+ — ON-THE-FLY AI CONTEXT ENGINE & AST CHEATSHEET \(@forart82\)\$\{C_RESET\}\s+/,
-        `${title}\${C_RESET}${titlePad}`,
-      );
-      const inspect = `Inspect v${ver}`;
-      const inspectPad = " ".repeat(Math.max(0, 16 - [...inspect].length));
-      c = c.replace(
-        /Inspect v[^$]+\$\{C_RESET\}\s*/,
-        `${inspect}\${C_RESET}${inspectPad}`,
-      );
-      fs.writeFileSync(p, c, "utf-8");
-    ' "$zshrc" "$LOCAL_VER"
-  fi
   log_ok "Installed aice_cheatsheet block into ${zshrc}"
 }
 
@@ -490,10 +536,54 @@ else
 fi
 
 # ── Substep 2.5: Global Agent Wiring, MCP Schemas & Opt-In Workspace Refresh ──
+sync_opted_projects() {
+  local raw_dir="$1"
+  local base_home="${AICE_AGENT_HOME:-${HOME}}"
+  local dev_dir="${raw_dir:-${base_home}/dev}"
+  local refreshed_count=0
+  local disabled_cleaned_count=0
+
+  if [[ -d "$dev_dir" ]]; then
+    dev_dir="$(cd "$dev_dir" && pwd)"
+    for proj_path in "${dev_dir}"/*/; do
+      [[ -d "$proj_path" ]] || continue
+      proj_path="${proj_path%/}"
+      local name
+      name="$(basename "$proj_path")"
+      [[ "$name" == .* ]] && continue
+      case "$name" in
+        node_modules|android-env|zshrc) continue ;;
+      esac
+      local lower_name
+      lower_name="$(printf '%s' "$name" | tr '[:upper:]' '[:lower:]')"
+      if [[ "$lower_name" == *_noaice || "$lower_name" == *_nonaice ]]; then
+        continue
+      fi
+      if [[ -f "${proj_path}/Cargo.toml" && -f "${proj_path}/crates/aice-cli/src/main.rs" ]]; then
+        continue
+      fi
+      [[ -f "${proj_path}/aice.config.json" ]] || continue
+
+      local cfg_json=""
+      if ! cfg_json="$("$AICE_BIN" config --json "$proj_path" 2>/dev/null)"; then
+        continue
+      fi
+      if printf '%s' "$cfg_json" | grep -Eq '"enabled"[[:space:]]*:[[:space:]]*false'; then
+        (cd "$proj_path" && "$AICE_BIN" disable >/dev/null 2>&1 || true)
+        disabled_cleaned_count=$((disabled_cleaned_count + 1))
+      else
+        (cd "$proj_path" && "$AICE_BIN" enable >/dev/null 2>&1 || true)
+        refreshed_count=$((refreshed_count + 1))
+      fi
+    done
+  fi
+  log_ok "Synchronized explicit aice.config.json projects in ${dev_dir} (${refreshed_count} enabled refreshed, ${disabled_cleaned_count} disabled cleaned)"
+}
+
 if [[ "$DRY_RUN" -eq 1 ]]; then
   if [[ "$NO_AGENTS" -eq 0 ]]; then
     printf '  [dry-run] %s agents setup\n' "$AICE_BIN"
-    printf '  [dry-run] regenerate MCP schemas in ~/.gemini/antigravity-cli/mcp/aice/\n'
+    printf '  [dry-run] %s mcp --generate-schemas %s/.gemini/antigravity-cli/mcp/aice\n' "$AICE_BIN" "${AICE_AGENT_HOME:-${HOME}}"
     if [[ "$SYNC_PROJECTS" -eq 1 ]] || [[ -n "${AICE_PROJECTS_DIR:-}" ]]; then
       printf '  [dry-run] refresh explicit aice.config.json projects in %s\n' "${SYNC_PROJECTS_DIR:-${AICE_PROJECTS_DIR:-~/dev}}"
     fi
@@ -505,47 +595,14 @@ else
     log_info "Configuring global CLI coding agents (aice agents setup)..."
     "$AICE_BIN" agents setup
 
-    log_info "Regenerating MCP tool schemas (aice mcp --generate-schemas)..."
-    "$AICE_BIN" mcp --generate-schemas
+    MCP_SCHEMA_DIR="${AICE_AGENT_HOME:-${HOME}}/.gemini/antigravity-cli/mcp/aice"
+    log_info "Regenerating MCP tool schemas in ${MCP_SCHEMA_DIR}..."
+    "$AICE_BIN" mcp --generate-schemas "$MCP_SCHEMA_DIR"
 
     if [[ "$SYNC_PROJECTS" -eq 1 ]] || [[ -n "${AICE_PROJECTS_DIR:-}" ]]; then
       TARGET_PROJECTS_DIR="${SYNC_PROJECTS_DIR:-${AICE_PROJECTS_DIR:-}}"
       log_info "Refreshing opted-in AICE workspaces in ${TARGET_PROJECTS_DIR:-~/dev}..."
-      AICE_SYNC_TARGET_DIR="$TARGET_PROJECTS_DIR" node -e '
-        const fs = require("node:fs");
-        const os = require("node:os");
-        const path = require("node:path");
-        const { spawnSync } = require("node:child_process");
-        const aiceBin = process.argv[1];
-        const homeDir = process.env.AICE_AGENT_HOME ? path.resolve(process.env.AICE_AGENT_HOME) : os.homedir();
-        const rawDir = process.env.AICE_SYNC_TARGET_DIR || process.env.AICE_PROJECTS_DIR || path.join(homeDir, "dev");
-        const devDir = path.resolve(rawDir);
-        const SKIP_DIRS = new Set(["node_modules", "android-env", ".git", "zshrc"]);
-
-        let refreshedCount = 0;
-        let disabledCleanedCount = 0;
-        if (fs.existsSync(devDir) && fs.statSync(devDir).isDirectory()) {
-          for (const entry of fs.readdirSync(devDir, { withFileTypes: true })) {
-            if (!entry.isDirectory()) continue;
-            if (entry.name.startsWith(".") || SKIP_DIRS.has(entry.name)) continue;
-            if (/_no(?:n)?aice$/i.test(entry.name)) continue;
-            const projPath = path.join(devDir, entry.name);
-            const cfgPath = path.join(projPath, "aice.config.json");
-            if (!fs.existsSync(cfgPath)) continue;
-            try {
-              const cfg = JSON.parse(fs.readFileSync(cfgPath, "utf-8"));
-              if (cfg.enabled !== false) {
-                spawnSync(aiceBin, ["enable"], { cwd: projPath, stdio: "ignore" });
-                refreshedCount++;
-              } else {
-                spawnSync(aiceBin, ["disable"], { cwd: projPath, stdio: "ignore" });
-                disabledCleanedCount++;
-              }
-            } catch {}
-          }
-        }
-        console.log(`[✔] Synchronized explicit aice.config.json projects in ${devDir} (${refreshedCount} enabled refreshed, ${disabledCleanedCount} disabled cleaned)`);
-      ' "$AICE_BIN"
+      sync_opted_projects "$TARGET_PROJECTS_DIR"
     fi
   fi
   log_info "Running post-install smoke checks..."

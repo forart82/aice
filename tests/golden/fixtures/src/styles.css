@@ -1,0 +1,11 @@
+.status-card {
+  display: flex;
+  padding: 12px 16px;
+  border: 1px solid #334155;
+  color: #f8fafc;
+}
+
+.status-card h2 {
+  font-size: 16px;
+  margin: 0;
+}

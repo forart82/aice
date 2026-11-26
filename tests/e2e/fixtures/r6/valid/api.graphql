@@ -1,0 +1,18 @@
+type Account {
+  id: ID!
+  owner: String!
+  balance: Int!
+}
+
+input CreditInput {
+  accountId: ID!
+  amount: Int!
+}
+
+type Query {
+  account(id: ID!): Account
+}
+
+type Mutation {
+  creditAccount(input: CreditInput!): Account!
+}

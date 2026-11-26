@@ -99,6 +99,162 @@ run_cmd() {
   "$@"
 }
 
+# Pure POSIX mawk-compatible fence-aware markdown directive stripper.
+# Returns 0 if file was modified/deleted, 1 if unchanged.
+strip_aice_markdown_file() {
+  local mdfile="$1"
+  local clean_empty_dirs="${2:-0}"
+  [[ -f "$mdfile" ]] || return 1
+
+  local tmp_file
+  tmp_file="$(mktemp "${mdfile}.tmp.XXXXXX")"
+
+  local changed=0
+  if awk '
+    function ltrim(s) { sub(/^[ \t]+/, "", s); return s }
+    function rtrim(s) { sub(/[ \t\r]+$/, "", s); return s }
+    function trim(s)  { return rtrim(ltrim(s)) }
+    function count_lead(s, ch,    n) {
+      n = 0
+      while (substr(s, n + 1, 1) == ch) n++
+      return n
+    }
+    function parse_fence(raw,    indent, trimmed, ch, cnt, rest) {
+      trimmed = raw
+      sub(/^[ \t]+/, "", trimmed)
+      indent = length(raw) - length(trimmed)
+      if (indent > 3) return 0
+      ch = substr(trimmed, 1, 1)
+      if (ch != "`" && ch != "~") return 0
+      cnt = count_lead(trimmed, ch)
+      if (cnt < 3) return 0
+      rest = substr(trimmed, cnt + 1)
+      f_ch = ch; f_cnt = cnt; f_rest = rest
+      return 1
+    }
+    function is_aice_start(s,    t, low) {
+      t = trim(s)
+      if (t ~ /^<!--[ \t]*AICE:START([ \t]+v[0-9A-Za-z._-]+)?[ \t]*-->$/) return 1
+      low = tolower(t)
+      if (low ~ /^##[ \t]+aice/ && (index(low, "- mandatory") > 0 || index(low, "cheat-card") > 0)) return 1
+      return 0
+    }
+    function is_aice_end(s,    t) {
+      t = trim(s)
+      return (t ~ /^<!--[ \t]*AICE:END[ \t]*-->$/) ? 1 : 0
+    }
+    function is_non_aice_heading(s,    t, low) {
+      t = ltrim(s)
+      if (!(t ~ /^(#|##)[ \t]+/)) return 0
+      low = tolower(t)
+      if (low ~ /^##[ \t]+aice($|[ \t(:-])/) return 0
+      return 1
+    }
+    BEGIN {
+      fence_ch = ""; fence_len = 0; active = 0; had_dir = 0; n_out = 0; prev_blank = 1
+    }
+    {
+      raw = $0
+      sub(/\r$/, "", raw)
+      if (parse_fence(raw)) {
+        if (fence_ch == "") {
+          if (f_ch == "~" || index(f_rest, "`") == 0) {
+            fence_ch = f_ch; fence_len = f_cnt
+          }
+        } else if (f_ch == fence_ch && f_cnt >= fence_len && f_rest ~ /^[ \t]*$/) {
+          fence_ch = ""; fence_len = 0
+        }
+        if (!active) { out[++n_out] = raw; prev_blank = 0 }
+        next
+      }
+      if (fence_ch == "") {
+        if (!active) {
+          if (is_aice_start(raw)) { active = 1; had_dir = 1; next }
+        } else {
+          if (is_aice_end(raw)) { active = 0; next }
+          if (is_non_aice_heading(raw)) {
+            active = 0
+            if (n_out > 0 && out[n_out] != "") out[++n_out] = ""
+            out[++n_out] = raw
+            prev_blank = 0
+            next
+          }
+          next
+        }
+      }
+      if (raw ~ /^[ \t]*$/) {
+        if (n_out > 0 && !prev_blank) { out[++n_out] = ""; prev_blank = 1 }
+      } else {
+        out[++n_out] = raw; prev_blank = 0
+      }
+    }
+    END {
+      while (n_out > 0 && out[n_out] == "") n_out--
+      if (!had_dir && n_out > 0) exit 2
+      for (i = 1; i <= n_out; i++) print out[i]
+    }
+  ' "$mdfile" > "$tmp_file"; then
+    changed=1
+  else
+    rc=$?
+    rm -f "$tmp_file"
+    if [[ "$rc" -eq 2 ]]; then
+      return 1
+    fi
+    return "$rc"
+  fi
+
+  if [[ "$changed" -eq 1 ]]; then
+    if [[ ! -s "$tmp_file" ]] || [[ -z "$(tr -d '[:space:]' < "$tmp_file")" ]]; then
+      rm -f "$tmp_file" "$mdfile"
+      if [[ "$clean_empty_dirs" -eq 1 ]]; then
+        local rdir rbase
+        rdir="$(dirname "$mdfile")"
+        rbase="$(basename "$rdir")"
+        case "$rbase" in
+          .claude|.codex|.agents|.gemini|rules)
+            rmdir "$rdir" 2>/dev/null || true
+            ;;
+        esac
+      fi
+    else
+      mv "$tmp_file" "$mdfile"
+    fi
+    return 0
+  fi
+  rm -f "$tmp_file"
+  return 1
+}
+
+strip_zshrc_cheatsheet() {
+  local rc_file="$1"
+  local tmp_file
+  tmp_file="$(mktemp "${rc_file}.tmp.XXXXXX")"
+  awk '
+    BEGIN { in_blk = 0; blank_pending = 0 }
+    /^# >>> aice-cheatsheet >>>[[:space:]]*$/ { in_blk = 1; next }
+    in_blk && /^# <<< aice-cheatsheet <<<[[:space:]]*$/ { in_blk = 0; blank_pending = 1; next }
+    in_blk { next }
+    blank_pending && /^[[:space:]]*$/ { blank_pending = 0; next }
+    { blank_pending = 0; print }
+  ' "$rc_file" > "$tmp_file"
+  mv "$tmp_file" "$rc_file"
+}
+
+is_in_aice_repo() {
+  local d="$1"
+  if [[ -d "$d" ]]; then
+    d="$(cd -- "$d" 2>/dev/null && pwd -P)" || return 1
+  fi
+  while [[ -n "$d" && "$d" != "/" && "$d" != "." ]]; do
+    if [[ -f "${d}/Cargo.toml" && -f "${d}/crates/aice-cli/src/main.rs" ]]; then
+      return 0
+    fi
+    d="$(dirname -- "$d")"
+  done
+  return 1
+}
+
 log_info "Starting AICE uninstallation (dry_run=${DRY_RUN}, auto_yes=${AUTO_YES})..."
 
 # ── Step 1: Unwire CLI Coding Agents (aice agents remove) ─────────────────────
@@ -108,8 +264,8 @@ if [[ "$KEEP_AGENTS" -eq 0 ]]; then
     AICE_RUNNER="${HOME}/.local/bin/aice"
   elif command -v aice >/dev/null 2>&1; then
     AICE_RUNNER="$(command -v aice)"
-  elif [[ -f "${SCRIPT_DIR}/bin/aice.mjs" ]] && command -v node >/dev/null 2>&1; then
-    AICE_RUNNER="${SCRIPT_DIR}/bin/aice.mjs"
+  elif [[ -x "${SCRIPT_DIR}/target/release/aice" ]]; then
+    AICE_RUNNER="${SCRIPT_DIR}/target/release/aice"
   fi
 
   if [[ -n "$AICE_RUNNER" ]]; then
@@ -117,119 +273,32 @@ if [[ "$KEEP_AGENTS" -eq 0 ]]; then
     if [[ "$DRY_RUN" -eq 1 ]]; then
       printf '  [dry-run] %s agents remove\n' "$AICE_RUNNER"
     else
-      if [[ "$AICE_RUNNER" == *.mjs ]]; then
-        node "$AICE_RUNNER" agents remove || log_warn "aice agents remove returned non-zero status"
-      else
-        "$AICE_RUNNER" agents remove || log_warn "aice agents remove returned non-zero status"
-      fi
+      "$AICE_RUNNER" agents remove || log_warn "aice agents remove returned non-zero status"
       log_ok "Removed AICE CLI coding agent integrations"
     fi
   else
     log_info "No aice runner found for 'aice agents remove'; skipping agent unwiring."
   fi
 
-  # Run fence-aware Node fallback cleaner across global agent markdown surfaces
-  if command -v node >/dev/null 2>&1; then
-    if [[ "$DRY_RUN" -eq 1 ]]; then
-      printf '  [dry-run] strip global agent AICE directives and orphan markdown files\n'
-    else
-      node -e '
-        const fs = require("node:fs");
-        const path = require("node:path");
-        const home = process.env.HOME || process.env.USERPROFILE || "";
-        if (!home) process.exit(0);
-
-        const TARGETS = [
-          path.join(home, ".claude", "CLAUDE.md"),
-          path.join(home, ".gemini", "GEMINI.md"),
-          path.join(home, ".gemini", "config", "GEMINI.md"),
-          path.join(home, ".gemini", "antigravity-cli", "GEMINI.md"),
-          path.join(home, ".codex", "AGENTS.md"),
-          path.join(home, ".codex", "CODEX.md"),
-          path.join(home, ".codex", "instructions.md"),
-          path.join(home, ".config", "opencode", "AGENTS.md"),
-          path.join(home, ".aider", "CONVENTIONS.md"),
-        ];
-
-        function stripDirectives(text) {
-          let fenceChar = null;
-          let fenceLen = 0;
-          let activeStart = -1;
-          const spans = [];
-          let pos = 0;
-          const total = text.length;
-          while (pos <= total) {
-            const nl = text.indexOf("\n", pos);
-            const lineEnd = nl === -1 ? total : nl;
-            const raw = text.slice(pos, lineEnd);
-            const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-            const fence = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
-            if (fence) {
-              const m = fence[1];
-              const ch = m[0];
-              const rest = fence[2] || "";
-              if (!fenceChar) {
-                if (ch === "~" || !rest.includes("`")) {
-                  fenceChar = ch;
-                  fenceLen = m.length;
-                }
-              } else if (ch === fenceChar && m.length >= fenceLen && /^[ \t]*$/.test(rest)) {
-                fenceChar = null;
-                fenceLen = 0;
-              }
-            } else if (!fenceChar) {
-              const isStart =
-                /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(line) ||
-                /^[ \t]*##\s+AICE(?:\s+\(?v?[0-9A-Za-z._-]+\)?)?\s*[-—]\s*(?:MANDATORY|\d+-Tool\s+AST\s+Cheat-Card)/i.test(line);
-              const isEnd = /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(line);
-              const isNonAiceHeading =
-                /^[ \t]*#{1,2}[ \t]+/.test(line) && !/^[ \t]*##\s+AICE\b/i.test(line);
-              if (activeStart === -1) {
-                if (isStart) activeStart = pos;
-              } else {
-                if (isEnd) {
-                  spans.push({ start: activeStart, end: pos + line.length });
-                  activeStart = -1;
-                } else if (isNonAiceHeading) {
-                  spans.push({ start: activeStart, end: pos });
-                  activeStart = -1;
-                }
-              }
-            }
-            if (nl === -1) break;
-            pos = nl + 1;
-          }
-          if (activeStart !== -1) spans.push({ start: activeStart, end: total });
-          if (spans.length === 0) return { stripped: text.trim(), hadDirective: false };
-          const segs = [];
-          let last = 0;
-          for (const s of spans) {
-            const seg = text.slice(last, s.start).trim();
-            if (seg) segs.push(seg);
-            last = s.end;
-          }
-          const trail = text.slice(last).trim();
-          if (trail) segs.push(trail);
-          return { stripped: segs.join("\n\n"), hadDirective: true };
-        }
-
-        for (const file of TARGETS) {
-          if (!fs.existsSync(file)) continue;
-          try {
-            const raw = fs.readFileSync(file, "utf-8");
-            const { stripped, hadDirective } = stripDirectives(raw);
-            if (hadDirective || raw.trim().length === 0) {
-              if (stripped.length === 0) {
-                fs.unlinkSync(file);
-              } else {
-                fs.writeFileSync(file, stripped + "\n", "utf-8");
-              }
-            }
-          } catch {}
-        }
-      '
-    fi
+  GLOBAL_MD_TARGETS=(
+    "${HOME}/.claude/CLAUDE.md"
+    "${HOME}/.gemini/GEMINI.md"
+    "${HOME}/.gemini/config/GEMINI.md"
+    "${HOME}/.gemini/antigravity-cli/GEMINI.md"
+    "${HOME}/.codex/AGENTS.md"
+    "${HOME}/.codex/CODEX.md"
+    "${HOME}/.codex/instructions.md"
+    "${HOME}/.config/opencode/AGENTS.md"
+    "${HOME}/.aider/CONVENTIONS.md"
+  )
+  if [[ "$DRY_RUN" -eq 1 ]]; then
+    printf '  [dry-run] strip global agent AICE directives and orphan markdown files\n'
+  else
+    for gmd in "${GLOBAL_MD_TARGETS[@]}"; do
+      strip_aice_markdown_file "$gmd" 0 || true
+    done
   fi
+
   if [[ -f "${HOME}/.gemini/config/rules/aice.md" ]]; then
     run_cmd rm -f "${HOME}/.gemini/config/rules/aice.md"
     log_ok "Removed global Antigravity rule: ${HOME}/.gemini/config/rules/aice.md"
@@ -253,17 +322,8 @@ if [[ -f "$ZSHRC_FILE" ]]; then
     log_info "Removing AICE Zsh startup cheatsheet from ${ZSHRC_FILE}..."
     if [[ "$DRY_RUN" -eq 1 ]]; then
       printf '  [dry-run] strip # >>> aice-cheatsheet >>> block from %s\n' "$ZSHRC_FILE"
-    elif command -v node >/dev/null 2>&1; then
-      node -e '
-        const fs = require("fs");
-        const file = process.argv[1];
-        let content = fs.readFileSync(file, "utf8");
-        content = content.replace(/\n?# >>> aice-cheatsheet >>>[\s\S]*?# <<< aice-cheatsheet <<<\n?/g, "\n");
-        fs.writeFileSync(file, content, "utf8");
-      ' "$ZSHRC_FILE"
-      log_ok "Removed aice_cheatsheet block from ${ZSHRC_FILE}"
     else
-      sed -i '/# >>> aice-cheatsheet >>>/,/# <<< aice-cheatsheet <<</d' "$ZSHRC_FILE"
+      strip_zshrc_cheatsheet "$ZSHRC_FILE"
       log_ok "Removed aice_cheatsheet block from ${ZSHRC_FILE}"
     fi
   else
@@ -306,16 +366,17 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     )
 
     if [[ ${#CONFIG_FILES[@]} -gt 0 ]]; then
+      REMOVED_CFGS=0
       for cfg in "${CONFIG_FILES[@]}"; do
         [[ -z "$cfg" ]] && continue
-        cfg_dir="$(dirname "$cfg")"
-        if [[ -f "${cfg_dir}/bin/aice.ts" && -f "${cfg_dir}/src/tools/splice.ts" ]]; then
+        if is_in_aice_repo "$(dirname -- "$cfg")"; then
           continue
         fi
         run_cmd rm -f "$cfg"
         log_ok "Removed project config: ${cfg}"
+        REMOVED_CFGS=$((REMOVED_CFGS + 1))
       done
-      log_ok "Removed ${#CONFIG_FILES[@]} project configuration file(s) under ${PROJECTS_DIR}"
+      log_ok "Removed ${REMOVED_CFGS} project configuration file(s) under ${PROJECTS_DIR}"
     else
       log_info "No aice.config.json files found under ${PROJECTS_DIR}."
     fi
@@ -343,8 +404,11 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     if [[ ${#CACHE_DIRS[@]} -gt 0 ]]; then
       for cdir in "${CACHE_DIRS[@]}"; do
         [[ -z "$cdir" ]] && continue
+        if is_in_aice_repo "$(dirname -- "$cdir")"; then
+          continue
+        fi
         run_cmd rm -rf "$cdir"
-        log_ok "Removed project idiom cache: ${cdir}"
+        log_ok "Removed project cache: ${cdir}"
       done
     fi
 
@@ -375,6 +439,9 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     if [[ ${#PROJECT_RULE_FILES[@]} -gt 0 ]]; then
       for rfile in "${PROJECT_RULE_FILES[@]}"; do
         [[ -z "$rfile" ]] && continue
+        if is_in_aice_repo "$(dirname -- "$rfile")"; then
+          continue
+        fi
         run_cmd rm -f "$rfile"
         if [[ "$DRY_RUN" -eq 0 ]]; then
           rdir="$(dirname "$rfile")"
@@ -420,104 +487,15 @@ if [[ "$KEEP_PROJECT_CONFIGS" -eq 0 ]]; then
     if [[ ${#PROJECT_MD_FILES[@]} -gt 0 ]]; then
       for mdfile in "${PROJECT_MD_FILES[@]}"; do
         [[ -z "$mdfile" ]] && continue
-        if grep -Eq "<!--\s*AICE:START|##\s+AICE" "$mdfile" 2>/dev/null; then
+        if is_in_aice_repo "$(dirname -- "$mdfile")"; then
+          continue
+        fi
+        if grep -Eq "<!--[[:space:]]*AICE:START|##[[:space:]]+AICE" "$mdfile" 2>/dev/null; then
           if [[ "$DRY_RUN" -eq 1 ]]; then
             printf '  [dry-run] strip AICE directive / clean orphan markdown from %s\n' "$mdfile"
-          elif command -v node >/dev/null 2>&1; then
-            node -e '
-              const fs = require("node:fs");
-              const path = require("node:path");
-              const file = process.argv[1];
-              let content = fs.readFileSync(file, "utf8");
-
-              let fenceChar = null;
-              let fenceLen = 0;
-              let activeStart = -1;
-              const spans = [];
-              let pos = 0;
-              const total = content.length;
-              while (pos <= total) {
-                const nl = content.indexOf("\n", pos);
-                const lineEnd = nl === -1 ? total : nl;
-                const raw = content.slice(pos, lineEnd);
-                const line = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
-                const fence = line.match(/^[ \t]{0,3}(`{3,}|~{3,})(.*)$/);
-                if (fence) {
-                  const m = fence[1];
-                  const ch = m[0];
-                  const rest = fence[2] || "";
-                  if (!fenceChar) {
-                    if (ch === "~" || !rest.includes("`")) {
-                      fenceChar = ch;
-                      fenceLen = m.length;
-                    }
-                  } else if (ch === fenceChar && m.length >= fenceLen && /^[ \t]*$/.test(rest)) {
-                    fenceChar = null;
-                    fenceLen = 0;
-                  }
-                } else if (!fenceChar) {
-                  const isStart =
-                    /^[ \t]*<!--\s*AICE:START(?:\s+v[0-9A-Za-z._-]+)?\s*-->[ \t]*$/.test(line) ||
-                    /^[ \t]*##\s+AICE(?:\s+\(?v?[0-9A-Za-z._-]+\)?)?\s*[-—]\s*(?:MANDATORY|\d+-Tool\s+AST\s+Cheat-Card)/i.test(line);
-                  const isEnd = /^[ \t]*<!--\s*AICE:END\s*-->[ \t]*$/.test(line);
-                  const isNonAiceHeading =
-                    /^[ \t]*#{1,2}[ \t]+/.test(line) && !/^[ \t]*##\s+AICE\b/i.test(line);
-                  if (activeStart === -1) {
-                    if (isStart) activeStart = pos;
-                  } else {
-                    if (isEnd) {
-                      spans.push({ start: activeStart, end: pos + line.length });
-                      activeStart = -1;
-                    } else if (isNonAiceHeading) {
-                      spans.push({ start: activeStart, end: pos });
-                      activeStart = -1;
-                    }
-                  }
-                }
-                if (nl === -1) break;
-                pos = nl + 1;
-              }
-              if (activeStart !== -1) spans.push({ start: activeStart, end: total });
-              if (spans.length === 0) process.exit(0);
-
-              const segs = [];
-              let last = 0;
-              for (const s of spans) {
-                const seg = content.slice(last, s.start).trim();
-                if (seg) segs.push(seg);
-                last = s.end;
-              }
-              const trail = content.slice(last).trim();
-              if (trail) segs.push(trail);
-              const next = segs.join("\n\n");
-
-              if (!next.trim()) {
-                fs.unlinkSync(file);
-                const dir = path.dirname(file);
-                const ALLOWED = new Set([".claude", ".codex", ".agents", ".gemini", "rules"]);
-                if (ALLOWED.has(path.basename(dir))) {
-                  try {
-                    if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
-                  } catch {}
-                }
-              } else {
-                fs.writeFileSync(file, next + "\n", "utf8");
-              }
-            ' "$mdfile"
-          else
-            sed -i -E '/<!--\s*AICE:START( v[^>]*)?\s*-->/,/<!--\s*AICE:END\s*-->/d' "$mdfile"
-            if [[ -z "$(tr -d '[:space:]' < "$mdfile")" ]]; then
-              rm -f "$mdfile"
-              rdir="$(dirname "$mdfile")"
-              rbase="$(basename "$rdir")"
-              case "$rbase" in
-                .claude|.codex|.agents|.gemini|rules)
-                  rmdir "$rdir" 2>/dev/null || true
-                  ;;
-              esac
-            fi
+          elif strip_aice_markdown_file "$mdfile" 1; then
+            log_ok "Cleaned AICE directive from project file: ${mdfile}"
           fi
-          log_ok "Cleaned AICE directive from project file: ${mdfile}"
         fi
       done
     fi

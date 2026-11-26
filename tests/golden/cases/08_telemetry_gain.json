@@ -1,0 +1,555 @@
+{
+  "suite": "08_telemetry_gain",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "note": "Note: observedTs0953 telemetry char/token fields in SPL-11, TEL-01, and B-T2 include the exact temp-path length of os.tmpdir()/aice-golden-XXXXXX/ws before <ROOT> path sanitization (explaining +-1 to 3 token variance across runs).",
+  "cases": [
+    {
+      "id": "TEL-01",
+      "description": "Telemetry ledger records events and gain --json reports project breakdown; cross-checks exact cl100k_base/o200k_base BPE",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "read",
+              "src/big.ts"
+            ]
+          },
+          {
+            "args": [
+              "read",
+              "src/math.ts",
+              "--dsl"
+            ]
+          },
+          {
+            "args": [
+              "splice",
+              "src/app.ts",
+              "-s",
+              "App.reset",
+              "-c",
+              "public reset(): number {\n  this.count = 0;\n  return 0;\n}"
+            ]
+          },
+          {
+            "args": [
+              "gain",
+              "--json"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"telemetryPath\": \"<SANDBOX>/home/.aice/telemetry/gains.jsonl\",\n  \"unique\": false,\n  \"totalOperations\": 3,\n  \"readOperations\": 2,\n  \"writeOperations\": 1,\n  \"overheadOperations\": 0,\n  \"overheadCalls\": 0,\n  \"repeatReadCalls\": 0,\n  \"nativeChars\": 4558,\n  \"aiceChars\": 916,\n  \"savedChars\": 3642,\n  \"charSavingsPct\": 79.9,\n  \"nativeCl100k\": 1438,\n  \"aiceCl100k\": 295,\n  \"savedCl100k\": 1143,\n  \"cl100kSavingsPct\": 79.5,\n  \"nativeO200k\": 1438,\n  \"aiceO200k\": 299,\n  \"savedO200k\": 1139,\n  \"o200kSavingsPct\": 79.2,\n  \"ruleBudgetCl100k\": 288,\n  \"netAfterRuleBudgetCl100k\": 823,\n  \"ruleBreakEvenMultiple\": 3.86,\n  \"ruleBreakEvenReached\": true,\n  \"totalRealisticNativeCl100k\": 1406,\n  \"totalRealisticSavedCl100k\": 1111,\n  \"realisticSavedCl100kPct\": 79,\n  \"totalPreservedTriviaTokens\": 0,\n  \"wrapperTaxCl100k\": 210,\n  \"parallelSliceCalls\": 0,\n  \"sequentialPaginationTurns\": 0,\n  \"failedRetryTurns\": 0,\n  \"estimatedTurns\": 1,\n  \"mcpEstimatedTurns\": 0,\n  \"grossRuleReplayCl100k\": 288,\n  \"ruleReplayTaxCl100k\": 288,\n  \"mcpSchemaBudgetCl100k\": 547,\n  \"mcpSchemaTaxCl100k\": 0,\n  \"paginationReplayTaxCl100k\": 0,\n  \"paginationCostWeightedTaxCl100k\": 0,\n  \"wastedRetryOutputTokensCl100k\": 0,\n  \"failedRetryOutputPenalty4xCl100k\": 0,\n  \"retryReplayTaxCl100k\": 0,\n  \"retryCostWeightedTaxCl100k\": 0,\n  \"totalSystemicTaxCl100k\": 498,\n  \"totalCostWeightedTaxCl100k\": 498,\n  \"netEndToEndSavedCl100k\": 613,\n  \"costWeightedNetDeltaCl100k\": 688,\n  \"spliceErrorRatePct\": 0,\n  \"singleFileReadCalls\": 2,\n  \"singleFileReadLossCalls\": 0,\n  \"singleFileReadLossPct\": 0,\n  \"endToEndVerdict\": \"TOKEN-REDUCING\",\n  \"byCommand\": [\n    {\n      \"command\": \"read\",\n      \"calls\": 1,\n      \"winCalls\": 1,\n      \"lossCalls\": 0,\n      \"winPct\": 100,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 111,\n      \"aiceCl100k\": 88,\n      \"netDeltaCl100k\": 23,\n      \"deltaPct\": 20.7,\n      \"rawNativeRefCl100k\": 111\n    },\n    {\n      \"command\": \"search\",\n      \"calls\": 0,\n      \"winCalls\": 0,\n      \"lossCalls\": 0,\n      \"winPct\": 0,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 0,\n      \"aiceCl100k\": 0,\n      \"netDeltaCl100k\": 0,\n      \"deltaPct\": 0,\n      \"rawNativeRefCl100k\": 0\n    },\n    {\n      \"command\": \"find\",\n      \"calls\": 0,\n      \"winCalls\": 0,\n      \"lossCalls\": 0,\n      \"winPct\": 0,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 0,\n      \"aiceCl100k\": 0,\n      \"netDeltaCl100k\": 0,\n      \"deltaPct\": 0,\n      \"rawNativeRefCl100k\": 0\n    },\n    {\n      \"command\": \"outline\",\n      \"calls\": 1,\n      \"winCalls\": 1,\n      \"lossCalls\": 0,\n      \"winPct\": 100,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 1222,\n      \"aiceCl100k\": 159,\n      \"netDeltaCl100k\": 1063,\n      \"deltaPct\": 87,\n      \"rawNativeRefCl100k\": 1222\n    },\n    {\n      \"command\": \"splice/write\",\n      \"calls\": 1,\n      \"winCalls\": 1,\n      \"lossCalls\": 0,\n      \"winPct\": 100,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 73,\n      \"aiceCl100k\": 48,\n      \"netDeltaCl100k\": 25,\n      \"deltaPct\": 34.2,\n      \"rawNativeRefCl100k\": 105\n    }\n  ],\n  \"byOperation\": [\n    {\n      \"operation\": \"outline\",\n      \"surface\": \"cli\",\n      \"calls\": 1,\n      \"nativeChars\": 3728,\n      \"aiceChars\": 488,\n      \"savedChars\": 3240,\n      \"nativeCl100k\": 1222,\n      \"aiceCl100k\": 159,\n      \"savedCl100k\": 1063,\n      \"savingsPct\": 87,\n      \"realisticNativeCl100k\": 1222,\n      \"realisticSavedCl100k\": 1063,\n      \"realisticSavingsPct\": 87,\n      \"nativeO200k\": 1222,\n      \"aiceO200k\": 164,\n      \"savedO200k\": 1058,\n      \"o200kSavingsPct\": 86.6\n    },\n    {\n      \"operation\": \"splice\",\n      \"surface\": \"cli\",\n      \"calls\": 1,\n      \"nativeChars\": 424,\n      \"aiceChars\": 144,\n      \"savedChars\": 280,\n      \"nativeCl100k\": 105,\n      \"aiceCl100k\": 48,\n      \"savedCl100k\": 57,\n      \"savingsPct\": 54.3,\n      \"realisticNativeCl100k\": 73,\n      \"realisticSavedCl100k\": 25,\n      \"realisticSavingsPct\": 34.2,\n      \"nativeO200k\": 105,\n      \"aiceO200k\": 47,\n      \"savedO200k\": 58,\n      \"o200kSavingsPct\": 55.2\n    },\n    {\n      \"operation\": \"context\",\n      \"surface\": \"cli\",\n      \"calls\": 1,\n      \"nativeChars\": 406,\n      \"aiceChars\": 284,\n      \"savedChars\": 122,\n      \"nativeCl100k\": 111,\n      \"aiceCl100k\": 88,\n      \"savedCl100k\": 23,\n      \"savingsPct\": 20.7,\n      \"realisticNativeCl100k\": 111,\n      \"realisticSavedCl100k\": 23,\n      \"realisticSavingsPct\": 20.7,\n      \"nativeO200k\": 111,\n      \"aiceO200k\": 88,\n      \"savedO200k\": 23,\n      \"o200kSavingsPct\": 20.7\n    }\n  ],\n  \"byLanguage\": [\n    {\n      \"language\": \"TypeScript\",\n      \"calls\": 3,\n      \"nativeCl100k\": 1438,\n      \"aiceCl100k\": 295,\n      \"savedCl100k\": 1143,\n      \"savingsPct\": 79.5,\n      \"realisticNativeCl100k\": 1406,\n      \"realisticSavedCl100k\": 1111,\n      \"realisticSavingsPct\": 79,\n      \"nativeO200k\": 1438,\n      \"aiceO200k\": 299,\n      \"savedO200k\": 1139\n    }\n  ],\n  \"projects\": [\n    {\n      \"projectRoot\": \"<ROOT>\",\n      \"projectName\": \"ws\",\n      \"calls\": 3,\n      \"readCalls\": 2,\n      \"writeCalls\": 1,\n      \"overheadCalls\": 0,\n      \"repeatReadCalls\": 0,\n      \"nativeChars\": 4558,\n      \"aiceChars\": 916,\n      \"savedChars\": 3642,\n      \"nativeCl100k\": 1438,\n      \"aiceCl100k\": 295,\n      \"savedCl100k\": 1143,\n      \"savingsPct\": 79.5,\n      \"nativeO200k\": 1438,\n      \"aiceO200k\": 299,\n      \"savedO200k\": 1139,\n      \"o200kSavingsPct\": 79.2,\n      \"wrapperTaxCl100k\": 210,\n      \"parallelSliceCalls\": 0,\n      \"sequentialPaginationTurns\": 0,\n      \"failedRetryTurns\": 0,\n      \"estimatedTurns\": 1,\n      \"mcpEstimatedTurns\": 0,\n      \"grossRuleReplayCl100k\": 288,\n      \"ruleReplayTaxCl100k\": 288,\n      \"mcpSchemaBudgetCl100k\": 547,\n      \"mcpSchemaTaxCl100k\": 0,\n      \"paginationReplayTaxCl100k\": 0,\n      \"paginationCostWeightedTaxCl100k\": 0,\n      \"wastedRetryOutputTokensCl100k\": 0,\n      \"failedRetryOutputPenalty4xCl100k\": 0,\n      \"retryReplayTaxCl100k\": 0,\n      \"retryCostWeightedTaxCl100k\": 0,\n      \"totalSystemicTaxCl100k\": 498,\n      \"totalCostWeightedTaxCl100k\": 498,\n      \"netEndToEndSavedCl100k\": 613,\n      \"costWeightedNetDeltaCl100k\": 688,\n      \"spliceErrorRatePct\": 0,\n      \"singleFileReadCalls\": 2,\n      \"singleFileReadLossCalls\": 0,\n      \"singleFileReadLossPct\": 0,\n      \"endToEndVerdict\": \"TOKEN-REDUCING\",\n      \"realisticNativeCl100k\": 1406,\n      \"realisticSavedCl100k\": 1111,\n      \"realisticSavingsPct\": 79\n    }\n  ]\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "telemetryPath": "<SANDBOX>/home/.aice/telemetry/gains.jsonl",
+          "unique": false,
+          "totalOperations": 3,
+          "readOperations": 2,
+          "writeOperations": 1,
+          "overheadOperations": 0,
+          "overheadCalls": 0,
+          "repeatReadCalls": 0,
+          "nativeChars": 4558,
+          "aiceChars": 916,
+          "savedChars": 3642,
+          "charSavingsPct": 79.9,
+          "nativeCl100k": 1438,
+          "aiceCl100k": 295,
+          "savedCl100k": 1143,
+          "cl100kSavingsPct": 79.5,
+          "nativeO200k": 1438,
+          "aiceO200k": 299,
+          "savedO200k": 1139,
+          "o200kSavingsPct": 79.2,
+          "ruleBudgetCl100k": 288,
+          "netAfterRuleBudgetCl100k": 823,
+          "ruleBreakEvenMultiple": 3.86,
+          "ruleBreakEvenReached": true,
+          "totalRealisticNativeCl100k": 1406,
+          "totalRealisticSavedCl100k": 1111,
+          "realisticSavedCl100kPct": 79,
+          "totalPreservedTriviaTokens": 0,
+          "wrapperTaxCl100k": 210,
+          "parallelSliceCalls": 0,
+          "sequentialPaginationTurns": 0,
+          "failedRetryTurns": 0,
+          "estimatedTurns": 1,
+          "mcpEstimatedTurns": 0,
+          "grossRuleReplayCl100k": 288,
+          "ruleReplayTaxCl100k": 288,
+          "mcpSchemaBudgetCl100k": 547,
+          "mcpSchemaTaxCl100k": 0,
+          "paginationReplayTaxCl100k": 0,
+          "paginationCostWeightedTaxCl100k": 0,
+          "wastedRetryOutputTokensCl100k": 0,
+          "failedRetryOutputPenalty4xCl100k": 0,
+          "retryReplayTaxCl100k": 0,
+          "retryCostWeightedTaxCl100k": 0,
+          "totalSystemicTaxCl100k": 498,
+          "totalCostWeightedTaxCl100k": 498,
+          "netEndToEndSavedCl100k": 613,
+          "costWeightedNetDeltaCl100k": 688,
+          "spliceErrorRatePct": 0,
+          "singleFileReadCalls": 2,
+          "singleFileReadLossCalls": 0,
+          "singleFileReadLossPct": 0,
+          "endToEndVerdict": "TOKEN-REDUCING",
+          "byCommand": [
+            {
+              "command": "read",
+              "calls": 1,
+              "winCalls": 1,
+              "lossCalls": 0,
+              "winPct": 100,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 111,
+              "aiceCl100k": 88,
+              "netDeltaCl100k": 23,
+              "deltaPct": 20.7,
+              "rawNativeRefCl100k": 111
+            },
+            {
+              "command": "search",
+              "calls": 0,
+              "winCalls": 0,
+              "lossCalls": 0,
+              "winPct": 0,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 0,
+              "aiceCl100k": 0,
+              "netDeltaCl100k": 0,
+              "deltaPct": 0,
+              "rawNativeRefCl100k": 0
+            },
+            {
+              "command": "find",
+              "calls": 0,
+              "winCalls": 0,
+              "lossCalls": 0,
+              "winPct": 0,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 0,
+              "aiceCl100k": 0,
+              "netDeltaCl100k": 0,
+              "deltaPct": 0,
+              "rawNativeRefCl100k": 0
+            },
+            {
+              "command": "outline",
+              "calls": 1,
+              "winCalls": 1,
+              "lossCalls": 0,
+              "winPct": 100,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 1222,
+              "aiceCl100k": 159,
+              "netDeltaCl100k": 1063,
+              "deltaPct": 87,
+              "rawNativeRefCl100k": 1222
+            },
+            {
+              "command": "splice/write",
+              "calls": 1,
+              "winCalls": 1,
+              "lossCalls": 0,
+              "winPct": 100,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 73,
+              "aiceCl100k": 48,
+              "netDeltaCl100k": 25,
+              "deltaPct": 34.2,
+              "rawNativeRefCl100k": 105
+            }
+          ],
+          "byOperation": [
+            {
+              "operation": "outline",
+              "surface": "cli",
+              "calls": 1,
+              "nativeChars": 3728,
+              "aiceChars": 488,
+              "savedChars": 3240,
+              "nativeCl100k": 1222,
+              "aiceCl100k": 159,
+              "savedCl100k": 1063,
+              "savingsPct": 87,
+              "realisticNativeCl100k": 1222,
+              "realisticSavedCl100k": 1063,
+              "realisticSavingsPct": 87,
+              "nativeO200k": 1222,
+              "aiceO200k": 164,
+              "savedO200k": 1058,
+              "o200kSavingsPct": 86.6
+            },
+            {
+              "operation": "splice",
+              "surface": "cli",
+              "calls": 1,
+              "nativeChars": 424,
+              "aiceChars": 144,
+              "savedChars": 280,
+              "nativeCl100k": 105,
+              "aiceCl100k": 48,
+              "savedCl100k": 57,
+              "savingsPct": 54.3,
+              "realisticNativeCl100k": 73,
+              "realisticSavedCl100k": 25,
+              "realisticSavingsPct": 34.2,
+              "nativeO200k": 105,
+              "aiceO200k": 47,
+              "savedO200k": 58,
+              "o200kSavingsPct": 55.2
+            },
+            {
+              "operation": "context",
+              "surface": "cli",
+              "calls": 1,
+              "nativeChars": 406,
+              "aiceChars": 284,
+              "savedChars": 122,
+              "nativeCl100k": 111,
+              "aiceCl100k": 88,
+              "savedCl100k": 23,
+              "savingsPct": 20.7,
+              "realisticNativeCl100k": 111,
+              "realisticSavedCl100k": 23,
+              "realisticSavingsPct": 20.7,
+              "nativeO200k": 111,
+              "aiceO200k": 88,
+              "savedO200k": 23,
+              "o200kSavingsPct": 20.7
+            }
+          ],
+          "byLanguage": [
+            {
+              "language": "TypeScript",
+              "calls": 3,
+              "nativeCl100k": 1438,
+              "aiceCl100k": 295,
+              "savedCl100k": 1143,
+              "savingsPct": 79.5,
+              "realisticNativeCl100k": 1406,
+              "realisticSavedCl100k": 1111,
+              "realisticSavingsPct": 79,
+              "nativeO200k": 1438,
+              "aiceO200k": 299,
+              "savedO200k": 1139
+            }
+          ],
+          "projects": [
+            {
+              "projectRoot": "<ROOT>",
+              "projectName": "ws",
+              "calls": 3,
+              "readCalls": 2,
+              "writeCalls": 1,
+              "overheadCalls": 0,
+              "repeatReadCalls": 0,
+              "nativeChars": 4558,
+              "aiceChars": 916,
+              "savedChars": 3642,
+              "nativeCl100k": 1438,
+              "aiceCl100k": 295,
+              "savedCl100k": 1143,
+              "savingsPct": 79.5,
+              "nativeO200k": 1438,
+              "aiceO200k": 299,
+              "savedO200k": 1139,
+              "o200kSavingsPct": 79.2,
+              "wrapperTaxCl100k": 210,
+              "parallelSliceCalls": 0,
+              "sequentialPaginationTurns": 0,
+              "failedRetryTurns": 0,
+              "estimatedTurns": 1,
+              "mcpEstimatedTurns": 0,
+              "grossRuleReplayCl100k": 288,
+              "ruleReplayTaxCl100k": 288,
+              "mcpSchemaBudgetCl100k": 547,
+              "mcpSchemaTaxCl100k": 0,
+              "paginationReplayTaxCl100k": 0,
+              "paginationCostWeightedTaxCl100k": 0,
+              "wastedRetryOutputTokensCl100k": 0,
+              "failedRetryOutputPenalty4xCl100k": 0,
+              "retryReplayTaxCl100k": 0,
+              "retryCostWeightedTaxCl100k": 0,
+              "totalSystemicTaxCl100k": 498,
+              "totalCostWeightedTaxCl100k": 498,
+              "netEndToEndSavedCl100k": 613,
+              "costWeightedNetDeltaCl100k": 688,
+              "spliceErrorRatePct": 0,
+              "singleFileReadCalls": 2,
+              "singleFileReadLossCalls": 0,
+              "singleFileReadLossPct": 0,
+              "endToEndVerdict": "TOKEN-REDUCING",
+              "realisticNativeCl100k": 1406,
+              "realisticSavedCl100k": 1111,
+              "realisticSavingsPct": 79
+            }
+          ]
+        },
+        "extraChecks": {
+          "ledgerRowCount": 3,
+          "ledgerRows": [
+            {
+              "t": "<TIMESTAMP>",
+              "r": "<ROOT>",
+              "f": "src/big.ts",
+              "o": "outline",
+              "a": "golden-capture",
+              "nc": 3728,
+              "ac": 488,
+              "n1": 1222,
+              "a1": 159,
+              "n2": 1222,
+              "a2": 164,
+              "rn": 1222,
+              "sc": 87
+            },
+            {
+              "t": "<TIMESTAMP>",
+              "r": "<ROOT>",
+              "f": "src/math.ts",
+              "o": "context",
+              "a": "golden-capture",
+              "nc": 406,
+              "ac": 284,
+              "n1": 111,
+              "a1": 88,
+              "n2": 111,
+              "a2": 88,
+              "rn": 111
+            },
+            {
+              "t": "<TIMESTAMP>",
+              "r": "<ROOT>",
+              "f": "src/app.ts",
+              "o": "splice",
+              "a": "golden-capture",
+              "nc": 424,
+              "ac": 144,
+              "n1": 105,
+              "a1": 48,
+              "n2": 105,
+              "a2": 47,
+              "rn": 73
+            }
+          ],
+          "exactBpeBigTs": {
+            "cl100k_base": 1222,
+            "o200k_base": 1223,
+            "utf8Bytes": 3728
+          },
+          "exactBpeMathTs": {
+            "cl100k_base": 111,
+            "o200k_base": 111,
+            "utf8Bytes": 406
+          }
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "gain --json returns valid JSON with project totals",
+          "Exact cl100k_base and o200k_base BPE counts match js-tiktoken reference",
+          "Rust computes exact o200k_base (not cl100k copy) and counts full emitted stdout including framing/stats"
+        ],
+        "deltaNote": "Rust closes B-T1..B-T6 by computing exact bpe-openai cl100k_base & o200k_base on raw vs full stdout without heuristics or negative clamping. Note: observedTs0953 telemetry char/token fields in SPL-11, TEL-01, and B-T2 include the exact temp-path length of os.tmpdir()/aice-golden-XXXXXX/ws before <ROOT> path sanitization (explaining +-1 to 3 token variance across runs)."
+      }
+    },
+    {
+      "id": "TEL-02",
+      "description": "Ephemeral /tmp workspaces are excluded from global ~/.aice/telemetry/gains.jsonl when no override env is set",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "read",
+              "src/big.ts"
+            ]
+          },
+          {
+            "args": [
+              "gain",
+              "--json"
+            ]
+          }
+        ],
+        "env": {
+          "AICE_HOME": "__UNSET__",
+          "AICE_TELEMETRY_PATH": "__UNSET__"
+        }
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"telemetryPath\": \"<SANDBOX>/home/.aice/telemetry/gains.jsonl\",\n  \"unique\": false,\n  \"totalOperations\": 0,\n  \"readOperations\": 0,\n  \"writeOperations\": 0,\n  \"overheadOperations\": 0,\n  \"overheadCalls\": 0,\n  \"repeatReadCalls\": 0,\n  \"nativeChars\": 0,\n  \"aiceChars\": 0,\n  \"savedChars\": 0,\n  \"charSavingsPct\": 0,\n  \"nativeCl100k\": 0,\n  \"aiceCl100k\": 0,\n  \"savedCl100k\": 0,\n  \"cl100kSavingsPct\": 0,\n  \"nativeO200k\": 0,\n  \"aiceO200k\": 0,\n  \"savedO200k\": 0,\n  \"o200kSavingsPct\": 0,\n  \"ruleBudgetCl100k\": 288,\n  \"netAfterRuleBudgetCl100k\": -288,\n  \"ruleBreakEvenMultiple\": 0,\n  \"ruleBreakEvenReached\": false,\n  \"totalRealisticNativeCl100k\": 0,\n  \"totalRealisticSavedCl100k\": 0,\n  \"realisticSavedCl100kPct\": 0,\n  \"totalPreservedTriviaTokens\": 0,\n  \"wrapperTaxCl100k\": 0,\n  \"parallelSliceCalls\": 0,\n  \"sequentialPaginationTurns\": 0,\n  \"failedRetryTurns\": 0,\n  \"estimatedTurns\": 0,\n  \"mcpEstimatedTurns\": 0,\n  \"grossRuleReplayCl100k\": 0,\n  \"ruleReplayTaxCl100k\": 0,\n  \"mcpSchemaBudgetCl100k\": 547,\n  \"mcpSchemaTaxCl100k\": 0,\n  \"paginationReplayTaxCl100k\": 0,\n  \"paginationCostWeightedTaxCl100k\": 0,\n  \"wastedRetryOutputTokensCl100k\": 0,\n  \"failedRetryOutputPenalty4xCl100k\": 0,\n  \"retryReplayTaxCl100k\": 0,\n  \"retryCostWeightedTaxCl100k\": 0,\n  \"totalSystemicTaxCl100k\": 0,\n  \"totalCostWeightedTaxCl100k\": 0,\n  \"netEndToEndSavedCl100k\": 0,\n  \"costWeightedNetDeltaCl100k\": 0,\n  \"spliceErrorRatePct\": 0,\n  \"singleFileReadCalls\": 0,\n  \"singleFileReadLossCalls\": 0,\n  \"singleFileReadLossPct\": 0,\n  \"endToEndVerdict\": \"NEUTRAL\",\n  \"byCommand\": [\n    {\n      \"command\": \"read\",\n      \"calls\": 0,\n      \"winCalls\": 0,\n      \"lossCalls\": 0,\n      \"winPct\": 0,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 0,\n      \"aiceCl100k\": 0,\n      \"netDeltaCl100k\": 0,\n      \"deltaPct\": 0,\n      \"rawNativeRefCl100k\": 0\n    },\n    {\n      \"command\": \"search\",\n      \"calls\": 0,\n      \"winCalls\": 0,\n      \"lossCalls\": 0,\n      \"winPct\": 0,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 0,\n      \"aiceCl100k\": 0,\n      \"netDeltaCl100k\": 0,\n      \"deltaPct\": 0,\n      \"rawNativeRefCl100k\": 0\n    },\n    {\n      \"command\": \"find\",\n      \"calls\": 0,\n      \"winCalls\": 0,\n      \"lossCalls\": 0,\n      \"winPct\": 0,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 0,\n      \"aiceCl100k\": 0,\n      \"netDeltaCl100k\": 0,\n      \"deltaPct\": 0,\n      \"rawNativeRefCl100k\": 0\n    },\n    {\n      \"command\": \"outline\",\n      \"calls\": 0,\n      \"winCalls\": 0,\n      \"lossCalls\": 0,\n      \"winPct\": 0,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 0,\n      \"aiceCl100k\": 0,\n      \"netDeltaCl100k\": 0,\n      \"deltaPct\": 0,\n      \"rawNativeRefCl100k\": 0\n    },\n    {\n      \"command\": \"splice/write\",\n      \"calls\": 0,\n      \"winCalls\": 0,\n      \"lossCalls\": 0,\n      \"winPct\": 0,\n      \"errorCalls\": 0,\n      \"errPct\": 0,\n      \"realisticNativeCl100k\": 0,\n      \"aiceCl100k\": 0,\n      \"netDeltaCl100k\": 0,\n      \"deltaPct\": 0,\n      \"rawNativeRefCl100k\": 0\n    }\n  ],\n  \"byOperation\": [],\n  \"byLanguage\": [],\n  \"projects\": []\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "telemetryPath": "<SANDBOX>/home/.aice/telemetry/gains.jsonl",
+          "unique": false,
+          "totalOperations": 0,
+          "readOperations": 0,
+          "writeOperations": 0,
+          "overheadOperations": 0,
+          "overheadCalls": 0,
+          "repeatReadCalls": 0,
+          "nativeChars": 0,
+          "aiceChars": 0,
+          "savedChars": 0,
+          "charSavingsPct": 0,
+          "nativeCl100k": 0,
+          "aiceCl100k": 0,
+          "savedCl100k": 0,
+          "cl100kSavingsPct": 0,
+          "nativeO200k": 0,
+          "aiceO200k": 0,
+          "savedO200k": 0,
+          "o200kSavingsPct": 0,
+          "ruleBudgetCl100k": 288,
+          "netAfterRuleBudgetCl100k": -288,
+          "ruleBreakEvenMultiple": 0,
+          "ruleBreakEvenReached": false,
+          "totalRealisticNativeCl100k": 0,
+          "totalRealisticSavedCl100k": 0,
+          "realisticSavedCl100kPct": 0,
+          "totalPreservedTriviaTokens": 0,
+          "wrapperTaxCl100k": 0,
+          "parallelSliceCalls": 0,
+          "sequentialPaginationTurns": 0,
+          "failedRetryTurns": 0,
+          "estimatedTurns": 0,
+          "mcpEstimatedTurns": 0,
+          "grossRuleReplayCl100k": 0,
+          "ruleReplayTaxCl100k": 0,
+          "mcpSchemaBudgetCl100k": 547,
+          "mcpSchemaTaxCl100k": 0,
+          "paginationReplayTaxCl100k": 0,
+          "paginationCostWeightedTaxCl100k": 0,
+          "wastedRetryOutputTokensCl100k": 0,
+          "failedRetryOutputPenalty4xCl100k": 0,
+          "retryReplayTaxCl100k": 0,
+          "retryCostWeightedTaxCl100k": 0,
+          "totalSystemicTaxCl100k": 0,
+          "totalCostWeightedTaxCl100k": 0,
+          "netEndToEndSavedCl100k": 0,
+          "costWeightedNetDeltaCl100k": 0,
+          "spliceErrorRatePct": 0,
+          "singleFileReadCalls": 0,
+          "singleFileReadLossCalls": 0,
+          "singleFileReadLossPct": 0,
+          "endToEndVerdict": "NEUTRAL",
+          "byCommand": [
+            {
+              "command": "read",
+              "calls": 0,
+              "winCalls": 0,
+              "lossCalls": 0,
+              "winPct": 0,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 0,
+              "aiceCl100k": 0,
+              "netDeltaCl100k": 0,
+              "deltaPct": 0,
+              "rawNativeRefCl100k": 0
+            },
+            {
+              "command": "search",
+              "calls": 0,
+              "winCalls": 0,
+              "lossCalls": 0,
+              "winPct": 0,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 0,
+              "aiceCl100k": 0,
+              "netDeltaCl100k": 0,
+              "deltaPct": 0,
+              "rawNativeRefCl100k": 0
+            },
+            {
+              "command": "find",
+              "calls": 0,
+              "winCalls": 0,
+              "lossCalls": 0,
+              "winPct": 0,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 0,
+              "aiceCl100k": 0,
+              "netDeltaCl100k": 0,
+              "deltaPct": 0,
+              "rawNativeRefCl100k": 0
+            },
+            {
+              "command": "outline",
+              "calls": 0,
+              "winCalls": 0,
+              "lossCalls": 0,
+              "winPct": 0,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 0,
+              "aiceCl100k": 0,
+              "netDeltaCl100k": 0,
+              "deltaPct": 0,
+              "rawNativeRefCl100k": 0
+            },
+            {
+              "command": "splice/write",
+              "calls": 0,
+              "winCalls": 0,
+              "lossCalls": 0,
+              "winPct": 0,
+              "errorCalls": 0,
+              "errPct": 0,
+              "realisticNativeCl100k": 0,
+              "aiceCl100k": 0,
+              "netDeltaCl100k": 0,
+              "deltaPct": 0,
+              "rawNativeRefCl100k": 0
+            }
+          ],
+          "byOperation": [],
+          "byLanguage": [],
+          "projects": []
+        },
+        "extraChecks": {
+          "defaultGainsJsonlCreatedForTmp": false
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "defaultGainsJsonlCreatedForTmp === false"
+        ],
+        "deltaNote": null
+      }
+    }
+  ]
+}

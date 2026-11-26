@@ -1,0 +1,30 @@
+{
+  "schema_version": "1.0.0",
+  "source": "tests/golden/cases/08_telemetry_gain.json",
+  "vectors": {
+    "big_ts": {
+      "name": "big.ts",
+      "utf8_bytes": 3728,
+      "cl100k_base": 1222,
+      "o200k_base": 1223,
+      "sha256": "d17c7477a40bdbb6586ffe42f9c4546ec3c2f05f561368ddc716d088b6a6730e",
+      "text": "export interface PipelineMetrics {\n  processed: number;\n  checksum: number;\n  warnings: string[];\n}\n\nexport function runBatchPipeline(seed: number, limit: number): PipelineMetrics {\n  const warnings: string[] = [];\n  let acc = seed;\n  let processed = 0;\n\n  if (limit <= 0) {\n    warnings.push(\"limit-non-positive\");\n    return { processed: 0, checksum: acc, warnings };\n  }\n\n  for (let idx = 1; idx <= limit; idx += 1) {\n    const stepA = idx * 3 + 1;\n    const stepB = stepA ^ 0x1f;\n    const stepC = stepB + (idx % 5);\n    const stepD = stepC * 2 - 3;\n    const stepE = stepD % 97;\n    const stepF = stepE + seed;\n    const stepG = stepF ^ (idx << 1);\n    const stepH = stepG + 7;\n    const stepI = stepH % 131;\n    const stepJ = stepI + stepA;\n    const stepK = stepJ - stepB;\n    const stepL = stepK + stepC;\n    const stepM = stepL + stepD;\n    const stepN = stepM + stepE;\n    const stepO = stepN + stepF;\n    const stepP = stepO + stepG;\n    const stepQ = stepP + stepH;\n    const stepR = stepQ + stepI;\n    const stepS = stepR + stepJ;\n    const stepT = stepS + stepK;\n    const stepU = stepT + stepL;\n    const stepV = stepU + stepM;\n    const stepW = stepV + stepN;\n    const stepX = stepW + stepO;\n    const stepY = stepX + stepP;\n    const stepZ = stepY + stepQ;\n\n    if (stepZ % 11 === 0) {\n      warnings.push(`divisible-${idx}`);\n      acc += stepZ + stepR + stepS;\n    } else if (stepZ % 7 === 0) {\n      acc += stepZ + stepT + stepU;\n    } else {\n      acc += stepZ + stepV + stepW + stepX + stepY;\n    }\n    processed += 1;\n  }\n\n  try {\n    const fold01 = acc + 101;\n    const fold02 = fold01 ^ 0x55;\n    const fold03 = fold02 + 13;\n    const fold04 = fold03 * 3;\n    const fold05 = fold04 % 997;\n    const fold06 = fold05 + 17;\n    const fold07 = fold06 ^ 0x2a;\n    const fold08 = fold07 + 19;\n    const fold09 = fold08 * 5;\n    const fold10 = fold09 % 991;\n    const fold11 = fold10 + 23;\n    const fold12 = fold11 ^ 0x3c;\n    const fold13 = fold12 + 29;\n    const fold14 = fold13 * 7;\n    const fold15 = fold14 % 983;\n    const fold16 = fold15 + 31;\n    const fold17 = fold16 ^ 0x4d;\n    const fold18 = fold17 + 37;\n    const fold19 = fold18 * 11;\n    const fold20 = fold19 % 977;\n    const fold21 = fold20 + 41;\n    const fold22 = fold21 ^ 0x6e;\n    const fold23 = fold22 + 43;\n    const fold24 = fold23 * 13;\n    const fold25 = fold24 % 971;\n    const fold26 = fold25 + 47;\n    const fold27 = fold26 ^ 0x7f;\n    const fold28 = fold27 + 53;\n    const fold29 = fold28 * 17;\n    const fold30 = fold29 % 967;\n    const fold31 = fold30 + 59;\n    const fold32 = fold31 ^ 0x81;\n    const fold33 = fold32 + 61;\n    const fold34 = fold33 * 19;\n    const fold35 = fold34 % 953;\n    const fold36 = fold35 + 67;\n    const fold37 = fold36 ^ 0x92;\n    const fold38 = fold37 + 71;\n    const fold39 = fold38 * 23;\n    const fold40 = fold39 % 947;\n    const fold41 = fold40 + 73;\n    const fold42 = fold41 ^ 0xa3;\n    const fold43 = fold42 + 79;\n    const fold44 = fold43 * 29;\n    const fold45 = fold44 % 941;\n    const fold46 = fold45 + 83;\n    const fold47 = fold46 ^ 0xb4;\n    const fold48 = fold47 + 89;\n    const fold49 = fold48 * 31;\n    const fold50 = fold49 % 937;\n    acc = fold50;\n  } catch (err) {\n    warnings.push(String(err));\n  }\n\n  return { processed, checksum: acc, warnings };\n}\n\nexport function clampMetric(value: number, minVal: number, maxVal: number): number {\n  return Math.min(Math.max(value, minVal), maxVal);\n}\n\nexport function summarizeMetrics(metrics: PipelineMetrics): string {\n  const clamped = clampMetric(metrics.checksum, 0, 1000);\n  const ratio = clampMetric(metrics.processed, 0, 100);\n  const tag = metrics.warnings.length > 0 ? \"warn\" : \"ok\";\n  return `${tag}:${clamped}:${ratio}`;\n}\n"
+    },
+    "math_ts": {
+      "name": "math.ts",
+      "utf8_bytes": 406,
+      "cl100k_base": 111,
+      "o200k_base": 111,
+      "sha256": "426001d4b619f4e1894c0f6c96cc8ac2f75a1c1de7545e57cc1817c1fd3fe971",
+      "text": "export interface CalcResult {\n  value: number;\n  label: string;\n}\n\nexport class Calculator {\n  private offset: number;\n\n  constructor(offset = 0) {\n    this.offset = offset;\n  }\n\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n\n  public mul(a: number, b: number): CalcResult {\n    return { value: a * b + this.offset, label: \"product\" };\n  }\n}\n"
+    },
+    "agents_md_v0953": {
+      "name": "AGENTS.md",
+      "utf8_bytes": 774,
+      "cl100k_base": 288,
+      "o200k_base": 288,
+      "sha256": "b11edec0c4dc6166bd72d110ffae1c2aeac7cd76825734eeb84f008ab0445ea0",
+      "text": "<!-- AICE:START v0.9.53 -->\n## AICE (v0.9.53)\n- Gate: ONLY if `aice.config.json` has `\"enabled\": true`; blocker: `aice disable` / `aice enable`.\n### Batch Read & Splice\n- ONLY aice read/search/find (aice_read) & aice splice/aice write (aice_splice); no shell writes or `sed`/`grep`/`cat`/`find`.\n- Read: `aice read f1:sym f2:L1-L50`, quote 'f:/a|b/', `aice search <pat> [dir]`, `aice find -d 2`.\n- No paging: NEVER walk `:L1-L150` -> `:L151-L300` across turns; batch `f:sym1 f:sym2` (or multi-file) in 1 `aice read` or `aice search <pat> f`.\n- Splice: `aice splice --stdin << 'EOF'` (=== f:sym ===, === f:L1-L20 ===, --delete, === f ===), multi-line `<<< === >>>` (no 1L).\n- Briefs: \"Use AICE (aice read / aice splice) for all file exploration and edits.\"\n<!-- AICE:END -->\n"
+    }
+  }
+}

@@ -1,0 +1,453 @@
+{
+  "suite": "05_splice_write",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "SPL-01",
+      "description": "Greenfield create writes new file on disk",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/created.ts",
+          "--create",
+          "-c",
+          "export function triple(n: number): number {\n  return n * 3;\n}\n"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol '*' in src/created.ts (0 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/created.ts": "export function triple(n: number): number {\n  return n * 3;\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "src/created.ts exists on disk with triple()"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-02",
+      "description": "Full overwrite with --overwrite replaces file contents",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/math.ts",
+          "--overwrite",
+          "-c",
+          "export const PI = 3.14159;\n"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol '*' in src/math.ts (0 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/math.ts": "export const PI = 3.14159;\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "src/math.ts equals 'export const PI = 3.14159;\\n'"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-03",
+      "description": "Symbol splice updates App.inc while preserving leading JSDoc and App.reset",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/app.ts",
+          "-s",
+          "App.inc",
+          "-c",
+          "public inc(step: number): CalcResult {\n  this.count += step * 2;\n  return this.calc.add(this.count, step);\n}"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol 'App.inc' in src/app.ts (79 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step * 2;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "src/app.ts contains 'this.count += step * 2;'",
+          "src/app.ts preserves '/** Increment counter and compute sum */'",
+          "src/app.ts preserves App.reset()"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-04",
+      "description": "Line range splice (-s L5-L7) replaces inclusive lines 5-7",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/helper.js",
+          "-s",
+          "L5-L7",
+          "-c",
+          "export function sumList(items) {\n  return items.reduce((acc, item) => acc + item, 10);\n}"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol 'L5-L7' in src/helper.js (22 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/helper.js": "export function formatMetric(name, value) {\n  return `${name}=${value.toFixed(2)}`;\n}\n\nexport function sumList(items) {\n  return items.reduce((acc, item) => acc + item, 10);\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "src/helper.js preserves formatMetric and updates sumList initial accumulator to 10"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-05",
+      "description": ":imports and :eof selectors update imports header and append to EOF",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "splice",
+              "src/app.ts:imports",
+              "-c",
+              "import { Calculator, type CalcResult } from \"./math.js\";\nimport { formatMetric } from \"./helper.js\";"
+            ]
+          },
+          {
+            "args": [
+              "splice",
+              "src/app.ts:eof",
+              "-c",
+              "export const APP_TAG = formatMetric(\"v\", 1);"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol 'imports' in src/app.ts (92 tokens saved)\n\n---EOF---\n✔ Spliced symbol 'eof' in src/app.ts (115 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\nimport { formatMetric } from \"./helper.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\nexport const APP_TAG = formatMetric(\"v\", 1);\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "src/app.ts imports formatMetric from ./helper.js",
+          "src/app.ts ends with export const APP_TAG"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-06",
+      "description": "--delete removes Calculator.mul while preserving Calculator.add",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/math.ts",
+          "--delete",
+          "Calculator.mul"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Deleted symbol 'Calculator.mul' in src/math.ts (77 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/math.ts": "export interface CalcResult {\n  value: number;\n  label: string;\n}\n\nexport class Calculator {\n  private offset: number;\n\n  constructor(offset = 0) {\n    this.offset = offset;\n  }\n\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n\n\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Calculator.mul removed from src/math.ts",
+          "Calculator.add preserved"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-07",
+      "description": "--insert-after and --insert-before insert sibling methods in exact order",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "splice",
+              "src/app.ts",
+              "--insert-after",
+              "App.inc",
+              "-c",
+              "public peek(): number {\n  return this.count;\n}"
+            ]
+          },
+          {
+            "args": [
+              "splice",
+              "src/app.ts",
+              "--insert-before",
+              "App.reset",
+              "-c",
+              "public dec(step: number): number {\n  this.count -= step;\n  return this.count;\n}"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Inserted after 'App.inc' in src/app.ts (107 tokens saved)\n\n---BEFORE---\n✔ Inserted before 'App.reset' in src/app.ts (120 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public peek(): number {\n    return this.count;\n  }\n\n  public dec(step: number): number {\n    this.count -= step;\n    return this.count;\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Method order in src/app.ts is inc -> peek -> dec -> reset"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-08",
+      "description": "<<< === >>> contextual hunk replaces exact matched block",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/helper.js",
+          "-c",
+          "<<<\nexport function formatMetric(name, value) {\n  return `${name}=${value.toFixed(2)}`;\n}\n===\nexport function formatMetric(name, value) {\n  return `${name}:${value.toFixed(3)}`;\n}\n>>>"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol ':hunk' in src/helper.js (-1 tokens saved)\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/helper.js": "export function formatMetric(name, value) {\n  return `${name}:${value.toFixed(3)}`;\n}\n\nexport function sumList(items) {\n  return items.reduce((acc, item) => acc + item, 0);\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "src/helper.js contains toFixed(3) and preserves sumList"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-09",
+      "description": "--stdin multi-file batch heredoc executes create + symbol splice + --delete atomically",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "--stdin"
+        ],
+        "stdin": "=== src/batch_helper.ts ===\nexport function doubleVal(x: number): number {\n  return x * 2;\n}\n\n=== src/app.ts:App.reset ===\npublic reset(): number {\n  this.count = 1;\n  return this.count;\n}\n\n=== src/math.ts:Calculator.mul --delete ===\n"
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "✔ Batch spliced 3 item(s) across 3 file(s) (164 tokens saved) [batch_helper.ts::create, app.ts:App.reset, math.ts:Calculator.mul]\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/batch_helper.ts": "export function doubleVal(x: number): number {\n  return x * 2;\n}\n",
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 1;\n    return this.count;\n  }\n}\n",
+          "src/math.ts": "export interface CalcResult {\n  value: number;\n  label: string;\n}\n\nexport class Calculator {\n  private offset: number;\n\n  constructor(offset = 0) {\n    this.offset = offset;\n  }\n\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n\n\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "src/batch_helper.ts created",
+          "src/app.ts App.reset sets this.count = 1",
+          "src/math.ts Calculator.mul deleted"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-10",
+      "description": "--dry-run --diff emits unified diff preview without modifying disk",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/app.ts",
+          "-s",
+          "App.reset",
+          "-c",
+          "public reset(): number {\n  this.count = 42;\n  return this.count;\n}",
+          "--dry-run",
+          "--diff"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "--- a/<ROOT>/src/app.ts\n+++ b/<ROOT>/src/app.ts\n@@ -15,7 +15,7 @@\n   }\n \n   public reset(): number {\n-    this.count = 0;\n+    this.count = 42;\n     return this.count;\n   }\n }\n[Dry Run] Successfully spliced src/app.ts\nimport { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 42;\n    return this.count;\n  }\n}\n\n",
+        "stderr": "",
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n"
+        },
+        "extraChecks": {
+          "diskUnchanged": true
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Diff contains -    this.count = 0; and +  this.count = 42;",
+          "src/app.ts on disk is byte-identical to original"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SPL-11",
+      "description": "splice --json emits structured JSON result and updates disk",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/app.ts",
+          "-s",
+          "App.reset",
+          "-c",
+          "public reset(): number {\n  this.count = 9;\n  return this.count;\n}",
+          "--json"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"success\": true,\n  \"filePath\": \"<ROOT>/src/app.ts\",\n  \"symbol\": \"App.reset\",\n  \"startLine\": 17,\n  \"endLine\": 20,\n  \"originalSnippet\": \"  public reset(): number {\\n    this.count = 0;\\n    return this.count;\\n  }\",\n  \"newSnippet\": \"  public reset(): number {\\n    this.count = 9;\\n    return this.count;\\n  }\",\n  \"modifiedCode\": \"import { Calculator, type CalcResult } from \\\"./math.js\\\";\\n\\nexport class App {\\n  private calc: Calculator;\\n  private count = 0;\\n\\n  constructor(offset = 1) {\\n    this.calc = new Calculator(offset);\\n  }\\n\\n  /** Increment counter and compute sum */\\n  public inc(step: number): CalcResult {\\n    this.count += step;\\n    return this.calc.add(this.count, step);\\n  }\\n\\n  public reset(): number {\\n    this.count = 9;\\n    return this.count;\\n  }\\n}\\n\",\n  \"newAiceSource\": \"import { Calculator, type CalcResult } from \\\"./math.js\\\";\\n\\nexport class App {\\n  private calc: Calculator;\\n  private count = 0;\\n\\n  constructor(offset = 1) {\\n    this.calc = new Calculator(offset);\\n  }\\n\\n  /** Increment counter and compute sum */\\n  public inc(step: number): CalcResult {\\n    this.count += step;\\n    return this.calc.add(this.count, step);\\n  }\\n\\n  public reset(): number {\\n    this.count = 9;\\n    return this.count;\\n  }\\n}\\n\",\n  \"tokensSaved\": 87,\n  \"preservedTriviaTokens\": 0,\n  \"realisticTokensSaved\": 55,\n  \"idiomsUsed\": false,\n  \"dryRun\": false\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "success": true,
+          "filePath": "<ROOT>/src/app.ts",
+          "symbol": "App.reset",
+          "startLine": 17,
+          "endLine": 20,
+          "originalSnippet": "  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }",
+          "newSnippet": "  public reset(): number {\n    this.count = 9;\n    return this.count;\n  }",
+          "modifiedCode": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 9;\n    return this.count;\n  }\n}\n",
+          "newAiceSource": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 9;\n    return this.count;\n  }\n}\n",
+          "tokensSaved": 87,
+          "preservedTriviaTokens": 0,
+          "realisticTokensSaved": 55,
+          "idiomsUsed": false,
+          "dryRun": false
+        },
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 9;\n    return this.count;\n  }\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Valid JSON output",
+          "src/app.ts updated with this.count = 9"
+        ],
+        "deltaNote": "Rust telemetry tokensSaved uses exact bpe-openai edit diff instead of inflated whole-file delta. Note: observedTs0953 telemetry char/token fields in SPL-11, TEL-01, and B-T2 include the exact temp-path length of os.tmpdir()/aice-golden-XXXXXX/ws before <ROOT> path sanitization (explaining +-1 to 3 token variance across runs)."
+      }
+    }
+  ]
+}

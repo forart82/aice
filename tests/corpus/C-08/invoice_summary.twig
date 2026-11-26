@@ -1,0 +1,56 @@
+<section class="invoice-summary" data-invoice="{{ invoice.number }}">
+  <header class="invoice-header">
+    <h1>Invoice {{ invoice.number }}</h1>
+    {% if invoice.status == 'paid' %}
+      <span class="badge badge-paid">Paid</span>
+    {% else %}
+      <span class="badge badge-pending">Pending</span>
+    {% endif %}
+  </header>
+
+  {% if lines is empty %}
+    <p class="invoice-empty">No billable line items were recorded for this cycle.</p>
+  {% else %}
+    <table class="invoice-table">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>Qty</th>
+          <th>Unit</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for line in lines %}
+          <tr>
+            <td>{{ line.sku }}</td>
+            <td>{{ line.quantity }}</td>
+            <td>{{ line.unitFormatted }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% endif %}
+
+  <dl class="invoice-totals">
+    <div><dt>Subtotal</dt><dd>{{ totals.subtotal }}</dd></div>
+    <div><dt>Discount</dt><dd>{{ totals.discount }}</dd></div>
+    <div><dt>Tax</dt><dd>{{ totals.tax }}</dd></div>
+    <div><dt>Total</dt><dd><strong>{{ totals.grandTotal }}</strong></dd></div>
+  </dl>
+
+  {% if notes is defined and notes is not empty %}
+    <aside class="invoice-notes">
+      <h2>Notes</h2>
+      <ul>
+        {% for note in notes %}
+          <li>{{ note }}</li>
+        {% endfor %}
+      </ul>
+    </aside>
+  {% endif %}
+
+  <footer class="invoice-footer">
+    <p>Merchant: {{ invoice.merchantName }} ({{ invoice.currency }})</p>
+    <p>Generated at: {{ invoice.generatedAt }}</p>
+  </footer>
+</section>

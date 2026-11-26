@@ -1,0 +1,16 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  invoices  Invoice[]
+}
+
+model Invoice {
+  id        Int     @id @default(autoincrement())
+  accountId Int
+  account   Account @relation(fields: [accountId], references: [id])
+}

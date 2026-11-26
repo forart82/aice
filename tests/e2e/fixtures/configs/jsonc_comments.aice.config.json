@@ -1,0 +1,7 @@
+{
+  // Single-line JSONC comment
+  "enabled": true,
+  /* Multi-line
+     JSONC comment */
+  "idiomsEnabled": false
+}

@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "mode": "side-by-side",
+  "targetLanguage": "typescript",
+  "idiomsEnabled": false
+}

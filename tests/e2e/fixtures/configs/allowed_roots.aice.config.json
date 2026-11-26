@@ -1,0 +1,6 @@
+{
+  "enabled": true,
+  "allowedReadRoots": [
+    "../outside/shared"
+  ]
+}

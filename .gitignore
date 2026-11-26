@@ -1,8 +1,4 @@
-node_modules/
-dist/*
-!dist/aice.mjs
-coverage/
-.aice-cache/
+target/
 *.log
 .DS_Store
 __pycache__/

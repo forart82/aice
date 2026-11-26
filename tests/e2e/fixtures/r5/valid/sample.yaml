@@ -1,0 +1,9 @@
+service:
+  name: ledger-worker
+  replicas: 3
+  ports:
+    - 8080
+    - 8443
+  healthcheck:
+    path: /healthz
+    interval_sec: 15

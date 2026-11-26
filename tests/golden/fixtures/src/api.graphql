@@ -1,0 +1,17 @@
+type Account {
+  id: ID!
+  email: String!
+  balance: Float!
+}
+
+type Query {
+  account(id: ID!): Account
+}
+
+query GetAccount($id: ID!) {
+  account(id: $id) {
+    id
+    email
+    balance
+  }
+}

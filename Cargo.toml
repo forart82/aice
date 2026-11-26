@@ -1,0 +1,54 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.9.53"
+edition = "2024"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+# Internal workspace crates
+aice-governance = { path = "crates/aice-governance" }
+aice-telemetry = { path = "crates/aice-telemetry" }
+aice-lang-registry = { path = "crates/aice-lang-registry" }
+aice-ast-engine = { path = "crates/aice-ast-engine" }
+aice-aice-ir = { path = "crates/aice-aice-ir" }
+aice-find-engine = { path = "crates/aice-find-engine" }
+aice-batch-read = { path = "crates/aice-batch-read" }
+aice-batch-write = { path = "crates/aice-batch-write" }
+aice-pipeline = { path = "crates/aice-pipeline" }
+
+# Core parsing & BPE tokenization
+tree-sitter = "0.27.2"
+tree-sitter-language = "0.1.9"
+bpe-openai = "0.3.2"
+
+# R5 grammars (21 crates -> 25 LanguageFn symbols)
+tree-sitter-json = "0.24.8"
+tree-sitter-yaml = "0.7.2"
+tree-sitter-toml-ng = "0.7.0"
+tree-sitter-md = "0.5.4"
+tree-sitter-html = "0.23.2"
+tree-sitter-css = "0.25.0"
+tree-sitter-xml = "0.7.0"
+tree-sitter-bash = "0.25.1"
+tree-sitter-rust = "0.24.2"
+tree-sitter-typescript = "0.23.2"
+tree-sitter-javascript = "0.25.0"
+tree-sitter-python = "0.25.0"
+tree-sitter-go = "0.25.0"
+tree-sitter-c = "0.24.2"
+tree-sitter-cpp = "0.23.4"
+tree-sitter-c-sharp = "0.24.0"
+tree-sitter-java = "0.23.5"
+tree-sitter-kotlin-ng = "1.1.0"
+tree-sitter-dart = "0.3.0"
+tree-sitter-php = "0.25.2"
+tree-sitter-ruby = "0.23.1"
+
+# R6 grammars (4 compatible crates -> 4 LanguageFn symbols)
+tree-sitter-sequel = "0.3.13"
+tree-sitter-prisma-io = "1.6.0"
+tree-sitter-graphql = "0.3.0"
+tree-sitter-cypher = "0.2.6"

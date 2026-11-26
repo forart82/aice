@@ -1,0 +1,205 @@
+{
+  "suite": "03_search_ranking",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "SRCH-01",
+      "description": "search ranks production declarations/usages ahead of test files (4-tier ranking)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "search",
+          "Calculator"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/math.ts:\n  L6: export class Calculator {\nsrc/app.ts:\n  L1: import { Calculator, type CalcResult } from \"./math.js\";\n  L4:   private calc: Calculator;\n  L8:     this.calc = new Calculator(offset);\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Finds Calculator in src/math.ts and src/app.ts",
+          "Production files rank before test files"
+        ],
+        "deltaNote": "Rust Wave 3 transforms matched context snippets via AICE IR on supported languages (closing B-R2)."
+      }
+    },
+    {
+      "id": "SRCH-02",
+      "description": "grep alias produces identical search results",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "grep",
+          "Calculator"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/math.ts:\n  L6: export class Calculator {\nsrc/app.ts:\n  L1: import { Calculator, type CalcResult } from \"./math.js\";\n  L4:   private calc: Calculator;\n  L8:     this.calc = new Calculator(offset);\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Matches search Calculator output"
+        ],
+        "deltaNote": "Rust Wave 3 transforms matched context snippets via AICE IR."
+      }
+    },
+    {
+      "id": "SRCH-03",
+      "description": "search -C 2 emits 2 lines of surrounding context",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "search",
+          "inc",
+          "-C",
+          "2"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/matrix.cpp:\n  L1: #include <vector>\n  L2: \n  L3: namespace math {\nsrc/native.c:\n  L1: #include <stdint.h>\n  L2: \n  L3: typedef struct {\nsrc/schema.prisma:\n  L5: \n  L6: model Account {\n  L7:   id        Int       @id @default(autoincrement())\n  L8:   email     String    @unique\n  L9:   invoices  Invoice[]\n  ..\n  L11: \n  L12: model Invoice {\n  L13:   id        Int     @id @default(autoincrement())\n  L14:   accountId Int\n  L15:   account   Account @relation(fields: [accountId], references: [id])\nsrc/app.ts:\n  L10: \n  L11:   /** Increment counter and compute sum */\n  L12:   public inc(step: number): CalcResult {\n  L13:     this.count += step;\n  L14:     return this.calc.add(this.count, step);\nsrc/app.spec.ts:\n  L3: export function verifyAppBehavior(): number {\n  L4:   const app = new App(2);\n  L5:   const res = app.inc(3);\n  L6:   return res.value + app.reset();\n  L7: }\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Includes L11-L15 context around App.inc in src/app.ts"
+        ],
+        "deltaNote": "Rust Wave 3 emits AICE-transformed context windows."
+      }
+    },
+    {
+      "id": "SRCH-04",
+      "description": "search -l emits matching file paths only",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "search",
+          "-l",
+          "Calculator"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/app.ts\nsrc/math.ts\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Lists src/math.ts and src/app.ts without snippet bodies"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SRCH-05",
+      "description": "search auto-escapes literal regex metacharacters without crashing",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "search",
+          "[a+b]*(c?)"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/Handler.kt:\n  L1: package com.aice.golden\n  L2: \n  L3: data class Request(val id: String, val retries: Int)\n  L4: \n  L5: class Handler(private val prefix: String) {\n  L6:     fun handle(req: Request): String {\n  L7:         return \"$prefix:${req.id}:${req.retries}\"\n  L8:     }\n  L9: }\nsrc/Service.java:\n  L1: package com.aice.golden;\n  L2: \n  L3: public class Service {\n  L4:     private final String name;\n  L5: \n  L6:     public Service(String name) {\n  L7:         this.name = name;\n  L8:     }\n  L9: \n  L10:     public String greet(String user) {\n  L11:         return this.name + \":\" + user;\n  L12:     }\n  L13: }\nsrc/api.graphql:\n  L1: type Account {\n  L2:   id: ID!\n  L3:   email: String!\n  L4:   balance: Float!\n  L5: }\n  L6: \n  L7: type Query {\n  L8:   account(id: ID!): Account\n  L9: }\n  L10: \n  L11: query GetAccount($id: ID!) {\n  L12:   account(id: $id) {\n  L13:     id\n  L14:     email\n  L15:     balance\n  L16:   }\n  L17: }\nsrc/app.ts:\n  L1: import { Calculator, type CalcResult } from \"./math.js\";\n  L2: \n  L3: export class App {\n  L4:   private calc: Calculator;\n  L5:   private count = 0;\n  L6: \n  L7:   constructor(offset = 1) {\n  L8:     this.calc = new Calculator(offset);\n  L9:   }\n  L10: \n  L11:   /** Increment counter and compute sum */\n  L12:   public inc(step: number): CalcResult {\n  L13:     this.count += step;\n  L14:     return this.calc.add(this.count, step);\n  L15:   }\n  L16: \n  L17:   public reset(): number {\n  L18:     this.count = 0;\n  L19:     return this.count;\n  L20:   }\n  L21: }\nsrc/big.ts:\n  L1: export interface PipelineMetrics {\n  L2:   processed: number;\n  L3:   checksum: number;\n  L4:   warnings: string[];\n  L5: }\n  L6: \n  L7: export function runBatchPipeline(seed: number, limit: number): PipelineMetrics {\n  L8:   const warnings: string[] = [];\n  L9:   let acc = seed;\n  L10:   let processed = 0;\n  L11: \n  L12:   if (limit <= 0) {\n  L13:     warnings.push(\"limit-non-positive\");\n  L14:     return { processed: 0, checksum: acc, warnings };\n  L15:   }\n  L16: \n  L17:   for (let idx = 1; idx <= limit; idx += 1) {\n  L18:     const stepA = idx * 3 + 1;\n  L19:     const stepB = stepA ^ 0x1f;\n  L20:     const stepC = stepB + (idx % 5);\n  L21:     const stepD = stepC * 2 - 3;\n  L22:     const stepE = stepD % 97;\n  L23:     const stepF = stepE + seed;\n  L24:     const stepG = stepF ^ (idx << 1);\n  L25:     const stepH = stepG + 7;\n  L26:     const stepI = stepH % 131;\n  L27:     const stepJ = stepI + stepA;\n  L28:     const stepK = stepJ - stepB;\n  L29:     const stepL = stepK + stepC;\n  L30:     const stepM = stepL + stepD;\n  L31:     const stepN = stepM + stepE;\n  L32:     const stepO = stepN + stepF;\n  L33:     const stepP = stepO + stepG;\n  L34:     const stepQ = stepP + stepH;\n  L35:     const stepR = stepQ + stepI;\n  L36:     const stepS = stepR + stepJ;\n  L37:     const stepT = stepS + stepK;\n  L38:     const stepU = stepT + stepL;\n  L39:     const stepV = stepU + stepM;\n  L40:     const stepW = stepV + stepN;\n  L41:     const stepX = stepW + stepO;\n  L42:     const stepY = stepX + stepP;\n  L43:     const stepZ = stepY + stepQ;\n  L44: \n  L45:     if (stepZ % 11 === 0) {\n  L46:       warnings.push(`divisible-${idx}`);\n  L47:       acc += stepZ + stepR + stepS;\n  L48:     } else if (stepZ % 7 === 0) {\n  L49:       acc += stepZ + stepT + stepU;\n  L50:     } else {\n  L51:       acc += stepZ + stepV + stepW + stepX + stepY;\n  L52:     }\n  L53:     processed += 1;\n  L54:   }\n  L55: \n  L56:   try {\n  L57:     const fold01 = acc + 101;\n  L58:     const fold02 = fold01 ^ 0x55;\n  L59:     const fold03 = fold02 + 13;\n  L60:     const fold04 = fold03 * 3;\n  L61:     const fold05 = fold04 % 997;\n  L62:     const fold06 = fold05 + 17;\n  L63:     const fold07 = fold06 ^ 0x2a;\n  L64:     const fold08 = fold07 + 19;\n  L65:     const fold09 = fold08 * 5;\n  L66:     const fold10 = fold09 % 991;\n  L67:     const fold11 = fold10 + 23;\n  L68:     const fold12 = fold11 ^ 0x3c;\n  L69:     const fold13 = fold12 + 29;\n  L70:     const fold14 = fold13 * 7;\n  L71:     const fold15 = fold14 % 983;\n  L72:     const fold16 = fold15 + 31;\n  L73:     const fold17 = fold16 ^ 0x4d;\n  L74:     const fold18 = fold17 + 37;\n  L75:     const fold19 = fold18 * 11;\n  L76:     const fold20 = fold19 % 977;\n  L77:     const fold21 = fold20 + 41;\n  L78:     const fold22 = fold21 ^ 0x6e;\n  L79:     const fold23 = fold22 + 43;\n  L80:     const fold24 = fold23 * 13;\n  L81:     const fold25 = fold24 % 971;\n  L82:     const fold26 = fold25 + 47;\n  L83:     const fold27 = fold26 ^ 0x7f;\n  L84:     const fold28 = fold27 + 53;\n  L85:     const fold29 = fold28 * 17;\n  L86:     const fold30 = fold29 % 967;\n  L87:     const fold31 = fold30 + 59;\n  L88:     const fold32 = fold31 ^ 0x81;\n  L89:     const fold33 = fold32 + 61;\n  L90:     const fold34 = fold33 * 19;\n  L91:     const fold35 = fold34 % 953;\n  L92:     const fold36 = fold35 + 67;\n  L93:     const fold37 = fold36 ^ 0x92;\n  L94:     const fold38 = fold37 + 71;\n  L95:     const fold39 = fold38 * 23;\n  L96:     const fold40 = fold39 % 947;\n  L97:     const fold41 = fold40 + 73;\n  L98:     const fold42 = fold41 ^ 0xa3;\n  L99:     const fold43 = fold42 + 79;\n  L100:     const fold44 = fold43 * 29;\n  L101:     const fold45 = fold44 % 941;\n  L102:     const fold46 = fold45 + 83;\n  L103:     const fold47 = fold46 ^ 0xb4;\n  L104:     const fold48 = fold47 + 89;\n  L105:     const fold49 = fold48 * 31;\n  L106:     const fold50 = fold49 % 937;\n  L107:     acc = fold50;\n  L108:   } catch (err) {\n  L109:     warnings.push(String(err));\n  L110:   }\n  L111: \n  L112:   return { processed, checksum: acc, warnings };\n  L113: }\n  L114: \n  L115: export function clampMetric(value: number, minVal: number, maxVal: number): number {\n  L116:   return Math.min(Math.max(value, minVal), maxVal);\n  L117: }\n  L118: \n  L119: export function summarizeMetrics(metrics: PipelineMetrics): string {\n  L120:   const clamped = clampMetric(metrics.checksum, 0, 1000);\n  L121:   const ratio = clampMetric(metrics.processed, 0, 100);\n  L122:   const tag = metrics.warnings.length > 0 ? \"warn\" : \"ok\";\n  L123:   return `${tag}:${clamped}:${ratio}`;\n  L124: }\nsrc/billing.cs:\n  L1: namespace Billing {\n  L2: \n  L3: public sealed class Invoice {\n  L4:     public string Id { get; }\n  L5:     public decimal Total { get; }\n  L6: \n  L7:     public Invoice(string id, decimal total) {\n  L8:         Id = id;\n  L9:         Total = total;\n  L10:     }\n  L11: \n  L12:     public decimal WithTax(decimal rate) {\n  L13:         return Total + (Total * rate);\n  L14:     }\n  L15: }\n  L16: \n  L17: }\nsrc/card.twig:\n  L1: {# Status card component #}\n  L2: {% if visible %}\n  L3: <article class=\"card\">\n  L4:   <h3>{{ title|upper }}</h3>\n  L5:   <p>{{ summary }}</p>\n  L6: </article>\n  L7: {% endif %}\nsrc/component.tsx:\n  L1: // @ts-nocheck\n  L2: import type { CalcResult } from \"./math.js\";\n  L3: \n  L4: export interface CardProps {\n  L5:   title: string;\n  L6:   result: CalcResult;\n  L7: }\n  L8: \n  L9: export function StatusCard(props: CardProps) {\n  L10:   return (\n  L11:     <section className=\"status-card\">\n  L12:       <h2>{props.title}</h2>\n  L13:       <span>{props.result.value}</span>\n  L14:     </section>\n  L15:   );\n  L16: }\nsrc/controller.php:\n  L1: <?php\n  L2: \n  L3: declare(strict_types=1);\n  L4: \n  L5: class Controller {\n  L6:     public function index(string $name): string {\n  L7:         return \"hello:\" . $name;\n  L8:     }\n  L9: }\nsrc/engine.rs:\n  L1: pub struct Engine {\n  L2:     pub tick: u64,\n  L3: }\n  L4: \n  L5: impl Engine {\n  L6:     pub fn new() -> Self {\n  L7:         Self { tick: 0 }\n  L8:     }\n  L9: \n  L10:     pub fn step(&mut self, delta: u64) -> u64 {\n  L11:         self.tick += delta;\n  L12:         self.tick\n  L13:     }\n  L14: }\nsrc/helper.js:\n  L1: export function formatMetric(name, value) {\n  L2:   return `${name}=${value.toFixed(2)}`;\n  L3: }\n  L4: \n  L5: export function sumList(items) {\n  L6:   return items.reduce((acc, item) => acc + item, 0);\n  L7: }\nsrc/jobs.rb:\n  L1: module Jobs\n  L2:   class Runner\n  L3:     def initialize(name)\n  L4:       @name = name\n  L5:     end\n  L6: \n  L7:     def execute(payload)\n  L8:       \"#{@name}:#{payload}\"\n  L9:     end\n  L10:   end\n  L11: end\nsrc/math.ts:\n  L1: export interface CalcResult {\n  L2:   value: number;\n  L3:   label: string;\n  L4: }\n  L5: \n  L6: export class Calculator {\n  L7:   private offset: number;\n  L8: \n  L9:   constructor(offset = 0) {\n  L10:     this.offset = offset;\n  L11:   }\n  L12: \n  L13:   public add(a: number, b: number): CalcResult {\n  L14:     return { value: a + b + this.offset, label: \"sum\" };\n  L15:   }\n  L16: \n  L17:   public mul(a: number, b: number): CalcResult {\n  L18:     return { value: a * b + this.offset, label: \"product\" };\n  L19:   }\n  L20: }\n// +24 more matching files — next: aice search \"[a+b]*(c?)\" src/matrix.cpp\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Matches literal [a+b]*(c?) in src/notes.txt",
+          "Exits 0 without invalid-regex crash"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "SRCH-06",
+      "description": "search regex alternation with --json emits structured matches",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "search",
+          "export class|CREATE TABLE",
+          "--json"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"mode\": \"search\",\n  \"pattern\": \"export class|CREATE TABLE\",\n  \"selector\": \"/export class|CREATE TABLE/\",\n  \"count\": 5,\n  \"files\": [\n    \"src/app.ts\",\n    \"src/math.ts\",\n    \"src/local_sqlite.sql\",\n    \"src/migrations/V001__init_ledger.sql\",\n    \"src/schema_ansi.sql\"\n  ],\n  \"formattedBundle\": \"src/app.ts:\\n  L3: export class App {\\nsrc/math.ts:\\n  L6: export class Calculator {\\nsrc/local_sqlite.sql:\\n  L3: CREATE TABLE cache_entries (\\nsrc/migrations/V001__init_ledger.sql:\\n  L2: CREATE TABLE ledger_entries (\\nsrc/schema_ansi.sql:\\n  L1: CREATE TABLE accounts (\"\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "mode": "search",
+          "pattern": "export class|CREATE TABLE",
+          "selector": "/export class|CREATE TABLE/",
+          "count": 5,
+          "files": [
+            "src/app.ts",
+            "src/math.ts",
+            "src/local_sqlite.sql",
+            "src/migrations/V001__init_ledger.sql",
+            "src/schema_ansi.sql"
+          ],
+          "formattedBundle": "src/app.ts:\n  L3: export class App {\nsrc/math.ts:\n  L6: export class Calculator {\nsrc/local_sqlite.sql:\n  L3: CREATE TABLE cache_entries (\nsrc/migrations/V001__init_ledger.sql:\n  L2: CREATE TABLE ledger_entries (\nsrc/schema_ansi.sql:\n  L1: CREATE TABLE accounts ("
+        }
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Valid JSON output",
+          "Matches TS classes and SQL CREATE TABLE entries"
+        ],
+        "deltaNote": null
+      }
+    }
+  ]
+}

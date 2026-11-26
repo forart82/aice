@@ -1,0 +1,9 @@
+[package]
+name = "aice-telemetry"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aice-governance.workspace = true
+bpe-openai.workspace = true

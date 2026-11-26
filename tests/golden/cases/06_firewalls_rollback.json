@@ -1,0 +1,361 @@
+{
+  "suite": "06_firewalls_rollback",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "FW-01",
+      "description": "Invalid TypeScript syntax is rejected with Line:Col diagnostics before touching disk",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/app.ts",
+          "-s",
+          "App.inc",
+          "-c",
+          "public inc(step: number): { broken ==="
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": "❌ Error splicing src/app.ts: Pre-write syntax validation failed for <ROOT>/src/app.ts (typescript): Line 12:31 - Property or signature expected.; Line 12:38 - Unexpected token. A constructor, method, accessor, or property was expected.; Line 14:10 - ';' expected.\nContext around L12-L15 (±5 lines):\n7│   constructor(offset = 1) {\n8│     this.calc = new Calculator(offset);\n9│   }\n10│ \n11│   /** Increment counter and compute sum */\n12│   public inc(step: number): CalcResult {\n13│     this.count += step;\n14│     return this.calc.add(this.count, step);\n15│   }\n16│ \n17│   public reset(): number {\n18│     this.count = 0;\n19│     return this.count;\n20│   }\n",
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n"
+        },
+        "extraChecks": {
+          "diskUnchanged": true
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Exits 1",
+          "Reports syntax error diagnostic",
+          "src/app.ts on disk unchanged"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FW-02-JSON",
+      "description": "Invalid syntax in src/manifest.json is blocked before disk touch",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/manifest.json",
+          "--overwrite",
+          "-c",
+          "{\"broken\": "
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": "❌ Error splicing src/manifest.json: Flow map must end with a } at line 1, column 11:\n\n{\"broken\":\n          ^\n\n",
+        "diskFilesAfter": {
+          "src/manifest.json": "{\n  \"name\": \"golden-fixture\",\n  \"version\": \"1.0.0\",\n  \"features\": {\n    \"ast\": true,\n    \"telemetry\": \"exact-bpe\"\n  }\n}\n"
+        },
+        "extraChecks": {
+          "diskUnchanged": true
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Exits 1",
+          "src/manifest.json on disk is unchanged"
+        ],
+        "deltaNote": "TS 0.9.53 validated JSON via JSON.parse; Rust validates via tree-sitter-json + strict JSON parser."
+      }
+    },
+    {
+      "id": "FW-02-YAML",
+      "description": "Invalid syntax in src/deploy.yaml is blocked before disk touch",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/deploy.yaml",
+          "--overwrite",
+          "-c",
+          "service: [unclosed\n  bad: : :"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": "❌ Error splicing src/deploy.yaml: Implicit keys of flow sequence pairs need to be on a single line at line 1, column 11:\n\nservice: [unclosed\n          ^\n\n",
+        "diskFilesAfter": {
+          "src/deploy.yaml": "service: aice-golden\nruntime:\n  workers: 4\n  strict_firewall: true\nroutes:\n  - path: /health\n    method: GET\n"
+        },
+        "extraChecks": {
+          "diskUnchanged": true
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Exits 1",
+          "src/deploy.yaml on disk is unchanged"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FW-02-CSS",
+      "description": "Invalid syntax in src/styles.css is blocked before disk touch",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/styles.css",
+          "--overwrite",
+          "-c",
+          ".card { color: red; /* unclosed"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": "❌ Error splicing src/styles.css: Failed pre-write syntax validation for <ROOT>/src/styles.css: Line 1:21 - Unterminated block comment '/*'; Line 1:7 - Unclosed delimiter '{' (expected '}'); Line 1:21 - Unclosed comment\nTip: Fix the syntax error on the reported line before retrying, or splice surgically via === <ROOT>/src/styles.css:<symbol> === or === <ROOT>/src/styles.css:L<start>-L<end> === on existing files.\n",
+        "diskFilesAfter": {
+          "src/styles.css": ".status-card {\n  display: flex;\n  padding: 12px 16px;\n  border: 1px solid #334155;\n  color: #f8fafc;\n}\n\n.status-card h2 {\n  font-size: 16px;\n  margin: 0;\n}\n"
+        },
+        "extraChecks": {
+          "diskUnchanged": true
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Exits 1",
+          "src/styles.css on disk is unchanged"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FW-02-PY",
+      "description": "Invalid syntax in src/worker.py is blocked before disk touch",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "src/worker.py",
+          "-s",
+          "run_job",
+          "-c",
+          "def run_job(job):\n    if job.retries > :\n        return 'bad'"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": "❌ Error splicing src/worker.py: Pre-write syntax validation failed for <ROOT>/src/worker.py (python): Line 11:22 - SyntaxError: invalid syntax\nContext around L10-L13 (±5 lines):\n5│ class TaskJob:\n6│     job_id: str\n7│     retries: int = 0\n8│ \n9│ \n10│ def run_job(job: TaskJob) -> str:\n11│     if job.retries > 3:\n12│         return f\"aborted:{job.job_id}\"\n13│     return f\"ok:{job.job_id}\"\n",
+        "diskFilesAfter": {
+          "src/worker.py": "from dataclasses import dataclass\n\n\n@dataclass\nclass TaskJob:\n    job_id: str\n    retries: int = 0\n\n\ndef run_job(job: TaskJob) -> str:\n    if job.retries > 3:\n        return f\"aborted:{job.job_id}\"\n    return f\"ok:{job.job_id}\"\n"
+        },
+        "extraChecks": {
+          "diskUnchanged": true
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Exits 1",
+          "src/worker.py on disk is unchanged"
+        ],
+        "deltaNote": "TS 0.9.53 shelled out to python3; Rust validates in-process via tree-sitter-python."
+      }
+    },
+    {
+      "id": "FW-03",
+      "description": "Binary write/splice attempts (logo.png and NUL-byte data.bin) exit 1 without touching disk",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "splice",
+              "bin/logo.png",
+              "-c",
+              "corrupt"
+            ]
+          },
+          {
+            "args": [
+              "splice",
+              "bin/data.bin",
+              "--overwrite",
+              "-c",
+              "corrupt"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "\n",
+        "stderr": "❌ Error splicing bin/logo.png: Refusing to write or splice binary file \"<ROOT>/bin/logo.png\" (binary extension \".png\"). AICE only edits UTF-8 text files.\n\n❌ Error splicing bin/data.bin: Refusing to write or splice binary file \"<ROOT>/bin/data.bin\" (binary extension \".bin\"). AICE only edits UTF-8 text files.\n",
+        "diskFilesAfter": {
+          "bin/logo.png": "[BINARY sha256=ebf4f635a17d10d6eb46ba680b70142419aa3220f228001a036d311a22ee9d2a bytes=67]",
+          "bin/data.bin": "[BINARY sha256=a6c00385d011701a6a1e4250216f271684943782cf02c137dcc737794e538a17 bytes=11]"
+        },
+        "extraChecks": {
+          "pngUnchanged": true,
+          "binUnchanged": true,
+          "pngExit": 1,
+          "binExit": 1
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Both exit 1",
+          "Binary files remain byte-identical on disk"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FW-04",
+      "description": "Half-open :L guard rejects unbalanced span truncation and safely aligns verbatim boundary off-by-one",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "splice",
+              "src/app.ts",
+              "-s",
+              "L12-L15",
+              "-c",
+              "  public inc(delta: number): CalcResult {\n    this.count += delta * 3;\n    return this.calc.add(this.count, delta);"
+            ]
+          },
+          {
+            "args": [
+              "splice",
+              "src/app.ts",
+              "-s",
+              "L12-L15",
+              "-c",
+              "  public inc(step: number): CalcResult {\n    this.count += step * 5;\n    return this.calc.add(this.count, step);"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "UNBALANCED:\n\nAUTO_ALIGN:\n✔ Spliced symbol 'L12-L15' in src/app.ts (79 tokens saved)\n",
+        "stderr": "UNBALANCED_ERR:\n❌ Error splicing src/app.ts: Line-range splice (L12-L15) rejected (pre-write syntax validation failed) in <ROOT>/src/app.ts: replacement leaves unbalanced braces/parentheses or syntax errors (Line 16:3 - Declaration or statement expected.). Use AST-scoped hunk splicing: === <ROOT>/src/app.ts:<symbol> === with <<< / === / >>>.\nContext around L12-L15 (±5 lines):\n7│   constructor(offset = 1) {\n8│     this.calc = new Calculator(offset);\n9│   }\n10│ \n11│   /** Increment counter and compute sum */\n12│   public inc(step: number): CalcResult {\n13│     this.count += step;\n14│     return this.calc.add(this.count, step);\n15│   }\n16│ \n17│   public reset(): number {\n18│     this.count = 0;\n19│     return this.count;\n20│   }\n\nAUTO_ALIGN_ERR:\n",
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step * 5;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n"
+        },
+        "extraChecks": {
+          "unbalancedExit": 1,
+          "unbalancedDiskUnchanged": true,
+          "autoAlignExit": 0
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Truncating closing brace on balanced :L span is blocked or safely aligned without breaking AST",
+          "Never corrupts closing brace '}' of App.inc"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FW-05",
+      "description": "Multi-file batch failure rolls back all writes atomically (src/new_ok.ts absent on disk)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "splice",
+          "--stdin"
+        ],
+        "stdin": "=== src/new_ok.ts ===\nexport const createdOk = true;\n\n=== src/math.ts:Calculator.add ===\npublic add(a: number, b: number): CalcResult {\n  return { value: a + b, label: \"ok\" };\n}\n\n=== src/app.ts:App.inc ===\npublic inc(step: number): { broken ==="
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": "❌ Error splicing <stdin>: Pre-write syntax validation failed for <ROOT>/src/app.ts (typescript): Line 12:31 - Property or signature expected.; Line 12:38 - Unexpected token. A constructor, method, accessor, or property was expected.; Line 14:10 - ';' expected.\nContext around L12-L15 (±5 lines):\n7│   constructor(offset = 1) {\n8│     this.calc = new Calculator(offset);\n9│   }\n10│ \n11│   /** Increment counter and compute sum */\n12│   public inc(step: number): CalcResult {\n13│     this.count += step;\n14│     return this.calc.add(this.count, step);\n15│   }\n16│ \n17│   public reset(): number {\n18│     this.count = 0;\n19│     return this.count;\n20│   }\n",
+        "diskFilesAfter": {
+          "src/new_ok.ts": "[ABSENT]",
+          "src/math.ts": "export interface CalcResult {\n  value: number;\n  label: string;\n}\n\nexport class Calculator {\n  private offset: number;\n\n  constructor(offset = 0) {\n    this.offset = offset;\n  }\n\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n\n  public mul(a: number, b: number): CalcResult {\n    return { value: a * b + this.offset, label: \"product\" };\n  }\n}\n",
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n"
+        },
+        "extraChecks": {
+          "newOkAbsent": true,
+          "mathUnchanged": true,
+          "appUnchanged": true
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_disk_and_exit",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "Exits 1",
+          "src/new_ok.ts === '[ABSENT]'",
+          "src/math.ts and src/app.ts remain byte-identical on disk"
+        ],
+        "deltaNote": null
+      }
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+[package]
+name = "aice-ast-engine"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+aice-lang-registry.workspace = true
+tree-sitter.workspace = true
+tree-sitter-language.workspace = true
+
+# R5 grammars
+tree-sitter-json.workspace = true
+tree-sitter-yaml.workspace = true
+tree-sitter-toml-ng.workspace = true
+tree-sitter-md.workspace = true
+tree-sitter-html.workspace = true
+tree-sitter-css.workspace = true
+tree-sitter-xml.workspace = true
+tree-sitter-bash.workspace = true
+tree-sitter-rust.workspace = true
+tree-sitter-typescript.workspace = true
+tree-sitter-javascript.workspace = true
+tree-sitter-python.workspace = true
+tree-sitter-go.workspace = true
+tree-sitter-c.workspace = true
+tree-sitter-cpp.workspace = true
+tree-sitter-c-sharp.workspace = true
+tree-sitter-java.workspace = true
+tree-sitter-kotlin-ng.workspace = true
+tree-sitter-dart.workspace = true
+tree-sitter-php.workspace = true
+tree-sitter-ruby.workspace = true
+
+# R6 grammars
+tree-sitter-sequel.workspace = true
+tree-sitter-prisma-io.workspace = true
+tree-sitter-graphql.workspace = true
+tree-sitter-cypher.workspace = true

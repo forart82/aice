@@ -1,0 +1,3 @@
+Plain text operational notes for AICE golden baseline.
+Line 2: Special regex chars like [a+b]*(c?) and $price.
+Line 3: End of operational notes.

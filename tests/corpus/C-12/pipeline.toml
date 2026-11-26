@@ -1,0 +1,25 @@
+[pipeline]
+name = "ledger-settlement"
+version = "1.4.0"
+max_concurrency = 16
+wal_sync_interval_ms = 250
+
+[timeouts]
+connect_ms = 1500
+request_ms = 5000
+shutdown_grace_ms = 10000
+
+[telemetry]
+sample_rate = 1.0
+emit_histograms = true
+histogram_buckets = [10, 25, 50, 100, 250, 500]
+
+[storage]
+wal_segment_bytes = 67108864
+fsync_mode = "every_batch"
+retention_hours = 168
+
+[security]
+require_hmac = true
+allowed_currencies = ["USD", "EUR", "GBP"]
+max_batch_items = 250

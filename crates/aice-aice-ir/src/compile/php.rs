@@ -1,0 +1,97 @@
+use aice_lang_registry::LanguageId;
+
+use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
+use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
+use crate::compile::stmt_common::emit_brace_stmts;
+use crate::compile::type_map::emit_type;
+use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
+use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
+use crate::ir_types::ParamDecl;
+
+pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
+    if module.items.is_empty() && !module.raw_fallback.is_empty() {
+        return Ok(module.raw_fallback.clone());
+    }
+    let ectx = ExprEmitCtx::from_module(module);
+    let mut ec = EmitCtx::new("    ");
+    ec.line("<?php");
+    ec.blank();
+    ec.emit_trivia(&module.module_trivia, CommentStyle::Slash);
+    if !module.module_name.is_empty() && module.module_name != "module" && module.module_name != "php" {
+        ec.line(&format!("namespace {};", module.module_name.replace('/', "\\")));
+        ec.blank();
+    }
+
+    for item in &module.items {
+        match item {
+            AiceItem::Directive { text, .. } => ec.line(text),
+            AiceItem::Import(imp) => ec.line(&format!("use {};", imp.source)),
+            AiceItem::Class(cd) => emit_php_class(&mut ec, cd, &ectx),
+            AiceItem::Fn(fd) => emit_php_fn(&mut ec, fd, &ectx),
+            _ => {}
+        }
+    }
+    Ok(ec.out)
+}
+
+fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
+    ec.blank();
+    ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
+    ec.line(&format!("class {} {{", cd.name));
+    ec.push();
+    for p in &cd.props {
+        let t = p.ty.as_ref().map(|x| format!("{} ", emit_type(x, LanguageId::Php))).unwrap_or_default();
+        ec.line(&format!("{}{t}${};", php_vis(p.vis), p.name));
+    }
+    for m in &cd.methods { emit_php_method(ec, m, ectx); }
+    ec.pop();
+    ec.line("}");
+}
+
+fn emit_php_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
+    ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+    let ps = emit_php_params(&m.params);
+    let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Php))).unwrap_or_default();
+    ec.line(&format!("{}function {}({ps}){rt} {{", php_vis(m.vis), m.name));
+    ec.push();
+    match &m.body {
+        FnBody::SignatureOnly => {}
+        FnBody::Expr(e) => ec.line(&format!("return {};", emit_expr(e, LanguageId::Php, ectx))),
+        FnBody::Block(stmts) => emit_brace_stmts(stmts, LanguageId::Php, ec, ectx, false),
+    }
+    ec.pop();
+    ec.line("}");
+}
+
+fn emit_php_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
+    ec.blank();
+    ec.emit_trivia(&f.trivia, CommentStyle::Slash);
+    let ps = emit_php_params(&f.params);
+    let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Php))).unwrap_or_default();
+    ec.line(&format!("function {}({ps}){rt} {{", f.name));
+    ec.push();
+    match &f.body {
+        FnBody::SignatureOnly => {}
+        FnBody::Expr(e) => ec.line(&format!("return {};", emit_expr(e, LanguageId::Php, ectx))),
+        FnBody::Block(stmts) => emit_brace_stmts(stmts, LanguageId::Php, ec, ectx, false),
+    }
+    ec.pop();
+    ec.line("}");
+}
+
+fn emit_php_params(params: &[ParamDecl]) -> String {
+    params.iter().map(|p| {
+        let nm = if p.name.starts_with('$') { p.name.clone() } else { format!("${}", p.name) };
+        match &p.ty {
+            Some(t) => format!("{} {nm}", emit_type(t, LanguageId::Php)),
+            None => nm,
+        }
+    }).collect::<Vec<_>>().join(", ")
+}
+
+fn php_vis(v: Visibility) -> &'static str {
+    match v {
+        Visibility::Public => "public ", Visibility::Private => "private ",
+        Visibility::Protected => "protected ", _ => "public ",
+    }
+}

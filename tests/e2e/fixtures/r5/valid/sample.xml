@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<catalog version="1.0">
+  <service id="ledger">
+    <name>AICE Ledger</name>
+    <port>8080</port>
+  </service>
+</catalog>

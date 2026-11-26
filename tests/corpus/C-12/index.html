@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>AICE Ledger Console</title>
+    <link rel="stylesheet" href="./tokens.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header class="shell-header">
+        <h1>AICE Ledger Console</h1>
+        <span class="badge badge-ok">Healthy</span>
+      </header>
+      <section class="card-grid" aria-label="Settlement overview">
+        <article class="card">
+          <h2>Pending Batches</h2>
+          <p class="card-value">14</p>
+        </article>
+        <article class="card">
+          <h2>Settled Volume</h2>
+          <p class="card-value">$482,910.00</p>
+        </article>
+        <article class="card">
+          <h2>Open Disputes</h2>
+          <p class="card-value">3</p>
+        </article>
+        <article class="card">
+          <h2>Webhook Delivery Rate</h2>
+          <p class="card-value">99.94%</p>
+        </article>
+      </section>
+      <section class="recent-batches" aria-label="Recent settlement batches">
+        <h2>Recent Batches</h2>
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Batch ID</th>
+              <th>Merchant</th>
+              <th>Currency</th>
+              <th>Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>batch_901</td>
+              <td>m_northwind</td>
+              <td>USD</td>
+              <td><span class="badge badge-ok">Settled</span></td>
+            </tr>
+            <tr>
+              <td>batch_902</td>
+              <td>m_contoso</td>
+              <td>EUR</td>
+              <td><span class="badge badge-warn">Pending</span></td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </main>
+  </body>
+</html>

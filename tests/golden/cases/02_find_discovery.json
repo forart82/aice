@@ -1,0 +1,478 @@
+{
+  "suite": "02_find_discovery",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "FIND-01",
+      "description": "find lists workspace text files and skips .git, node_modules, and binary files",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "find"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/: Handler.kt (9L), Service.java (13L), api.graphql (17L), app.spec.ts (7L), app.ts (21L), big.ts (124L), billing.cs (17L), build.sh (13L), card.twig (7L), component.tsx (16L), config.toml (7L), config.xml (5L), controller.php (9L), deploy.yaml (7L), diagram.svg (4L), engine.rs (14L), graph.cypher (5L), guide.md (12L), helper.js (7L), jobs.rb (11L), local_sqlite.sql (11L), manifest.json (8L), math.ts (20L), matrix.cpp (17L), native.c (10L), notes.txt (3L), page.html (12L), proc_mysql.sql (8L), report_tsql.sql (15L), schema.prisma (16L), schema_ansi.sql (14L), server.go (12L), styles.css (11L), trigger_pg.sql (15L), widget.dart (10L), worker.py (13L)\nsrc/migrations/V001__init_ledger.sql (13L)\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Lists src/ files with line counts",
+          "Skips bin/logo.png, bin/data.bin, .git/HEAD, node_modules/dummy/index.js"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FIND-02",
+      "description": "tree alias matches find discovery output",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "tree"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/: Handler.kt (9L), Service.java (13L), api.graphql (17L), app.spec.ts (7L), app.ts (21L), big.ts (124L), billing.cs (17L), build.sh (13L), card.twig (7L), component.tsx (16L), config.toml (7L), config.xml (5L), controller.php (9L), deploy.yaml (7L), diagram.svg (4L), engine.rs (14L), graph.cypher (5L), guide.md (12L), helper.js (7L), jobs.rb (11L), local_sqlite.sql (11L), manifest.json (8L), math.ts (20L), matrix.cpp (17L), native.c (10L), notes.txt (3L), page.html (12L), proc_mysql.sql (8L), report_tsql.sql (15L), schema.prisma (16L), schema_ansi.sql (14L), server.go (12L), styles.css (11L), trigger_pg.sql (15L), widget.dart (10L), worker.py (13L)\nsrc/migrations/V001__init_ledger.sql (13L)\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Equivalent discovery output to find",
+          "Skips binary and ignored paths"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FIND-03",
+      "description": "find -d 1 limits directory traversal depth",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "find",
+          "-d",
+          "1"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Shows top-level entries (src/) without listing files inside src/"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FIND-04",
+      "description": "find --max-depth 1 and -L 1 respect depth flags",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "find",
+          "--max-depth",
+          "1"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Respects --max-depth 1 identically to -d 1"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FIND-05",
+      "description": "find -L 1 respects tree-style -L depth flag",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "find",
+          "-L",
+          "1"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Respects -L 1 identically to -d 1"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FIND-06",
+      "description": "find --search filters discovered paths by pattern",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "find",
+          "--search",
+          "worker"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/worker.py (13L)\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Includes src/worker.py",
+          "Excludes unrelated src files"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FIND-07",
+      "description": "find --json emits structured discovery payload",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "find",
+          "--json"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"mode\": \"files\",\n  \"projectRoot\": \"<ROOT>\",\n  \"count\": 37,\n  \"files\": [\n    {\n      \"path\": \"src/Handler.kt\",\n      \"lines\": 9,\n      \"bytes\": 220,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/Service.java\",\n      \"lines\": 13,\n      \"bytes\": 234,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/api.graphql\",\n      \"lines\": 17,\n      \"bytes\": 192,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/app.spec.ts\",\n      \"lines\": 7,\n      \"bytes\": 167,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/app.ts\",\n      \"lines\": 21,\n      \"bytes\": 433,\n      \"sizeKB\": 0.4\n    },\n    {\n      \"path\": \"src/big.ts\",\n      \"lines\": 124,\n      \"bytes\": 3728,\n      \"sizeKB\": 3.6\n    },\n    {\n      \"path\": \"src/billing.cs\",\n      \"lines\": 17,\n      \"bytes\": 303,\n      \"sizeKB\": 0.3\n    },\n    {\n      \"path\": \"src/build.sh\",\n      \"lines\": 13,\n      \"bytes\": 229,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/card.twig\",\n      \"lines\": 7,\n      \"bytes\": 143,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/component.tsx\",\n      \"lines\": 16,\n      \"bytes\": 319,\n      \"sizeKB\": 0.3\n    },\n    {\n      \"path\": \"src/config.toml\",\n      \"lines\": 7,\n      \"bytes\": 103,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/config.xml\",\n      \"lines\": 5,\n      \"bytes\": 161,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/controller.php\",\n      \"lines\": 9,\n      \"bytes\": 143,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/deploy.yaml\",\n      \"lines\": 7,\n      \"bytes\": 109,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/diagram.svg\",\n      \"lines\": 4,\n      \"bytes\": 186,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/engine.rs\",\n      \"lines\": 14,\n      \"bytes\": 217,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/graph.cypher\",\n      \"lines\": 5,\n      \"bytes\": 151,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/guide.md\",\n      \"lines\": 12,\n      \"bytes\": 273,\n      \"sizeKB\": 0.3\n    },\n    {\n      \"path\": \"src/helper.js\",\n      \"lines\": 7,\n      \"bytes\": 175,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/jobs.rb\",\n      \"lines\": 11,\n      \"bytes\": 151,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/local_sqlite.sql\",\n      \"lines\": 11,\n      \"bytes\": 316,\n      \"sizeKB\": 0.3\n    },\n    {\n      \"path\": \"src/manifest.json\",\n      \"lines\": 8,\n      \"bytes\": 120,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/math.ts\",\n      \"lines\": 20,\n      \"bytes\": 406,\n      \"sizeKB\": 0.4\n    },\n    {\n      \"path\": \"src/matrix.cpp\",\n      \"lines\": 17,\n      \"bytes\": 231,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/migrations/V001__init_ledger.sql\",\n      \"lines\": 13,\n      \"bytes\": 366,\n      \"sizeKB\": 0.4\n    },\n    {\n      \"path\": \"src/native.c\",\n      \"lines\": 10,\n      \"bytes\": 164,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/notes.txt\",\n      \"lines\": 3,\n      \"bytes\": 145,\n      \"sizeKB\": 0.1\n    },\n    {\n      \"path\": \"src/page.html\",\n      \"lines\": 12,\n      \"bytes\": 201,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/proc_mysql.sql\",\n      \"lines\": 8,\n      \"bytes\": 253,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/report_tsql.sql\",\n      \"lines\": 15,\n      \"bytes\": 250,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/schema.prisma\",\n      \"lines\": 16,\n      \"bytes\": 354,\n      \"sizeKB\": 0.3\n    },\n    {\n      \"path\": \"src/schema_ansi.sql\",\n      \"lines\": 14,\n      \"bytes\": 308,\n      \"sizeKB\": 0.3\n    },\n    {\n      \"path\": \"src/server.go\",\n      \"lines\": 12,\n      \"bytes\": 166,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/styles.css\",\n      \"lines\": 11,\n      \"bytes\": 156,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/trigger_pg.sql\",\n      \"lines\": 15,\n      \"bytes\": 296,\n      \"sizeKB\": 0.3\n    },\n    {\n      \"path\": \"src/widget.dart\",\n      \"lines\": 10,\n      \"bytes\": 168,\n      \"sizeKB\": 0.2\n    },\n    {\n      \"path\": \"src/worker.py\",\n      \"lines\": 13,\n      \"bytes\": 228,\n      \"sizeKB\": 0.2\n    }\n  ]\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "mode": "files",
+          "projectRoot": "<ROOT>",
+          "count": 37,
+          "files": [
+            {
+              "path": "src/Handler.kt",
+              "lines": 9,
+              "bytes": 220,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/Service.java",
+              "lines": 13,
+              "bytes": 234,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/api.graphql",
+              "lines": 17,
+              "bytes": 192,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/app.spec.ts",
+              "lines": 7,
+              "bytes": 167,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/app.ts",
+              "lines": 21,
+              "bytes": 433,
+              "sizeKB": 0.4
+            },
+            {
+              "path": "src/big.ts",
+              "lines": 124,
+              "bytes": 3728,
+              "sizeKB": 3.6
+            },
+            {
+              "path": "src/billing.cs",
+              "lines": 17,
+              "bytes": 303,
+              "sizeKB": 0.3
+            },
+            {
+              "path": "src/build.sh",
+              "lines": 13,
+              "bytes": 229,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/card.twig",
+              "lines": 7,
+              "bytes": 143,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/component.tsx",
+              "lines": 16,
+              "bytes": 319,
+              "sizeKB": 0.3
+            },
+            {
+              "path": "src/config.toml",
+              "lines": 7,
+              "bytes": 103,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/config.xml",
+              "lines": 5,
+              "bytes": 161,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/controller.php",
+              "lines": 9,
+              "bytes": 143,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/deploy.yaml",
+              "lines": 7,
+              "bytes": 109,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/diagram.svg",
+              "lines": 4,
+              "bytes": 186,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/engine.rs",
+              "lines": 14,
+              "bytes": 217,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/graph.cypher",
+              "lines": 5,
+              "bytes": 151,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/guide.md",
+              "lines": 12,
+              "bytes": 273,
+              "sizeKB": 0.3
+            },
+            {
+              "path": "src/helper.js",
+              "lines": 7,
+              "bytes": 175,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/jobs.rb",
+              "lines": 11,
+              "bytes": 151,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/local_sqlite.sql",
+              "lines": 11,
+              "bytes": 316,
+              "sizeKB": 0.3
+            },
+            {
+              "path": "src/manifest.json",
+              "lines": 8,
+              "bytes": 120,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/math.ts",
+              "lines": 20,
+              "bytes": 406,
+              "sizeKB": 0.4
+            },
+            {
+              "path": "src/matrix.cpp",
+              "lines": 17,
+              "bytes": 231,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/migrations/V001__init_ledger.sql",
+              "lines": 13,
+              "bytes": 366,
+              "sizeKB": 0.4
+            },
+            {
+              "path": "src/native.c",
+              "lines": 10,
+              "bytes": 164,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/notes.txt",
+              "lines": 3,
+              "bytes": 145,
+              "sizeKB": 0.1
+            },
+            {
+              "path": "src/page.html",
+              "lines": 12,
+              "bytes": 201,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/proc_mysql.sql",
+              "lines": 8,
+              "bytes": 253,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/report_tsql.sql",
+              "lines": 15,
+              "bytes": 250,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/schema.prisma",
+              "lines": 16,
+              "bytes": 354,
+              "sizeKB": 0.3
+            },
+            {
+              "path": "src/schema_ansi.sql",
+              "lines": 14,
+              "bytes": 308,
+              "sizeKB": 0.3
+            },
+            {
+              "path": "src/server.go",
+              "lines": 12,
+              "bytes": 166,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/styles.css",
+              "lines": 11,
+              "bytes": 156,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/trigger_pg.sql",
+              "lines": 15,
+              "bytes": 296,
+              "sizeKB": 0.3
+            },
+            {
+              "path": "src/widget.dart",
+              "lines": 10,
+              "bytes": 168,
+              "sizeKB": 0.2
+            },
+            {
+              "path": "src/worker.py",
+              "lines": 13,
+              "bytes": 228,
+              "sizeKB": 0.2
+            }
+          ]
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Valid JSON output",
+          "Contains discovered src/ entries and excludes bin/logo.png"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "FIND-08",
+      "description": "read --files emits fast workspace file list matching find",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "--files"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "src/: Handler.kt (9L), Service.java (13L), api.graphql (17L), app.spec.ts (7L), app.ts (21L), big.ts (124L), billing.cs (17L), build.sh (13L), card.twig (7L), component.tsx (16L), config.toml (7L), config.xml (5L), controller.php (9L), deploy.yaml (7L), diagram.svg (4L), engine.rs (14L), graph.cypher (5L), guide.md (12L), helper.js (7L), jobs.rb (11L), local_sqlite.sql (11L), manifest.json (8L), math.ts (20L), matrix.cpp (17L), native.c (10L), notes.txt (3L), page.html (12L), proc_mysql.sql (8L), report_tsql.sql (15L), schema.prisma (16L), schema_ansi.sql (14L), server.go (12L), styles.css (11L), trigger_pg.sql (15L), widget.dart (10L), worker.py (13L)\nsrc/migrations/V001__init_ledger.sql (13L)\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Lists text files with line counts",
+          "Excludes binary files"
+        ],
+        "deltaNote": null
+      }
+    }
+  ]
+}

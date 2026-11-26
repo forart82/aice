@@ -1,0 +1,4 @@
+{
+  "service": "aice-ledger",
+  "ports": [8080, ]
+}

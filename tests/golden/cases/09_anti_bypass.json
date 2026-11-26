@@ -1,0 +1,545 @@
+{
+  "suite": "09_anti_bypass",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "B-R1",
+      "category": "read",
+      "title": "Default read emits un-transformed raw native TS unless --dsl is passed",
+      "sourceLocationsTs0953": [
+        "src/tools/read/types-and-budgets.ts:317-322",
+        "src/cli/read-commands.ts:160,186",
+        "src/mcp/server.ts:1008"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "read src/math.ts",
+        "exitCode": 0,
+        "stdout": "export interface CalcResult {\n  value: number;\n  label: string;\n}\n\nexport class Calculator {\n  private offset: number;\n\n  constructor(offset = 0) {\n    this.offset = offset;\n  }\n\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n\n  public mul(a: number, b: number): CalcResult {\n    return { value: a * b + this.offset, label: \"product\" };\n  }\n}\n",
+        "emittedRawTypescript": true
+      },
+      "rustRequiredBehavior": "Default read MUST transform supported languages into canonical AICE IR (Law 3 + R3).",
+      "antiRegressionAssertions": [
+        "read src/math.ts without --dsl emits AICE IR, not raw TS braces/export keywords"
+      ]
+    },
+    {
+      "id": "B-R2",
+      "category": "read",
+      "title": "aice search hardcodes rawNative: true with no AST/AICE transformation",
+      "sourceLocationsTs0953": [
+        "src/cli/read-commands.ts:321,336"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "search Calculator",
+        "exitCode": 0,
+        "stdout": "src/math.ts:\n  L6: export class Calculator {\nsrc/app.ts:\n  L1: import { Calculator, type CalcResult } from \"./math.js\";\n  L4:   private calc: Calculator;\n  L8:     this.calc = new Calculator(offset);\n",
+        "emittedRawSnippets": true
+      },
+      "rustRequiredBehavior": "Search matched windows MUST flow through the AICE pipeline and transform supported snippets into AICE IR.",
+      "antiRegressionAssertions": [
+        "search Calculator returns AICE-transformed context windows on supported files"
+      ]
+    },
+    {
+      "id": "B-R3",
+      "category": "read",
+      "title": ">50 KB large-file symbol query skips AST diagnostics and decompilation",
+      "sourceLocationsTs0953": [
+        "src/tools/context/orchestrator.ts:258,277,349"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "read src/huge.ts:lateTarget --dsl",
+        "fileBytes": 106670,
+        "exitCode": 0,
+        "stdout": "// src/huge.ts:lateTarget\nmodule huge\nfn lateTarget(x:int) -> int = x * 42\n\n"
+      },
+      "rustRequiredBehavior": "Files >50 KB MUST still be parsed by tree-sitter and transformed to AICE IR without size bypass.",
+      "antiRegressionAssertions": [
+        "read >50KB file:lateTarget parses AST and emits exact AICE symbol slice"
+      ]
+    },
+    {
+      "id": "B-R4",
+      "category": "read",
+      "title": "Passthrough / zero-envelope extensions & Twig skip decompilation silently",
+      "sourceLocationsTs0953": [
+        "src/tools/context/orchestrator.ts:260-261,350-356,360-361"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "read src/card.twig src/config.toml src/schema_ansi.sql --dsl",
+        "exitCode": 0,
+        "stdout": "// src/card.twig\n{# Status card component #}\n{% if visible %}\n<article class=\"card\">\n  <h3>{{ title|upper }}</h3>\n  <p>{{ summary }}</p>\n</article>\n{% endif %}\n\n\n// src/config.toml\n[package]\nname = \"aice-golden\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nbpe-openai = \"0.3.2\"\n\n\n// src/schema_ansi.sql\nCREATE TABLE accounts (\n  id BIGINT PRIMARY KEY,\n  owner_name VARCHAR(120) NOT NULL,\n  balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00\n);\n\nWITH active_accounts AS (\n  SELECT id, owner_name, balance\n  FROM accounts\n  WHERE balance > 0\n)\nSELECT id, owner_name, balance\nFROM active_accounts\nORDER BY balance DESC;\n\n"
+      },
+      "rustRequiredBehavior": "All R5/Twig/R6 languages undergo real AST + AICE IR transformation; ONLY PlainText uses UnsupportedPassthrough.",
+      "antiRegressionAssertions": [
+        "Twig, TOML, and SQL emit AICE IR rather than silent raw passthrough"
+      ]
+    },
+    {
+      "id": "B-R5",
+      "category": "read",
+      "title": "Silent AICE drop on small files when AICE tokens exceed raw tokens",
+      "sourceLocationsTs0953": [
+        "src/tools/context/orchestrator.ts:367-373"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "read src/tiny.ts --dsl",
+        "exitCode": 0,
+        "stdout": "// src/tiny.ts\nexport const x = 1;\n\n"
+      },
+      "rustRequiredBehavior": "Supported files MUST always emit AICE IR (R3) and report honest signed (even negative) token deltas.",
+      "antiRegressionAssertions": [
+        "No silent swap back to raw native TS when AICE output is larger on tiny files"
+      ]
+    },
+    {
+      "id": "B-R6",
+      "category": "read",
+      "title": "[AICE AST Fallback] naive String.includes() / line-50 fallback on AST failure",
+      "sourceLocationsTs0953": [
+        "src/tools/context/orchestrator.ts:281-330,375-382,488-500"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "read src/bad.rs:target_fn --dsl",
+        "exitCode": 0,
+        "stdout": "// src/bad.rs:target_fn\n2│ pub fn target_fn() -> i32 { 7 }\n\n## ⚠️ Native Syntax Diagnostics\n- Line 1:19 — Unclosed delimiter '(' (expected ')')\n  `L1: pub fn broken_rust( { let x = ; }`\n",
+        "stderr": "[AICE AST Fallback] Decompiler failed for src/bad.rs: RustDecompiler syntax error at line 1, col 21: Expected parameter name. Found: LBRACE ({). Falling back to line-numbered native slice.\n"
+      },
+      "rustRequiredBehavior": "Rust uses real tree-sitter AST slicing and emits explicit structured diagnostics on unparseable symbols instead of naive line-50 text fallback.",
+      "antiRegressionAssertions": [
+        "No '[AICE AST Fallback]' line-50 substring guessing"
+      ]
+    },
+    {
+      "id": "B-R7",
+      "category": "read",
+      "title": "8 decompiler/emitter no-ops (java, shell, xml, markdown, etc.) return raw verbatim source",
+      "sourceLocationsTs0953": [
+        "src/decompiler/index.ts:191-220",
+        "src/emitters/index.ts:145-164"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "read src/Service.java src/build.sh src/config.xml src/guide.md --dsl",
+        "exitCode": 0,
+        "stdout": "// src/Service.java\npackage com.aice.golden;\n\npublic class Service {\n    private final String name;\n\n    public Service(String name) {\n        this.name = name;\n    }\n\n    public String greet(String user) {\n        return this.name + \":\" + user;\n    }\n}\n\n\n// src/build.sh\n#!/usr/bin/env bash\nset -euo pipefail\n\nrun_check() {\n  local mode=\"${1:-fast}\"\n  case \"$mode\" in\n    fast) echo \"running fast\" ;;\n    full) echo \"running full\" ;;\n    *) echo \"unknown\" >&2; return 1 ;;\n  esac\n}\n\nrun_check \"fast\"\n\n\n// src/config.xml\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<settings version=\"1\">\n  <module name=\"pipeline\" enabled=\"true\" />\n  <module name=\"firewall\" strict=\"true\" />\n</settings>\n\n\n// src/guide.md\n# Golden Architecture Guide\n\nOverview of the multi-language golden fixture workspace.\n\n## Pipeline Stages\n\n1. Governance gate checks `aice.config.json`.\n2. AST engine transforms source into AICE IR.\n\n## Telemetry Notes\n\nReports exact `cl100k_base` and `o200k_base` counts.\n\n"
+      },
+      "rustRequiredBehavior": "Java, Shell/Bash, XML, and Markdown MUST have real AST parsing, non-empty AICE IR transformation, and pre-write firewalls.",
+      "antiRegressionAssertions": [
+        "Java, Bash, XML, and Markdown transform to AICE IR on read and round-trip cleanly"
+      ]
+    },
+    {
+      "id": "B-R8",
+      "category": "read",
+      "title": "Chrome-stripping hack removes framing headers solely to keep savings non-negative",
+      "sourceLocationsTs0953": [
+        "src/tools/read/engine.ts:2030-2098"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "read src/math.ts:L1-L3",
+        "exitCode": 0,
+        "stdout": "// src/math.ts:1-3\nexport interface CalcResult {\n  value: number;\n  label: string;\n"
+      },
+      "rustRequiredBehavior": "Metadata framing MUST be deterministic and independent of whether token savings cross 0%.",
+      "antiRegressionAssertions": [
+        "Framing headers never stripped conditionally based on savings sign"
+      ]
+    },
+    {
+      "id": "B-W1",
+      "category": "write",
+      "title": "--force bypasses pre-write syntax validation and writes broken syntax to disk",
+      "sourceLocationsTs0953": [
+        "src/tools/splice/native-orchestrator.ts:1388,1480,1536",
+        "src/tools/splice/batch.ts:625-640,954",
+        "src/tools/create.ts:1344-1365"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "splice src/app.ts -s App.inc -c 'public inc(): { broken ===' --force",
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol 'App.inc' in src/app.ts (79 tokens saved)\n",
+        "stderr": "",
+        "tsCorruptedDisk": true
+      },
+      "rustRequiredBehavior": "SyntaxFirewall MUST NEVER be bypassable via --force (--force only authorizes >25L full overwrite, never invalid syntax).",
+      "antiRegressionAssertions": [
+        "Invalid syntax with --force exits 1 and leaves disk untouched"
+      ]
+    },
+    {
+      "id": "B-W2",
+      "category": "write",
+      "title": "Broken-file-on-disk bypass disables syntax validation for newly spliced errors",
+      "sourceLocationsTs0953": [
+        "src/tools/splice/native-orchestrator.ts:1388,1480,1536",
+        "src/tools/splice/batch.ts:954",
+        "src/tools/diff-patch.ts:957-961"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "splice src/broken_disk.ts -s okFn -c 'export function okFn(): { {{{'",
+        "exitCode": 0,
+        "stdout": "✔ Spliced symbol 'okFn' in src/broken_disk.ts (6 tokens saved)\n",
+        "stderr": "",
+        "diskAfter": {
+          "src/broken_disk.ts": "export const broken = ;\nexport function okFn(): { {{{\n"
+        }
+      },
+      "rustRequiredBehavior": "Firewall MUST reject splices that introduce new AST syntax errors or increase error node count even when file on disk has pre-existing errors.",
+      "antiRegressionAssertions": [
+        "Introducing unclosed brace into pre-broken file is rejected with exit 1"
+      ]
+    },
+    {
+      "id": "B-W3",
+      "category": "write",
+      "title": "Balanced-brace invalid syntax passes TS validator for Rust, Go, C++, C#, Java, Kotlin, PHP",
+      "sourceLocationsTs0953": [
+        "src/tools/syntax-validator.ts:944-962,1386-1443"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "rustBalancedSyntaxErrorExit": 0,
+        "rustStdout": "✔ Spliced symbol 'Engine.step' in src/engine.rs (35 tokens saved)\n",
+        "goBalancedSyntaxErrorExit": 0,
+        "goStdout": "✔ Spliced symbol 'StartServer' in src/server.go (19 tokens saved)\n"
+      },
+      "rustRequiredBehavior": "All 7 languages (+ C, Dart, Ruby, R6 DBs) MUST use real tree-sitter / strict RD parsers and reject balanced-brace invalid syntax.",
+      "antiRegressionAssertions": [
+        "Balanced-brace invalid Rust/Go/C/C++/C#/Java/Kotlin/PHP/Dart/Ruby/SQL syntax exits 1 before disk touch"
+      ]
+    },
+    {
+      "id": "B-W4",
+      "category": "write",
+      "title": "External python3/bash PATH dependency and unvalidated TOML/HTML/SQL passthrough writes",
+      "sourceLocationsTs0953": [
+        "src/tools/syntax-validator.ts:876,934-937,1063-1191,1435-1437"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "invalidTomlOverwriteExit": 0,
+        "invalidPythonWithEmptyPathExit": 0,
+        "invalidPythonWithEmptyPathStdout": "✔ Spliced symbol 'run_job' in src/worker.py (29 tokens saved)\n",
+        "invalidPythonWithEmptyPathStderr": "",
+        "invalidBashWithEmptyPathExit": 0,
+        "invalidBashWithEmptyPathStdout": "✔ Spliced symbol 'run_check' in src/build.sh (18 tokens saved)\n",
+        "invalidBashWithEmptyPathStderr": "",
+        "invalidHtmlOverwriteExit": 0,
+        "diskFilesAfter": {
+          "src/worker.py": "from dataclasses import dataclass\n\n\n@dataclass\nclass TaskJob:\n    job_id: str\n    retries: int = 0\n\n\ndef run_job(job):\n    if job.retries > :\n        return 'bad'\n",
+          "src/build.sh": "#!/usr/bin/env bash\nset -euo pipefail\n\nrun_check() {\n  if then\n}\n\nrun_check \"fast\"\n"
+        }
+      },
+      "rustRequiredBehavior": "All syntax firewalls MUST run 100% in-process in Rust (zero PATH binary spawns) and validate TOML, HTML, XML, SQL, Prisma, GraphQL, Cypher strictly.",
+      "antiRegressionAssertions": [
+        "With PATH='', invalid Python/Bash is still rejected",
+        "Invalid TOML and SQL are rejected with exit 1"
+      ]
+    },
+    {
+      "id": "B-W5",
+      "category": "write",
+      "title": "Line-based regex lowering in hybrid preprocessor risks mutating non-declaration sigils/expressions",
+      "sourceLocationsTs0953": [
+        "src/tools/preprocessor.ts:1701-1960"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "exitCode": 0,
+        "diskAfter": {
+          "src/server.go": "package server\n\nimport \"fmt\"\n\ntype Config struct {\n\tPort int\n\tHost string\n}\n\nfunc StartServer(cfg Config) string {\n  msg := \"ret value <- keep\"\n  return msg\n}\n"
+        }
+      },
+      "rustRequiredBehavior": "Lowering MUST be lexer/AST-aware and preserve string literals, template expressions, and Go channel receives (`<-ch`).",
+      "antiRegressionAssertions": [
+        "Go `<-ch` channel ops and string contents containing `ret`/`<-` are never corrupted"
+      ]
+    },
+    {
+      "id": "B-S1",
+      "category": "surface",
+      "title": "--json, --max-tokens, and TTY --full bypass CLI budget ceilings while non-TTY --full clamps silently",
+      "sourceLocationsTs0953": [
+        "src/cli/read-commands.ts:117,135,295,425",
+        "src/tools/read/dynamic-budget.ts:638-649"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "nonTtyFullBytes": 7902,
+        "jsonFullBytes": 16569
+      },
+      "rustRequiredBehavior": "Rust enforces one deterministic, explicitly documented water-filling budget contract across CLI/JSON/MCP with zero hidden bypass flags.",
+      "antiRegressionAssertions": [
+        "Budget behavior is deterministic and honest telemetry reflects exact emitted stdout bytes/tokens"
+      ]
+    },
+    {
+      "id": "B-S2",
+      "category": "surface",
+      "title": "Hidden CLI commands (fmt, diff, create, compile, verify) operate outside unified pipeline; fmt --stdin skips enabled:false",
+      "sourceLocationsTs0953": [
+        "src/cli/utility-commands.ts:28-286",
+        "src/cli/compile-commands.ts",
+        "src/cli/mcp-and-bench-commands.ts",
+        "src/cli/splice-commands.ts:804+"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "fmtFileExitWhenDisabled": 1,
+        "fmtStdinExitWhenDisabled": 0,
+        "fmtStdinStdout": "fn ok() -> int:\n  ret 1\n",
+        "diffFileExitWhenDisabled": 1
+      },
+      "rustRequiredBehavior": "All commands traverse PipelineRequest<Raw> -> authorize -> Governed; disabled config rejects uniformly with exit 1.",
+      "antiRegressionAssertions": [
+        "Zero un-governed or un-pipelined subcommands remain"
+      ]
+    },
+    {
+      "id": "B-S3",
+      "category": "surface",
+      "title": "Hidden legacy MCP tool names (aice_context, aice_create, aice_outline, etc.) still execute outside 2-tool surface",
+      "sourceLocationsTs0953": [
+        "src/mcp/server.ts:1053-1409,1841-2277"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "legacyAiceContextResponse": {
+          "jsonrpc": "2.0",
+          "id": 2,
+          "result": {
+            "content": [
+              {
+                "type": "text",
+                "text": "module math\n\ntype CalcResult:\n  value:int\n  label:str\n\npub class Calculator(pub offset:int = 0):\n  fn add(a:int, b:int) -> CalcResult = { value: a + b + this.offset, label: \"sum\" }\n  fn mul(a:int, b:int) -> CalcResult = { value: a * b + this.offset, label: \"product\" }\n\n\n## Target Outline\ntype CalcResult: # [L1-L4]\n  value: int # [L2-L2]\n  label: str # [L3-L3]\n\npub class Calculator(pub offset: int = ...): # [L6-L20]\n  fn add(a: int, b: int) -> CalcResult: ... # [L13-L15]\n  fn mul(a: int, b: int) -> CalcResult: ... # [L17-L19]\n\n## Downstream Callers\n- src/app.ts:1 (Calculator, CalcResult)\n- src/component.tsx:2 (CalcResult)"
+              }
+            ]
+          }
+        }
+      },
+      "rustRequiredBehavior": "MCP executeToolCall MUST accept strictly aice_read and aice_splice (all routed through unified PipelineExecutor) and reject unknown tool names.",
+      "antiRegressionAssertions": [
+        "Calling aice_context or aice_create returns JSON-RPC unknown-tool error"
+      ]
+    },
+    {
+      "id": "B-S4",
+      "category": "surface",
+      "title": "Internal engine.ts early-exit forks (--files & R1 --search) skip unified context/telemetry pipeline",
+      "sourceLocationsTs0953": [
+        "src/tools/read/engine.ts:100-102,466-523"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "filesExit": 0,
+        "searchExit": 0
+      },
+      "rustRequiredBehavior": "Find and Search MUST traverse PipelineExecutor<Governed> -> aice_telemetry::meter_and_seal -> StdoutWriter.",
+      "antiRegressionAssertions": [
+        "find and search enforce identical governance, safe-root containment, binary filtering, and exact telemetry"
+      ]
+    },
+    {
+      "id": "B-T1",
+      "category": "telemetry",
+      "title": "Faked o200k_base equals cl100k_base instead of running real o200k_base tokenizer",
+      "sourceLocationsTs0953": [
+        "src/tools/read/discovery.ts:595",
+        "src/tools/read/search.ts:278,548",
+        "src/tools/read/engine.ts:1224"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "ledgerRows": [
+          {
+            "t": "<TIMESTAMP>",
+            "r": "<ROOT>",
+            "f": "<workspace-files>",
+            "o": "outline",
+            "a": "golden-capture",
+            "nc": 11765,
+            "ac": 703,
+            "n1": 2942,
+            "a1": 248,
+            "n2": 2942,
+            "a2": 246,
+            "rn": 195
+          }
+        ]
+      },
+      "rustRequiredBehavior": "Telemetry MUST compute real bpe-openai cl100k_base AND o200k_base independently.",
+      "antiRegressionAssertions": [
+        "nativeO200k equals bpe_openai::o200k_base count (not copied from cl100k_base)"
+      ]
+    },
+    {
+      "id": "B-T2",
+      "category": "telemetry",
+      "title": "Heuristic chars/4, chars/3.8, bytes/3.5 approximations instead of exact BPE counts",
+      "sourceLocationsTs0953": [
+        "src/tools/read/discovery.ts:583",
+        "src/tools/read/search.ts:278",
+        "src/tools/splice/native-orchestrator.ts:1561",
+        "src/cli/telemetry-and-flags.ts:84",
+        "src/tools/create.ts:1497-1515",
+        "src/tools/outline.ts:1065,1068",
+        "src/mcp/server.ts:1256"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "spliceJson": {
+          "success": true,
+          "filePath": "<ROOT>/src/app.ts",
+          "symbol": "App.reset",
+          "startLine": 17,
+          "endLine": 19,
+          "originalSnippet": "  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }",
+          "newSnippet": "  public reset(): number {\n    return 0;\n  }",
+          "modifiedCode": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    return 0;\n  }\n}\n",
+          "newAiceSource": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    return 0;\n  }\n}\n",
+          "tokensSaved": 87,
+          "preservedTriviaTokens": 0,
+          "realisticTokensSaved": 53,
+          "idiomsUsed": false,
+          "dryRun": false
+        },
+        "telemetryPathVarianceNote": "Note: observedTs0953 telemetry char/token fields in SPL-11, TEL-01, and B-T2 include the exact temp-path length of os.tmpdir()/aice-golden-XXXXXX/ws before <ROOT> path sanitization (explaining +-1 to 3 token variance across runs)."
+      },
+      "rustRequiredBehavior": "Zero heuristic char/byte division; 100% exact bpe-openai cl100k_base & o200k_base counts.",
+      "antiRegressionAssertions": [
+        "All telemetry token counts match bpe-openai exact counts with 0 tolerance"
+      ]
+    },
+    {
+      "id": "B-T3",
+      "category": "telemetry",
+      "title": "find/search telemetry inflates baseline by summing unread file bodies across workspace",
+      "sourceLocationsTs0953": [
+        "src/tools/read/discovery.ts:583-595",
+        "src/tools/read/search.ts:525-548"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "ledgerRows": [
+          {
+            "t": "<TIMESTAMP>",
+            "r": "<ROOT>",
+            "f": "<workspace-files>",
+            "o": "outline",
+            "a": "golden-capture",
+            "nc": 11765,
+            "ac": 703,
+            "n1": 2942,
+            "a1": 248,
+            "n2": 2942,
+            "a2": 246,
+            "rn": 195
+          },
+          {
+            "t": "<TIMESTAMP>",
+            "r": "<ROOT>",
+            "f": "<directory>",
+            "o": "context",
+            "a": "golden-capture",
+            "sm": 1,
+            "nc": 11765,
+            "ac": 199,
+            "n1": 3453,
+            "a1": 55,
+            "n2": 3453,
+            "a2": 55,
+            "rn": 149
+          }
+        ]
+      },
+      "rustRequiredBehavior": "find/search baseline MUST reflect equivalent native find/rg command output, never full unread corpus file contents.",
+      "antiRegressionAssertions": [
+        "find/search baseline tokens equal honest native discovery/grep output tokens"
+      ]
+    },
+    {
+      "id": "B-T4",
+      "category": "telemetry",
+      "title": "Math.max(0, ...) clamping and splice comparing whole-file tokens vs short snippet",
+      "sourceLocationsTs0953": [
+        "src/cli/mcp-and-bench-commands.ts:375,567",
+        "src/tools/outline.ts:1070",
+        "src/tools/create.ts:227,1497-1515",
+        "src/tools/splice/batch.ts:1601"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "command": "splice src/big.ts -s L2-L5 -c '...'",
+        "stdout": "✔ Spliced symbol 'L2-L5' in src/big.ts (1201 tokens saved)\n"
+      },
+      "rustRequiredBehavior": "Preserve negative signed token deltas faithfully; never clamp to 0 or 1 or compare whole file against snippet.",
+      "antiRegressionAssertions": [
+        "Negative token savings are recorded with negative sign in ledger and gain"
+      ]
+    },
+    {
+      "id": "B-T5",
+      "category": "telemetry",
+      "title": "Synthetic sanitizeHonestRealisticBaseline multipliers (multiFilesCount * 10 / 45 / 80)",
+      "sourceLocationsTs0953": [
+        "src/telemetry/index.ts:709-730"
+      ],
+      "ts0953EvidenceType": "static_code_audit",
+      "observedTs0953": {
+        "note": "TS telemetry/index.ts applies synthetic multipliers when rawBaseline is missing or heuristic."
+      },
+      "rustRequiredBehavior": "Rust PipelineResult<Executed> ALWAYS carries actual raw_baseline_payload bytes/tokens with zero synthetic multipliers.",
+      "antiRegressionAssertions": [
+        "No magic multiplier constants in telemetry metering"
+      ]
+    },
+    {
+      "id": "B-T6",
+      "category": "telemetry",
+      "title": "--stats footer omitted from recorded aiceCl100k and --json skips tokenCount tracking",
+      "sourceLocationsTs0953": [
+        "src/tools/read/engine.ts:1958,2154",
+        "src/tools/read/search.ts:296,552"
+      ],
+      "ts0953EvidenceType": "live_probe",
+      "observedTs0953": {
+        "stdoutWithStats": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n\n📊 Context Pack Token Telemetry:\n  Total pack tokens: 105\n  Dependencies:      0\n  Downstream callers:0\n  Target characters: 432\n",
+        "exactStdoutTokensCl100k": 143,
+        "ledgerRows": [
+          {
+            "t": "<TIMESTAMP>",
+            "r": "<ROOT>",
+            "f": "src/app.ts",
+            "o": "context",
+            "a": "golden-capture",
+            "nc": 433,
+            "ac": 432,
+            "n1": 105,
+            "a1": 105,
+            "n2": 105,
+            "a2": 105,
+            "rn": 105
+          }
+        ]
+      },
+      "rustRequiredBehavior": "meter_and_seal MUST count the complete final stdout payload (including all headers, framing, and --stats footers).",
+      "antiRegressionAssertions": [
+        "Logged emitted tokens === exact BPE count of full stdout bytes"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": "1.0.0",
+  "repoVersion": "0.9.53",
+  "captureEntry": "bin/aice.ts",
+  "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2",
+  "capturedAtUtc": "2026-11-20T00:39:55.558Z",
+  "suites": {
+    "01_governance_config.json": 6,
+    "02_find_discovery.json": 8,
+    "03_search_ranking.json": 6,
+    "04_read_pipeline.json": 15,
+    "05_splice_write.json": 11,
+    "06_firewalls_rollback.json": 8,
+    "07_mcp_surface.json": 2,
+    "08_telemetry_gain.json": 2,
+    "09_anti_bypass.json": 23
+  },
+  "totalCases": 81,
+  "telemetryVarianceNote": "Note: observedTs0953 telemetry char/token fields in SPL-11, TEL-01, and B-T2 include the exact temp-path length of os.tmpdir()/aice-golden-XXXXXX/ws before <ROOT> path sanitization (explaining +-1 to 3 token variance across runs).",
+  "rustUpgradeDeltaContract": {
+    "law3SinglePipeline": "100% of reads, searches, find, writes, and MCP calls traverse Governance -> Resolution -> PipelineExecutor -> Honest BPE Telemetry -> StdoutWriter.",
+    "r3DefaultAiceTransformation": "Where TS v0.9.53 defaulted rawNative:true (emitting raw native source unless --dsl was passed), Rust transforms ALL supported R5/Twig/R6 files into AICE IR by default. Only LanguageId::PlainText uses TranspileOutcome::UnsupportedPassthrough.",
+    "r5AndR6ParserUpgrades": "Replaces TS delimiter-only validators (Rust/Go/C++/C#/Java/Kotlin/PHP) and external python3/bash spawns with 100% in-process tree-sitter + original Rust RD/Pratt parsers across all 22 R5 + Twig + 9 R6 DB dialects.",
+    "antiBypassClosure": "All 23 documented bypasses (B-R1..B-R8, B-W1..B-W5, B-S1..B-S4, B-T1..B-T6) in 09_anti_bypass.json MUST be verified closed in Waves 2-5."
+  }
+}

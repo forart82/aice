@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<plugin id="aice-ledger-extension" version="1.4.0">
+  <metadata>
+    <name>AICE Ledger Settlement Extension</name>
+    <vendor>AICE Systems</vendor>
+    <minRuntime>0.9.53</minRuntime>
+  </metadata>
+  <capabilities>
+    <capability id="settlement.batch" enabled="true" />
+    <capability id="settlement.reconcile" enabled="true" />
+    <capability id="webhook.dispatch" enabled="true" />
+  </capabilities>
+  <endpoints>
+    <endpoint name="health" path="/healthz" method="GET" />
+    <endpoint name="settle" path="/v1/settlements" method="POST" />
+    <endpoint name="reconcile" path="/v1/reconcile" method="POST" />
+    <endpoint name="balances" path="/v1/merchants/balances" method="GET" />
+  </endpoints>
+  <policies>
+    <policy name="idempotency" ttlSeconds="86400" enforced="true" />
+    <policy name="rateLimit" requestsPerMinute="1200" burst="120" />
+  </policies>
+</plugin>

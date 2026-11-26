@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "AICE: On-the-Fly AI Context Engine & Multi-Language $idioms Splicer"
+title: "AICE: 100% Rust AI Co-Engine & Atomic Multi-Language AST Splicer"
 message: "If you use AICE in your research, benchmarks, or AI coding agent workflows, please cite it using the metadata from this file."
 type: software
 authors:
@@ -20,4 +20,4 @@ keywords:
   - token-optimization
   - llm
   - coding-agents
-  - idioms
+  - rust

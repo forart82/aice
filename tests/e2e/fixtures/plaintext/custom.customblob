@@ -1,0 +1,3 @@
+Custom unknown extension UTF-8 payload.
+Line two: key=value; token=[x+y]
+Line three: must pass through without AST transformation.

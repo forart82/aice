@@ -1,0 +1,455 @@
+{
+  "suite": "07_mcp_surface",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "MCP-01",
+      "description": "MCP stdio JSON-RPC exposes strictly 2 tools (aice_read, aice_splice) and enforces binary/firewall parity",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "mcp_session",
+        "mcpRequests": [
+          {
+            "method": "initialize",
+            "params": {
+              "protocolVersion": "2024-11-05",
+              "capabilities": {},
+              "clientInfo": {
+                "name": "golden",
+                "version": "1.0"
+              }
+            }
+          },
+          {
+            "method": "notifications/initialized"
+          },
+          {
+            "method": "tools/list",
+            "params": {}
+          },
+          {
+            "method": "tools/call",
+            "params": {
+              "name": "aice_read",
+              "arguments": {
+                "path": "src/math.ts:Calculator.add"
+              }
+            }
+          },
+          {
+            "method": "tools/call",
+            "params": {
+              "name": "aice_read",
+              "arguments": {
+                "path": "bin/logo.png"
+              }
+            }
+          },
+          {
+            "method": "tools/call",
+            "params": {
+              "name": "aice_splice",
+              "arguments": {
+                "filePath": "src/app.ts",
+                "symbol": "App.reset",
+                "code": "public reset(): number {\n  this.count = 7;\n  return this.count;\n}"
+              }
+            }
+          },
+          {
+            "method": "tools/call",
+            "params": {
+              "name": "aice_splice",
+              "arguments": {
+                "filePath": "src/app.ts",
+                "symbol": "App.inc",
+                "code": "public inc(step: number): { broken ==="
+              }
+            }
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "[\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 1,\n    \"result\": {\n      \"protocolVersion\": \"2024-11-05\",\n      \"capabilities\": {\n        \"tools\": {}\n      },\n      \"serverInfo\": {\n        \"name\": \"aice-mcp\",\n        \"version\": \"0.9.53\"\n      }\n    }\n  },\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 2,\n    \"result\": {\n      \"tools\": [\n        {\n          \"name\": \"aice_read\",\n          \"description\": \"Read files, dirs, symbols, :L, search, or file list. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch in path or paths.\",\n          \"inputSchema\": {\n            \"type\": \"object\",\n            \"properties\": {\n              \"path\": {\n                \"type\": \"string\",\n                \"description\": \"File/dir, f:sym, f:L1-L50, or space-separated list\"\n              },\n              \"paths\": {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"string\"\n                }\n              },\n              \"targets\": {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"string\"\n                }\n              },\n              \"filePath\": {\n                \"type\": \"string\"\n              },\n              \"fileOrDir\": {\n                \"type\": \"string\"\n              },\n              \"symbol\": {\n                \"type\": \"string\",\n                \"description\": \"Symbol, L1-L30, /pat/, outline\"\n              },\n              \"selector\": {\n                \"type\": \"string\"\n              },\n              \"search\": {\n                \"type\": \"string\"\n              },\n              \"filesOnly\": {\n                \"type\": \"boolean\"\n              },\n              \"contextLines\": {\n                \"type\": \"number\"\n              },\n              \"dsl\": {\n                \"type\": \"boolean\"\n              },\n              \"outline\": {\n                \"type\": \"boolean\"\n              },\n              \"full\": {\n                \"type\": \"boolean\"\n              },\n              \"depth\": {\n                \"type\": \"number\"\n              },\n              \"maxTokens\": {\n                \"type\": \"number\"\n              },\n              \"includeDeps\": {\n                \"type\": \"boolean\"\n              },\n              \"includeCallers\": {\n                \"type\": \"boolean\"\n              },\n              \"compact\": {\n                \"type\": \"boolean\"\n              },\n              \"types\": {\n                \"type\": \"boolean\"\n              },\n              \"idioms\": {\n                \"type\": \"boolean\"\n              },\n              \"stats\": {\n                \"type\": \"boolean\"\n              },\n              \"json\": {\n                \"type\": \"boolean\"\n              }\n            },\n            \"required\": []\n          }\n        },\n        {\n          \"name\": \"aice_splice\",\n          \"description\": \"Create, overwrite, or splice files/symbols/:L/hunks (aice_write). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code.\",\n          \"inputSchema\": {\n            \"type\": \"object\",\n            \"properties\": {\n              \"filePath\": {\n                \"type\": \"string\",\n                \"description\": \"File or file:selector\"\n              },\n              \"path\": {\n                \"type\": \"string\"\n              },\n              \"fileOrDir\": {\n                \"type\": \"string\"\n              },\n              \"symbolSelector\": {\n                \"type\": \"string\",\n                \"description\": \"Symbol, L1-L25, imports, eof, :overwrite\"\n              },\n              \"symbol\": {\n                \"type\": \"string\"\n              },\n              \"selector\": {\n                \"type\": \"string\"\n              },\n              \"range\": {\n                \"type\": \"string\"\n              },\n              \"code\": {\n                \"type\": \"string\",\n                \"description\": \"Code, multi-line hunk, or === file:sym === stream\"\n              },\n              \"content\": {\n                \"type\": \"string\"\n              },\n              \"newAiceCode\": {\n                \"type\": \"string\"\n              },\n              \"body\": {\n                \"type\": \"string\"\n              },\n              \"delete\": {\n                \"type\": \"boolean\"\n              },\n              \"create\": {\n                \"type\": \"boolean\"\n              },\n              \"force\": {\n                \"type\": \"boolean\"\n              },\n              \"overwrite\": {\n                \"type\": \"boolean\"\n              },\n              \"insertAfter\": {\n                \"type\": \"string\"\n              },\n              \"insertBefore\": {\n                \"type\": \"string\"\n              },\n              \"preserveDocs\": {\n                \"type\": \"boolean\"\n              },\n              \"dryRun\": {\n                \"type\": \"boolean\"\n              },\n              \"idioms\": {\n                \"type\": \"boolean\"\n              },\n              \"inlineIdioms\": {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"string\"\n                }\n              },\n              \"edits\": {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"object\"\n                }\n              },\n              \"batch\": {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"object\"\n                }\n              },\n              \"files\": {\n                \"type\": \"array\",\n                \"items\": {\n                  \"type\": \"object\"\n                }\n              }\n            }\n          }\n        }\n      ]\n    }\n  },\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 3,\n    \"result\": {\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"// src/math.ts:13-15\\n  public add(a: number, b: number): CalcResult {\\n    return { value: a + b + this.offset, label: \\\"sum\\\" };\\n  }\\n// siblings in Calculator: mul\"\n        }\n      ]\n    }\n  },\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 4,\n    \"result\": {\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"// [binary file skipped: bin/logo.png (67 bytes)]\"\n        }\n      ]\n    }\n  },\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 5,\n    \"result\": {\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Successfully spliced symbol 'App.reset' in src/app.ts.\"\n        }\n      ]\n    }\n  },\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 6,\n    \"result\": {\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"Pre-write syntax validation failed for <ROOT>/src/app.ts (typescript): Line 12:31 - Property or signature expected.; Line 12:38 - Unexpected token. A constructor, method, accessor, or property was expected.; Line 14:10 - ';' expected.\\nContext around L12-L15 (±5 lines):\\n7│   constructor(offset = 1) {\\n8│     this.calc = new Calculator(offset);\\n9│   }\\n10│ \\n11│   /** Increment counter and compute sum */\\n12│   public inc(step: number): CalcResult {\\n13│     this.count += step;\\n14│     return this.calc.add(this.count, step);\\n15│   }\\n16│ \\n17│   public reset(): number {\\n18│     this.count = 7;\\n19│     return this.count;\\n20│   }\"\n        }\n      ],\n      \"isError\": true\n    }\n  }\n]",
+        "stderr": "",
+        "stdoutJson": [
+          {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+              "protocolVersion": "2024-11-05",
+              "capabilities": {
+                "tools": {}
+              },
+              "serverInfo": {
+                "name": "aice-mcp",
+                "version": "0.9.53"
+              }
+            }
+          },
+          {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+              "tools": [
+                {
+                  "name": "aice_read",
+                  "description": "Read files, dirs, symbols, :L, search, or file list. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch in path or paths.",
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "description": "File/dir, f:sym, f:L1-L50, or space-separated list"
+                      },
+                      "paths": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "targets": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "filePath": {
+                        "type": "string"
+                      },
+                      "fileOrDir": {
+                        "type": "string"
+                      },
+                      "symbol": {
+                        "type": "string",
+                        "description": "Symbol, L1-L30, /pat/, outline"
+                      },
+                      "selector": {
+                        "type": "string"
+                      },
+                      "search": {
+                        "type": "string"
+                      },
+                      "filesOnly": {
+                        "type": "boolean"
+                      },
+                      "contextLines": {
+                        "type": "number"
+                      },
+                      "dsl": {
+                        "type": "boolean"
+                      },
+                      "outline": {
+                        "type": "boolean"
+                      },
+                      "full": {
+                        "type": "boolean"
+                      },
+                      "depth": {
+                        "type": "number"
+                      },
+                      "maxTokens": {
+                        "type": "number"
+                      },
+                      "includeDeps": {
+                        "type": "boolean"
+                      },
+                      "includeCallers": {
+                        "type": "boolean"
+                      },
+                      "compact": {
+                        "type": "boolean"
+                      },
+                      "types": {
+                        "type": "boolean"
+                      },
+                      "idioms": {
+                        "type": "boolean"
+                      },
+                      "stats": {
+                        "type": "boolean"
+                      },
+                      "json": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": []
+                  }
+                },
+                {
+                  "name": "aice_splice",
+                  "description": "Create, overwrite, or splice files/symbols/:L/hunks (aice_write). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code.",
+                  "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                      "filePath": {
+                        "type": "string",
+                        "description": "File or file:selector"
+                      },
+                      "path": {
+                        "type": "string"
+                      },
+                      "fileOrDir": {
+                        "type": "string"
+                      },
+                      "symbolSelector": {
+                        "type": "string",
+                        "description": "Symbol, L1-L25, imports, eof, :overwrite"
+                      },
+                      "symbol": {
+                        "type": "string"
+                      },
+                      "selector": {
+                        "type": "string"
+                      },
+                      "range": {
+                        "type": "string"
+                      },
+                      "code": {
+                        "type": "string",
+                        "description": "Code, multi-line hunk, or === file:sym === stream"
+                      },
+                      "content": {
+                        "type": "string"
+                      },
+                      "newAiceCode": {
+                        "type": "string"
+                      },
+                      "body": {
+                        "type": "string"
+                      },
+                      "delete": {
+                        "type": "boolean"
+                      },
+                      "create": {
+                        "type": "boolean"
+                      },
+                      "force": {
+                        "type": "boolean"
+                      },
+                      "overwrite": {
+                        "type": "boolean"
+                      },
+                      "insertAfter": {
+                        "type": "string"
+                      },
+                      "insertBefore": {
+                        "type": "string"
+                      },
+                      "preserveDocs": {
+                        "type": "boolean"
+                      },
+                      "dryRun": {
+                        "type": "boolean"
+                      },
+                      "idioms": {
+                        "type": "boolean"
+                      },
+                      "inlineIdioms": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "edits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      },
+                      "batch": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      },
+                      "files": {
+                        "type": "array",
+                        "items": {
+                          "type": "object"
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "// src/math.ts:13-15\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n// siblings in Calculator: mul"
+                }
+              ]
+            }
+          },
+          {
+            "jsonrpc": "2.0",
+            "id": 4,
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "// [binary file skipped: bin/logo.png (67 bytes)]"
+                }
+              ]
+            }
+          },
+          {
+            "jsonrpc": "2.0",
+            "id": 5,
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Successfully spliced symbol 'App.reset' in src/app.ts."
+                }
+              ]
+            }
+          },
+          {
+            "jsonrpc": "2.0",
+            "id": 6,
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Pre-write syntax validation failed for <ROOT>/src/app.ts (typescript): Line 12:31 - Property or signature expected.; Line 12:38 - Unexpected token. A constructor, method, accessor, or property was expected.; Line 14:10 - ';' expected.\nContext around L12-L15 (±5 lines):\n7│   constructor(offset = 1) {\n8│     this.calc = new Calculator(offset);\n9│   }\n10│ \n11│   /** Increment counter and compute sum */\n12│   public inc(step: number): CalcResult {\n13│     this.count += step;\n14│     return this.calc.add(this.count, step);\n15│   }\n16│ \n17│   public reset(): number {\n18│     this.count = 7;\n19│     return this.count;\n20│   }"
+                }
+              ],
+              "isError": true
+            }
+          }
+        ],
+        "diskFilesAfter": {
+          "src/app.ts": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 7;\n    return this.count;\n  }\n}\n"
+        },
+        "extraChecks": {
+          "listedTools": [
+            "aice_read",
+            "aice_splice"
+          ]
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "tools/list returns strictly ['aice_read', 'aice_splice']",
+          "aice_read bin/logo.png skips binary bytes",
+          "aice_splice updates App.reset and rejects invalid App.inc with isError:true"
+        ],
+        "deltaNote": "Rust closes B-S3 by removing hidden legacy MCP aliases (aice_context, aice_create, etc.) from executeToolCall as well."
+      }
+    },
+    {
+      "id": "MCP-02",
+      "description": "MCP tools/call rejects aice_read and aice_splice when enabled:false in aice.config.json",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "disabled"
+      },
+      "invocation": {
+        "kind": "mcp_session",
+        "mcpRequests": [
+          {
+            "method": "initialize",
+            "params": {
+              "protocolVersion": "2024-11-05",
+              "capabilities": {}
+            }
+          },
+          {
+            "method": "tools/call",
+            "params": {
+              "name": "aice_read",
+              "arguments": {
+                "path": "src/app.ts"
+              }
+            }
+          },
+          {
+            "method": "tools/call",
+            "params": {
+              "name": "aice_splice",
+              "arguments": {
+                "filePath": "src/app.ts",
+                "symbol": "App.reset",
+                "code": "public reset(): number { return 0; }"
+              }
+            }
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "[\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 1,\n    \"result\": {\n      \"protocolVersion\": \"2024-11-05\",\n      \"capabilities\": {\n        \"tools\": {}\n      },\n      \"serverInfo\": {\n        \"name\": \"aice-mcp\",\n        \"version\": \"0.9.53\"\n      }\n    }\n  },\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 2,\n    \"result\": {\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"AICE is disabled for this project via aice.config.json (\\\"enabled\\\": false). Use native tools or run 'aice enable'.\"\n        }\n      ],\n      \"isError\": true\n    }\n  },\n  {\n    \"jsonrpc\": \"2.0\",\n    \"id\": 3,\n    \"result\": {\n      \"content\": [\n        {\n          \"type\": \"text\",\n          \"text\": \"AICE is disabled for this project via aice.config.json (\\\"enabled\\\": false). Use native tools or run 'aice enable'.\"\n        }\n      ],\n      \"isError\": true\n    }\n  }\n]",
+        "stderr": "",
+        "stdoutJson": [
+          {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "result": {
+              "protocolVersion": "2024-11-05",
+              "capabilities": {
+                "tools": {}
+              },
+              "serverInfo": {
+                "name": "aice-mcp",
+                "version": "0.9.53"
+              }
+            }
+          },
+          {
+            "jsonrpc": "2.0",
+            "id": 2,
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'."
+                }
+              ],
+              "isError": true
+            }
+          },
+          {
+            "jsonrpc": "2.0",
+            "id": 3,
+            "result": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'."
+                }
+              ],
+              "isError": true
+            }
+          }
+        ]
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Both aice_read and aice_splice return isError:true mentioning enabled:false"
+        ],
+        "deltaNote": null
+      }
+    }
+  ]
+}

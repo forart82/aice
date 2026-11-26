@@ -1,0 +1,5 @@
+model Account {
+  id Int @id
+  owner
+  balance Int =
+}

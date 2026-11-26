@@ -1,0 +1,8 @@
+{
+  "name": "e2e-fixture-pkg",
+  "version": "1.0.0",
+  "aice": {
+    "enabled": true,
+    "idiomsEnabled": false
+  }
+}

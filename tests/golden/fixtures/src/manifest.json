@@ -1,0 +1,8 @@
+{
+  "name": "golden-fixture",
+  "version": "1.0.0",
+  "features": {
+    "ast": true,
+    "telemetry": "exact-bpe"
+  }
+}

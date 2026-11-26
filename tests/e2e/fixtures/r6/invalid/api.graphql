@@ -1,0 +1,9 @@
+type Account {
+  id: ID!
+  owner: String!
+  balance:
+}
+
+type Query {
+  account(: ID!): Account
+}

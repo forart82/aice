@@ -1,0 +1,36 @@
+type Invoice {
+  id: ID!
+  number: String!
+  merchantCode: String!
+  totalCents: Int!
+  status: InvoiceStatus!
+  lines: [InvoiceLine!]!
+}
+
+type InvoiceLine {
+  sku: String!
+  quantity: Int!
+  unitCents: Int!
+}
+
+enum InvoiceStatus {
+  PENDING
+  PAID
+  VOID
+}
+
+input CreateInvoiceInput {
+  merchantCode: String!
+  number: String!
+  totalCents: Int!
+}
+
+type Query {
+  invoice(id: ID!): Invoice
+  invoicesByMerchant(merchantCode: String!, limit: Int = 25): [Invoice!]!
+}
+
+type Mutation {
+  createInvoice(input: CreateInvoiceInput!): Invoice!
+  markInvoicePaid(id: ID!): Invoice!
+}

@@ -1,0 +1,46 @@
+[package]
+name = "aice-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "aice"
+path = "src/main.rs"
+
+[[test]]
+name = "modularity_gate"
+path = "../../tests/integration/modularity_gate.rs"
+
+[[test]]
+name = "anti_bypass_audit"
+path = "../../tests/integration/anti_bypass_audit.rs"
+
+[[test]]
+name = "w2_m4_pipeline_cli"
+path = "../../tests/integration/w2_m4_pipeline_cli.rs"
+
+[[test]]
+name = "w4_m2_batch_write"
+path = "../../tests/integration/w4_m2_batch_write.rs"
+
+[[test]]
+name = "w4_m3_mcp_server"
+path = "../../tests/integration/w4_m3_mcp_server.rs"
+
+[[test]]
+name = "w4_m4_r7_idiom_gate"
+path = "../../tests/integration/w4_m4_r7_idiom_gate.rs"
+
+[[test]]
+name = "golden_parity"
+path = "../../tests/integration/golden_parity.rs"
+
+[dependencies]
+aice-pipeline.workspace = true
+aice-governance.workspace = true
+aice-telemetry.workspace = true
+
+[dev-dependencies]
+aice-lang-registry.workspace = true
+aice-ast-engine.workspace = true

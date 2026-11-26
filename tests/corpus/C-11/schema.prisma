@@ -1,0 +1,55 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Merchant {
+  id        String    @id @default(cuid())
+  code      String    @unique
+  currency  String    @default("USD")
+  invoices  Invoice[]
+  createdAt DateTime  @default(now())
+}
+
+model Invoice {
+  id          String        @id @default(cuid())
+  number      String        @unique
+  merchantId  String
+  merchant    Merchant      @relation(fields: [merchantId], references: [id])
+  totalCents  Int
+  status      String        @default("pending")
+  lines       InvoiceLine[]
+  createdAt   DateTime      @default(now())
+}
+
+model InvoiceLine {
+  id        String  @id @default(cuid())
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id])
+  sku       String
+  quantity  Int
+  unitCents Int
+}
+
+model SettlementRun {
+  id           String   @id @default(cuid())
+  merchantCode String
+  batchStatus  String   @default("queued")
+  grossCents   Int
+  feeCents     Int
+  netCents     Int
+  executedAt   DateTime @default(now())
+}
+
+model WebhookSubscription {
+  id          String   @id @default(cuid())
+  merchantId  String
+  endpointUrl String
+  secretHash  String
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+}

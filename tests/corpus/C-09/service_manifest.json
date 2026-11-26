@@ -1,0 +1,67 @@
+{
+  "service": "ledger-api",
+  "version": "1.4.0",
+  "runtime": "linux-x86_64",
+  "healthcheck": {
+    "path": "/healthz",
+    "intervalSeconds": 10,
+    "timeoutSeconds": 3
+  },
+  "rateLimits": [
+    {
+      "route": "/v1/settlements",
+      "method": "POST",
+      "requestsPerMinute": 1200,
+      "burst": 120
+    },
+    {
+      "route": "/v1/orders",
+      "method": "GET",
+      "requestsPerMinute": 3000,
+      "burst": 300
+    },
+    {
+      "route": "/v1/webhooks/dispatch",
+      "method": "POST",
+      "requestsPerMinute": 600,
+      "burst": 60
+    },
+    {
+      "route": "/v1/reconcile",
+      "method": "POST",
+      "requestsPerMinute": 200,
+      "burst": 20
+    },
+    {
+      "route": "/v1/merchants/balances",
+      "method": "GET",
+      "requestsPerMinute": 2400,
+      "burst": 240
+    }
+  ],
+  "circuitBreaker": {
+    "failureThreshold": 5,
+    "resetTimeoutMs": 15000,
+    "halfOpenRequests": 3
+  },
+  "observability": {
+    "metricsPath": "/metrics",
+    "traceSampleRate": 0.25,
+    "logLevel": "info",
+    "structuredJson": true
+  },
+  "dependencies": [
+    {
+      "name": "postgres-primary",
+      "required": true,
+      "poolSize": 32,
+      "connectTimeoutMs": 1500
+    },
+    {
+      "name": "redis-ratelimit",
+      "required": false,
+      "poolSize": 16,
+      "connectTimeoutMs": 500
+    }
+  ]
+}

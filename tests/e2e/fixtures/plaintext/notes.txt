@@ -1,0 +1,4 @@
+AICE PlainText Fixture
+Regex metacharacter literal probe: [a+b]*(c?) and $price ^start | pipe.
+Line 3: Keep verbatim under UnsupportedPassthrough.
+Line 4: Trailing context line.

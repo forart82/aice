@@ -1,18 +1,16 @@
 ![AICE — AI Context Engine](assets/aice-banner.jpg)
 
-# AICE: On-the-Fly AI Context Engine & Surgical Code Splicer
+# AICE: 100% Rust AI Co-Engine & Atomic Multi-Language AST Splicer
 
 [![Version: 0.9.53](https://img.shields.io/badge/Version-0.9.53-00bcd4.svg)](https://github.com/forart82/aice/releases)
 [![Author: @forart82](https://img.shields.io/badge/Author-%40forart82-181717.svg?logo=github)](https://github.com/forart82)
 [![GitHub Stars](https://img.shields.io/github/stars/forart82/aice?style=social)](https://github.com/forart82/aice/stargazers)
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-[![TypeScript 5.8+](https://img.shields.io/badge/TypeScript-5.8%2B-blue)](https://www.typescriptlang.org/)
-[![Bun 1.4+](https://img.shields.io/badge/Bun-1.4%2B-black)](https://bun.sh/)
-[![Node.js 22/24](https://img.shields.io/badge/Node.js-22%20%7C%2024-green)](https://nodejs.org/)
-[![Tests Passing](https://img.shields.io/badge/Tests-1%2C620%2B%20passing-brightgreen)](tests/)
-[![End-to-End Quota Savings](https://img.shields.io/badge/Net%20Quota%20Saved-%2B17%25%20--%20%2B25%25-00a86b)](docs/BENCHMARKS.md)
+[![Rust Edition 2024](https://img.shields.io/badge/Rust-Edition_2024-orange?logo=rust)](Cargo.toml)
+[![Tests Passing](https://img.shields.io/badge/Tests-442%2B_Rust_%7C_81%2F81_Golden_%7C_215%2F215_E2E-brightgreen)](tests/)
+[![Rust vs TS vs rtk](https://img.shields.io/badge/Startup-1.25_ms_(160.9x_vs_TS)-00a86b)](docs/BENCHMARKS_RUST_VS_TS_RTK.md)
 
-> **A pure on-the-fly context engine and atomic multi-file splicer for autonomous AI coding agents — cut wasted reads, output tokens, and broken disk writes with zero `.aice` files on disk.**
+> **A zero-runtime-dependency native Linux Rust binary — unified unbypassable I/O pipeline, universal AICE IR on read across 32 programming languages and database dialects, intra-function AST slicing, fuzzy target resolution, honest `bpe-openai` telemetry, and atomic multi-file pre-write `SyntaxFirewall` commits with zero `.aice` files on disk.**
 
 ![How AICE Works](assets/aice-workflow.svg)
 
@@ -21,56 +19,43 @@
 ## ⚡ What Is AICE? (In 30 Seconds)
 
 AI coding agents burn most of their token quota in two invisible ways:
-1. **Context Bloat**: Stuffing entire 1,000-line files into chat history — where every wasted line gets **replayed across ~20+ subsequent turns** and pushes your session into the compaction wall early.
+1. **Context Bloat**: Stuffing entire 1,000-line files into chat history — where every wasted line gets **replayed across subsequent turns** and pushes your session into the compaction wall early.
 2. **Edit Repetition**: Re-emitting unchanged `Target` blocks or rewriting large files during edits, burning **4x-priced output tokens** and risking silent off-by-one line deletions.
 
-**AICE (AI Context Engine)** gives your AI agent **2 smart tools** — **`aice read`** (MCP: `aice_read`, plus `aice search` / `aice find`) and **`aice splice`** (MCP: `aice_splice`, alias `aice write`) — that read files surgically and edit multiple files atomically in RAM, leaving **zero `.aice` files on disk** and zero changes to your builds or git history.
+**AICE (AI Co-Engine)** gives autonomous agents **strictly 2 MCP tools** (`aice_read` and `aice_splice`) and **12 canonical CLI subcommands** (`read`, `search`, `find`, `splice`, `enable`, `disable`, `config`, `agents`, `gain`, `analyze`, `mcp`, `benchmark`) backed by one compile-time type-state pipeline (`Raw -> Governed -> Executed -> MeteredOutput -> StdoutWriter`). Every supported file read is deterministically transformed into compact **AICE IR** (R3), and every write passes an in-memory **`SyntaxFirewall`** and atomic `.tmp -> rename` commit with full rollback and **zero `.aice` files on disk**.
 
 ```mermaid
 flowchart LR
     subgraph NoAICE["Without AICE (Multi-Turn Context Bloat)"]
         direction LR
         N1["Dump whole files + grep chains"] --> N2["Re-emit Target blocks in edits"]
-        N2 --> N3["196K avg context -> early compaction"]
+        N2 --> N3["Early compaction + broken writes"]
     end
-    subgraph WithAICE["With AICE (1-Turn Surgical Loop)"]
+    subgraph WithAICE["With Rust AICE (1-Turn Surgical Pipeline)"]
         direction LR
-        A1["aice read (9 KB cap, X-Ray, @focus)"] --> A2["aice splice (hunks or :L-R / --stdin)"]
-        A2 --> A3["Syntax + :L guard — 0 broken writes"]
+        A1["aice read (AICE IR, X-Ray, @focus, --deps)"] --> A2["aice splice (hunks, :sym, :L, --stdin)"]
+        A2 --> A3["32-lang SyntaxFirewall + atomic rollback"]
     end
-    NoAICE -. "Switch to 2-tool AICE" .-> WithAICE
+    NoAICE -. "Switch to Rust AICE" .-> WithAICE
 ```
 
 ---
 
-## 📊 What You Actually Win in Production (Live Measured Data)
+## 📊 Empirical Performance (`Rust AICE` vs `Legacy TS AICE` vs `rtk 0.43.0`)
 
-### At a Glance
+Measured live in isolated `/tmp` sandboxes across the 12-workload / 44-file / 32-language corpus (`tests/corpus/C-01..C-12`) using exact `bpe-openai` (`cl100k_base` & `o200k_base`) tokenization across **100% of emitted stdout** (negative deltas preserved verbatim; see full tables in [`docs/BENCHMARKS_RUST_VS_TS_RTK.md`](docs/BENCHMARKS_RUST_VS_TS_RTK.md)):
 
-| Everyday Impact | What Changes for Your Agent | How AICE Makes It Automatic |
-| :--- | :--- | :--- |
-| **Leaner Reads Stay Out of History** | **`-43% to -56%`** smaller read payloads | `>120L` Monolith X-Ray outlines, `:sym@keyword` focus slices, `>110L` blank/import elision, and an aligned `9 KB` anti-spill ceiling. |
-| **Nearly Half the Output Tokens** | **`-44% to -47%`** fewer `4x`-priced edit tokens | Multi-file `--stdin` batch streams (`<<< === >>>` or `:Lstart-Lend`) skip repeating unchanged `Target` blocks. |
-| **Zero Wasted Slice & Retry Turns** | **`0`** extra pagination or flag-retry turns | Symbol/search hints instead of linear `:L` breadcrumbs, priority 1-turn multi-target batch packing (`aice read f1:sym f2 f3`), 1-turn shifted `:L` / hunk splice recovery, and an anti-pagination `AGENTS.md` rule. |
-| **Longer Sessions Before Compaction** | **`119K`** avg window vs `196K` (`-39%`) | Agents run **~35% longer** before hitting the `200K` compaction wall. |
-| **Zero Broken Disk Writes** | **`0`** broken files written to disk | Pre-write native syntax validation, `±20`-line `:L` & CSS brace disambiguation, 5th-pass whitespace hunk recovery, and atomic `.tmp` -> `rename` commits. |
+| Metric / Capability | Rust AICE (`0.9.53`) | Legacy TS AICE (`0.9.53`) | `rtk 0.43.0` |
+| :--- | :---: | :---: | :---: |
+| **Cold Startup (`--version`)** | **`1.25 ms`** (`4.2 MiB` RSS) | `201.45 ms` (`137.7 MiB` RSS) | `1.84 ms` (`3.9 MiB` RSS) |
+| **44-File Full AICE IR Sweep (`--full`)** | **`86.19 ms`** (`10.4x` vs TS; 32/32 langs) | `892.12 ms` (skips SQL/breaks Go) | `75.21 ms` (raw passthrough) |
+| **44-File Structural `--outline`** | **`78.72 ms` (`+46.56%` `cl100k`, 32/32 AST)** | `806.37 ms` (fallback on SQL/Go) | `82.94 ms` (`10/44` empty, `13/44` raw) |
+| **Intra-AST Slicing & `#` Selectors** | **`45.0–45.8 ms`** (`@if`, `@first`, `f#S::m`) | Partial (`@first` 1L; `#` fails) | N/A |
+| **Fuzzy Path & Symbol Guessing** | **`47.2 ms`** (auto-resolves path & sym) | Fuzzy path fails (`exit 1`) | N/A |
+| **Atomic 3-File `splice --stdin --create`** | **`49.98 ms`** (`18.93 ms` SHA-256 rollback) | `731.74 ms` (`742.00 ms` rollback) | N/A |
+| **Telemetry Honesty (`gains.jsonl` vs BPE)** | **`6/6` exact match (`0` drift)** | `chars/4` heuristics | Heuristic estimate |
 
-### Live Production Scorecard (`923` Real Calls / `633` AI Turns on `aipl_dog`)
-
-Measured across **`13` autonomous workers** on real production tasks, priced in honest end-to-end billable quota (**`1x`** new input, **`0.1x`** cached history replay, **`4x`** output) after subtracting all AICE taxes (rule card, CLI wrapper, pagination, and retry turns):
-
-| Metric | `v0.9.47 – v0.9.48` (880 calls / 543 turns) | `v0.9.49+` (Zero-Friction Engine) | Why It Matters |
-| :--- | :---: | :---: | :--- |
-| **Read / Search Payload vs Native** | `1.61M` vs `~2.82M` (`-43%`) | `49K` vs `~111K` (`-56%`) | Smaller reads stay out of chat history across ~23 subsequent turns. |
-| **Edit Output Tokens (`splice` vs `edit_file`)** | `110K` vs `196K` (`-44%`) | `11.4K` vs `21.4K` (`-47%`) | Cuts **output tokens** (4x more expensive & slowest part of replies). |
-| **Broken Files Written to Disk** | **`0` / 72 edits** | **`0` / 12 edits** | Pre-write syntax & `:L` guard caught **11** broken edits before disk write. |
-| **Extra `9 KB` Pagination / Retry Turns** | `28` slice + `19` retry turns | **`0` wasted turns** | Coalescing, partial `9 KB` fill & flag normalization eliminated retry tax. |
-| **Average Context Window Size** | `196K` tok / turn | **`119K` tok / turn (`-39%`)** | Agents work ~35% longer before hitting the `200K` compaction wall. |
-| **Real Net End-to-End Quota Saved** | **`+5% to +11%` Net** | **`+17% to +25%` Net** | Honest bottom-line savings on your real LLM quota meter. |
-
-> Controlled cold-start lab benchmarks (`RW-01`..`RW-11`, `11/11` wins) and full production telemetry breakdowns live in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) and [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md).
->
-> **Deterministic Offline Suite (`RW-01`..`RW-10`, 15 languages, `10/10` wins, `Zero .aice Left: true`)**: Tokens `127,011` (Without) → **`73,777` (`-41.9%`, Pure AICE)** → **`35,942` (`-71.7%`, With Idioms)**; Turns `502` → **`206` (`-59.0%`)** → **`154` (`-69.3%`)**; powered by bounded `mtime+ctime+size+ino` LRU caching (`benchmark:offline` `9.2s → 3.3s` `-64%`, `verify:tokenomics` `18.7s → 4.8s` `-75%`, warm caller scans `~15x` faster, warm outlines `~8x` faster).
+> **R7 Empirical Idiom Gate (`VERDICT: KILL`)**: Under Requirement R7, `aice-idioms` was empirically benchmarked across `C-01..C-12` (`32` languages). Because R3 AICE IR already strips syntactic verbosity, idioms cleared the `> 1.0%` net BPE reduction threshold in only `5/12` (`41.7% < 80%`) workloads. Per R7, `crates/aice-idioms` and all idiom flags (`--idioms`, `--idioms-on`, etc.) were removed 100% with zero dead code ([`docs/IDIOM_GATE_REPORT.md`](docs/IDIOM_GATE_REPORT.md)). Legacy `"idiomsEnabled"` / `"idioms"` keys in existing `aice.config.json` files remain tolerated and preserved cleanly.
 
 ---
 
@@ -82,17 +67,17 @@ Measured across **`13` autonomous workers** on real production tasks, priced in 
 git clone https://github.com/forart82/aice.git && cd aice && ./install.sh
 
 # Common update, non-interactive & uninstall flags:
-./install.sh --update        # Pull origin/main & refresh binary, MCP schemas, agents & ~/dev/* rules
-./install.sh -y              # Auto-confirm dependencies, git update & Zsh cheatsheet
+./install.sh --update        # Pull origin/main & rebuild native binary, MCP schemas, agents & rules
+./install.sh -y              # Auto-confirm prerequisites, git update & Zsh cheatsheet
 ./install.sh --dry-run       # Preview every step without mutating disk
 ./uninstall.sh               # Cleanly remove binary, MCP configs, Zsh block & optional project configs
 ```
 
 **What `./install.sh` sets up automatically:**
-- Detects your Linux package manager (`apt`, `dnf`/`yum`, `pacman`, `zypper`, `apk`), checks `git`, `curl`, `node >= 20`, `npm`, builds the bundle, and installs **`~/.local/bin/aice`**.
+- Detects your Linux package manager (`apt`, `dnf`/`yum`, `pacman`, `zypper`, `apk`), checks `git`, `curl`, `cc`/`gcc`, `cargo`, and `rustc`, compiles `target/release/aice` via `cargo build --release`, and installs **`~/.local/bin/aice`**.
 - Regenerates MCP tool schemas (`aice mcp --generate-schemas`) and wires the strict 2-tool **`aice mcp`** stdio server into installed CLI coding agents (`aice agents setup`).
-- Refreshes single-file `AGENTS.md` rules across AICE-enabled projects in `~/dev/*` (strictly respecting `"enabled": false`).
-- Optionally adds the **`aice-cheat`** startup cheatsheet box to `~/.zshrc` (skip anytime with `--no-cheatsheet`).
+- Optionally refreshes single-file `AGENTS.md` rules across opted-in projects when `--sync-projects [dir]` is passed (strictly respecting `"enabled": false` and skipping the AICE source repository).
+- Optionally adds the **`aice-cheat`** 80-column startup cheatsheet box to `~/.zshrc` (skip anytime with `--no-cheatsheet`).
 
 | CLI Coding Agent | Auto-Configured MCP / Config Path | Project Rule Footprint |
 | :--- | :--- | :--- |
@@ -105,12 +90,11 @@ git clone https://github.com/forart82/aice.git && cd aice && ./install.sh
 | **Cursor Agent (`cursor`)** | `~/.cursor/mcp.json` (`mcpServers.aice`) | MCP tool descriptions |
 
 <details>
-<summary>Alternative: manual symlink or Bun standalone single binary</summary>
+<summary>Alternative: manual release build & install</summary>
 
 ```bash
-ln -sf "$(pwd)/bin/aice.mjs" ~/.local/bin/aice
-# Or compile a standalone binary with Bun (include THIRD-PARTY-NOTICES.txt when distributing):
-bun build --compile "$(pwd)/bin/aice.ts" --outfile ~/.local/bin/aice
+cargo build --release --offline
+install -m 755 target/release/aice ~/.local/bin/aice
 ```
 
 </details>
@@ -128,35 +112,34 @@ AICE is **opt-in per workspace** via `aice.config.json` and maintains a single c
 ```bash
 aice enable ~/dev/my-project    # Writes "enabled": true in aice.config.json + <=300-tok AGENTS.md
 aice disable ~/dev/my-project   # Sets "enabled": false and strips AICE blocks cleanly
-aice config ~/dev/my-project    # Inspect active settings (project $idioms are OFF by default)
+aice config ~/dev/my-project    # Inspect active settings (alias: aice status)
 ```
-
-> **Opt-in `$idioms` & `--dsl`**: Project `$idioms` (`"idiomsEnabled": false` by default) and AICE shorthand decompilation (`--dsl`) stay off unless explicitly enabled per call (`--dsl --idioms`) or per project (`aice idioms on`).
 
 ### 3. How Your AI Agent Uses It (Everyday Cheat-Sheet)
 
-Autonomous agents see **strictly 2 MCP tools** (`aice_read` and `aice_splice`) — mirrored on the CLI by `aice read` (plus ergonomic `aice search` / `aice find`) and `aice splice` (alias `aice write`):
+Autonomous agents see **strictly 2 MCP tools** (`aice_read` and `aice_splice`) — mirrored on the CLI by `aice read` (aliases `context`, `ctx`), `aice search` (`grep`), `aice find` (`tree`), and `aice splice` (`write`):
 
 | Task | CLI Shortcut | MCP Tool (`tools/list`: strictly 2) |
 | :--- | :--- | :--- |
-| **List files (`< 20ms`, zero AST)** | `aice find "*.ts" src` *(alias: `tree`)* | `aice_read({ path: "src", filesOnly: true })` |
-| **4-Tier ranked search (`<=40L` AST / `±10L`)** | `aice search "validateToken" src -C 5` *(alias: `grep`)* | `aice_read({ path: "src", search: "validateToken", contextLines: 5 })` |
-| **1-Turn numbered native read (`<= 9 KB`)** | `aice read src/file.ts:sym@kw` | `aice_read({ path: "src/file.ts:sym@kw" })` |
+| **Fast parallel file & symbol discovery** | `aice find "*.rs" crates/` *(alias: `tree`)* | `aice_read({ path: "crates", filesOnly: true })` |
+| **4-Tier ranked search (AICE IR snippets)** | `aice search "validateToken" src -C 5` *(alias: `grep`)* | `aice_read({ path: "src", search: "validateToken", contextLines: 5 })` |
+| **Universal AICE IR read / `#` / intra-AST** | `aice read src/engine.rs#Engine::step@if` | `aice_read({ path: "src/engine.rs#Engine::step@if" })` |
+| **Dependency-ordered multi-file pack** | `aice read src/api.ts src/types.ts --deps --max-tokens 1200` | `aice_read({ paths: ["src/api.ts", "src/types.ts"], includeDeps: true, maxTokens: 1200 })` |
 | **Multi-file create & surgical splice** | `aice splice --stdin << 'EOF'` *(alias: `write`)* | `aice_splice({ code: "=== file:sym ===..." })` |
 
 ```bash
-# 1. Fast workspace map (<20ms zero-AST file list) & ranked search
-aice find "*.ts" src
+# 1. Parallel ignore-aware file list & ranked AST search
+aice find "*.rs" crates/ -d 2
 aice search "validateToken" src -C 5
 
-# 2. Smart 1-turn reads (9 KB cap, 1-based line numbers, zero linear :L pagination)
-aice read src/app.ts                         # Bare file inline if <= 9 KB, or auto-outline + batch symbol/search hint
-aice read src/monolith.ts:outline            # >120L Monolith X-Ray with internal landmarks
-aice read src/monolith.ts:bigFn@keyword      # Focus slice inside a giant symbol around @keyword
-aice read src/file.ts:fnA src/file.ts:fnB    # Batch symbols in 1 call (never walk :L1-L150 -> :L151-L300 across turns)
-aice read src/a.ts:fnA src/big.ts src/b.ts   # 1-turn batch packing: explicit/small targets inline + oversized bare file auto-outlined
+# 2. Universal AICE IR reads (auto-outlines >120L files unless --full; zero linear :L pagination)
+aice read src/app.ts                          # Compact AICE IR if <=120L, else X-Ray outline + batch hint
+aice read src/monolith.rs:outline             # >120L Monolith X-Ray with internal landmarks
+aice read src/monolith.rs:bigFn@if            # Intra-function AST branch/loop/CTE focus slice
+aice read src/file.ts:fnA src/file.ts:fnB     # Batch symbols in 1 call (never walk :L1-L150 -> :L151-L300 across turns)
+aice read src/a.rs#Mod::fn src/b.rs --deps    # Dependency-ordered + caller-aware context pack (--callers, --max-tokens)
 
-# 3. Surgical edits & multi-file --stdin batches (without repeating Target blocks)
+# 3. Surgical edits & atomic multi-file --stdin batches (without repeating Target blocks)
 aice splice src/engine.ts -s GameEngine.step -c $'<<<\n  this.tick += 1;\n===\n  this.tick += BONUS;\n>>>'
 
 aice splice --stdin << 'EOF'
@@ -164,7 +147,7 @@ aice splice --stdin << 'EOF'
 export const BONUS = 2;
 === src/constants.ts:eof ===
 export const MAX_RETRIES = 3;
-=== src/engine.ts:GameEngine.step ===
+=== src/engine.ts#GameEngine::step ===
 <<<
   this.tick += 1;
 ===
@@ -177,88 +160,79 @@ const scaled = base * BONUS;
 EOF
 ```
 
-### 4. Built-In Guardrails & Real Savings Telemetry (`aice gain` & `aice analyze`)
+### 4. Built-In Guardrails & Honest BPE Telemetry (`aice gain`, `aice analyze`, `aice benchmark`)
 
-- **Anti-Pagination & 1-Turn Batch Packing (`v0.9.53`)**: Oversized or budget-capped files emit `batch symbols: aice read <file>:<sym1> <file>:<sym2> or aice search <pat> <file>` hints (preserving nested-subproject `cwd`-relative paths) instead of linear `:L1-L140` breadcrumbs; `aice read f1:sym f2 f3` packs explicit selectors and small files first while auto-outlining oversized bare files in **1 turn**; and the `<= 300`-token `AGENTS.md` rule forbids sequential `:L1-L150` -> `:L151-L300` paging across turns.
-- **1-Turn `:Lstart-Lend` & Hunk Splice Recovery (`v0.9.53`)**: Pre-write native syntax validation, inclusive `:L` off-by-one guard, `±20`-line shifted anchor & prefix+suffix envelope `:Lstart-Lend` recovery, CSS off-by-1 brace disambiguation, 5th-pass interior-whitespace `<<< === >>>` hunk matching, actionable retry `Tip:` diagnostics (`±5` numbered lines), and atomic `.tmp` -> `rename` commits settle edits in 1 turn with zero broken disk writes.
-- **Smart Self-Healing Diagnostics**: Missing symbols trigger Levenshtein `Did you mean` hints, invalid regex patterns fall back safely to literal search, and MCP-style flags (`--files-only=true`, `--context-lines=5`) passed to CLI calls normalize automatically.
-- **Honest Signed BPE & Session Accounting (`v0.9.53`)**: Tracks `cl100k_base` & `o200k_base` deltas in a `< 250 B/event` numeric ledger (`~/.aice/telemetry/gains.jsonl`, overrideable via `AICE_TELEMETRY_DIR` / `AICE_TELEMETRY_PATH` / `AICE_HOME`), while `aice analyze` counts `extraReadTurns` strictly on true same-file repeat reads, strips shell redirects (`2>/dev/null`, `2>&1`), and separates post-`&&` non-AICE command failures from AICE errors.
+- **Anti-Pagination & 1-Turn Batch Packing**: Oversized or budget-capped files emit `batch symbols: aice read <file>:<sym1> <file>:<sym2> or aice search <pat> <file>` hints (preserving nested-subproject `cwd`-relative paths) instead of linear `:L1-L140` breadcrumbs; `aice read f1:sym f2 f3` packs explicit selectors and small files first while auto-outlining oversized bare files in **1 turn**; and the `<= 300`-token `AGENTS.md` rule forbids sequential `:L1-L150` -> `:L151-L300` paging across turns.
+- **Pre-Write `SyntaxFirewall` & Atomic Rollback**: Every write target is verified in memory against native `tree-sitter` or strict Rust RD parsers before any disk write (`--force` authorizes `> 25L` overwrites or empty truncation only, NEVER bypassing `SyntaxFirewall`). Includes half-open `:Lstart-Lend` off-by-one protection, 5-tier contextual `<<< === >>>` hunk recovery, `Line:Col` ±5-line diagnostics, and `.tmp -> rename` atomic commits with full multi-file rollback.
+- **Smart Fuzzy Target Guessing & Flag Normalization**: Approximate paths, partial symbols, and minor misspellings auto-resolve unambiguously or return compact ranked selectors; MCP-style flags (`--files-only=true`, `--context-lines=5`, `--max-depth=2`) normalize automatically at ingress.
+- **100% Honest `bpe-openai` Telemetry (`v0.9.53`)**: Computes exact `cl100k_base` & `o200k_base` token counts comparing actual raw inputs against **100% of emitted stdout** (negative deltas preserved verbatim) into `~/.aice/telemetry/gains.jsonl` (overrideable via `AICE_TELEMETRY_DIR` / `AICE_TELEMETRY_PATH` / `AICE_HOME`).
 
 ```bash
-aice gain              # Global summary, Rule Break-Even & <90s Repeat-Read Turn Warnings (alias: aice stats)
-aice gain my-project   # Per-project drill-down & last 15 operations
-aice analyze .         # Post-session readLoopAudit & Context Replay Token Tax report
+aice gain                  # Global dashboard, Rule Break-Even & repeat-read audit (aliases: gains, stats, telemetry)
+aice gain my-project       # Per-project drill-down & last 15 operations
+aice analyze .             # Post-session transcript reconciliation & Context Replay Tax report
+aice benchmark --markdown  # In-process multi-language AICE IR & BPE benchmark suite (alias: bench)
 aice gain --reset --yes
 ```
 
-> **Optional Opt-In DSL & Custom `$idioms`**: Default `aice read` emits exact 1-based disk-numbered native code (`1│ ...`) for zero-translation 1-turn splicing. Pass `--dsl --idioms` (or enable `"idiomsEnabled": true` in `aice.config.json`) when you want compact AICE shorthand + project `$idioms` macro compression (see the full C++20 `$clampBand` walkthrough in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)).
-
 ---
 
-## 🌍 Supported Languages & Universal UTF-8 Text Files
+## 🌍 Supported Languages (32) & Universal UTF-8 Text Files
 
-### Structured AST, Decompiler & Pre-Write Syntax-Validated Languages (22+ Languages)
+### R5 Languages, Markup, Data & R6 Database / Query Dialects (32 Total)
 
-| Domain | Languages & Hardened Capabilities |
+Powered by 25 native `tree-sitter` grammar crates (`tree-sitter 0.27.2`) plus strict original Rust recursive-descent/Pratt parsers (Twig, T-SQL, PL/pgSQL, Cypher, DB Migrations):
+
+| Domain | Supported Targets & Capabilities |
 | :--- | :--- |
-| **Web & App** | TypeScript (`.ts`, `.tsx`, `.d.ts`), JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`), **Java (`.java`)** *(native routing, `"""` text blocks & symbol splicing)*, PHP (`.php`, heredoc/nowdoc, `#[Attr]`), Kotlin (`.kt`, `.kts`, raw `"""`, nested `/* /* */ */`), C# (`.cs`, nested classes, `@""` / `"""` strings) |
-| **Systems & Backend** | Python (`.py`, `.pyi`, zero-import `python3 -S -I` `compile()`), Go (`.go`, backticks, runes), Rust (`.rs`, nested `/* /* */ */`, `'static` lifetimes, `r#"..."#`, `A::B::C`, `..spread`, `as Type`), C++20 (`.cpp`, `.cc`, `.cxx`, `.hpp`, `.h`, `std::` scope, `1'000'000` digit separators, `R"delim(...)delim"`) |
-| **Markup & Styling** | **XML & SVG (`.xml`, `.svg`)** *(fast in-process well-formedness validator with `Line:Col` diagnostics & outlining)*, HTML (`.html`, `.htm`), CSS (`.css`), Twig (`.twig`), Markdown (`.md`, `.markdown`) |
-| **Data & Config** | JSON (`.json`, `.jsonc`, `.webmanifest`), YAML (`.yaml`, `.yml`, `.cff`) |
-| **Shell & Agents** | Shell (`.sh`, `.bash`, `.zsh`), PowerShell (`.ps1`), Batch (`.cmd`, `.bat`), AIPL (`.aipl`) |
+| **Web & App (R5)** | TypeScript (`.ts`, `.tsx`, `.d.ts`), JavaScript (`.js`, `.jsx`, `.mjs`, `.cjs`), Java (`.java`), Kotlin (`.kt`, `.kts`), Dart (`.dart`), PHP (`.php`), C# (`.cs`), Ruby (`.rb`) |
+| **Systems & Backend (R5)** | Rust (`.rs`), Go (`.go`), Python (`.py`, `.pyi`), C (`.c`, `.h`), C++ (`.cpp`, `.cc`, `.cxx`, `.hpp`) |
+| **Markup & Styling (R5)** | HTML (`.html`, `.htm`), CSS (`.css`), XML / SVG (`.xml`, `.svg`), Twig (`.twig`), Markdown (`.md`, `.markdown`) |
+| **Data, Config & Shell (R5)** | JSON (`.json`, `.jsonc`), YAML (`.yaml`, `.yml`), TOML (`.toml`), Shell / Bash (`.sh`, `.bash`, `.zsh`) |
+| **Databases & Queries (R6)** | ANSI SQL (`.sql`), PostgreSQL / PL/pgSQL (`$$` bodies, triggers, views, CTEs), MySQL / MariaDB (`DELIMITER //`, procedures), SQLite (`PRAGMA`, `STRICT`, `WITHOUT ROWID`), T-SQL / SQL Server (`GO`, `[bracket]` idents, `TRY..CATCH`), DB Migrations (Flyway `V*__*.sql`, Goose, dbmate, Alembic), Prisma (`.prisma`), GraphQL (`.graphql`, `.gql`), Cypher (`.cypher`, `.cql`) |
 
-### Universal UTF-8 Text-File Support & Binary Guard (`src/config/file-classification.ts`)
+### Universal UTF-8 Text Passthrough & Binary Guard (`crates/aice-governance/src/binary_probe.rs`)
 
-- **Any UTF-8 Text File Works Out-of-the-Box**: `aice find`, `aice search`, `aice read`, `aice splice`, and `aice write` (plus MCP `aice_read` / `aice_splice`) support arbitrary & unknown text formats — including `.svg`, `.xml`, `.toml`, `.ini`, `.csv`, `.log`, `.tf`, `.rst`, `.mdx`, extensionless files (`Makefile`, `NOTES`), dotfiles (`.env.local`, `.customrc`), inline SVG/data blobs, and unknown extensions (`.customblob`).
-- **Fail-Closed Binary Guard & Transactional Rollback**: Known binary extensions (`.png`, `.wasm`, images, archives, fonts, executables) and NUL-byte / non-UTF-8 files are skipped cleanly in `find`/`search`/`read` and rejected before disk mutation in `splice`/`write`/MCP, backed by lossless `Buffer` rollback snapshots in `spliceBatch`/`createBatch`.
+- **Any UTF-8 Text File Works Out-of-the-Box (Law 3)**: Formats outside the 32 AST-parsed targets (e.g., `.ps1`, `.cmd`, `.bat`, `.aipl`, `.ini`, `.csv`, `.log`, `.tf`, `.rst`, `.mdx`, `Makefile`, dotfiles) are classified as `LanguageId::PlainText`: they skip only AICE IR AST transpilation while traversing full governance, line/range/search slicing, batch framing, and honest BPE telemetry.
+- **Fail-Closed Binary Guard & Atomic Rollback**: Known binary extensions (`.png`, `.wasm`, archives, fonts, executables) and NUL-byte / non-UTF-8 files (`8,192 B` probe, `2 MiB` max text cap) are skipped safely on read and blocked before disk mutation on write (`crates/aice-batch-write/`).
 
 ---
 
-## 📚 Deep-Dive Documentation (Advanced & Internal Details)
+## 📚 Documentation & Workspace Layout
 
 | Document | What It Covers |
 | :--- | :--- |
-| [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Unified 2-tool engine, `9 KB` CLI/MCP water-filling budgets, `>120L` X-Ray, `:sym@pattern`, `>110L` elision, `>65L` search focus, inclusive `:L` guard, flag normalization & C++20 `--dsl --idioms` walkthrough. |
-| [`docs/AICE_SPEC.md`](docs/AICE_SPEC.md) | Normative AICE EBNF grammar, canonical standard library, refinement calculus, lens theorems & CLI/MCP contract. |
-| [`docs/AI_SYSTEM_PROMPT.md`](docs/AI_SYSTEM_PROMPT.md) | Full LLM system prompt & canonical `<= 300`-token `AGENTS.md` cheat-card specification. |
-| [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) | Live 33-session adversarial benchmark (`RW-01`..`RW-11`) + 923-call `aipl_dog` multi-worker production ledger. |
-| [`docs/BENCHMARKS_OFFLINE.md`](docs/BENCHMARKS_OFFLINE.md) | Deterministic 10-scenario / 15-language offline BPE (`o200k_base`) benchmark breakdown. |
-| [`docs/CST_TRIVIA_SPEC.md`](docs/CST_TRIVIA_SPEC.md) | Bidirectional lens & lossless Concrete Syntax Tree (CST) trivia table specification. |
-| [`docs/RESEARCH_SYNTHESIS.md`](docs/RESEARCH_SYNTHESIS.md) | BPE pre-tokenization economics, Dyck-$k$ theory & the Symmetric Billable Quota Equation. |
+| [`docs/RUST_ARCHITECTURE.md`](docs/RUST_ARCHITECTURE.md) | 12-command CLI, unified selectors, heredoc/hunk grammar, honest BPE schema, MCP contract, type-state pipeline & parser routing table. |
+| [`docs/BENCHMARKS_RUST_VS_TS_RTK.md`](docs/BENCHMARKS_RUST_VS_TS_RTK.md) | Live 3-way empirical benchmarks: Rust AICE vs Legacy TS AICE vs `rtk 0.43.0` (`C-01..C-12`, 44 files, 32 languages). |
+| [`docs/IDIOM_GATE_REPORT.md`](docs/IDIOM_GATE_REPORT.md) | R7 Empirical Idiom Gate (`VERDICT: KILL` at `5/12` > 1%) & 100% subsystem removal audit. |
+| [`docs/AICE_SPEC.md`](docs/AICE_SPEC.md) | Normative AICE EBNF grammar & lens specification. |
+| [`docs/RESEARCH_SYNTHESIS.md`](docs/RESEARCH_SYNTHESIS.md) | BPE pre-tokenization economics, Dyck-$k$ theory & Symmetric Billable Quota Equation. |
 
-### Project Layout
+### Project Layout (9 Library Crates + `aice-cli`)
 
 ```text
 aice/
-├── bin/
-│   └── aice.ts             # Slim CLI entrypoint & barrel (read, search/grep, find/tree, splice/write)
-├── src/
-│   ├── cli/                # 7 acyclic CLI command & MCP-to-CLI flag-normalization submodules
-│   ├── config/
-│   │   ├── file-classification.ts # Universal UTF-8 text-file SSOT & binary guard
-│   │   ├── path-resolver.ts       # Project root & universal target path resolution
-│   │   └── project-config.ts      # aice.config.json, TARGET_EXT_MAP & rule sync
-│   ├── cache/
-│   │   ├── lru.ts          # BoundedLruCache, TwoGenBoundedCache, FileStatLruCache (mtime+ctime+size+ino)
-│   │   └── disk-cache.ts   # Optional on-disk compilation cache helpers
-│   ├── core/
-│   │   ├── parser.ts       # Thin parser barrel re-exporting acyclic src/core/parser/ (7 submodules, :: scope)
-│   │   └── lexer.ts / ast.ts / trivia.ts # Indentation lexer, AST nodes & CST trivia
-│   ├── decompiler/         # Hardened polyglot decompilers (TS, Python, Rust, C++, Go, C#, Kotlin, PHP, ...)
-│   ├── emitters/           # Lossless multi-language native emitters & TargetLanguage SSOT
-│   ├── tools/
-│   │   ├── read.ts         # Thin barrel -> src/tools/read/ (6 acyclic discovery/search/budget/engine submodules)
-│   │   ├── context.ts      # Thin barrel -> src/tools/context/ (8 acyclic search/focus/elision/callers submodules)
-│   │   ├── splice.ts       # Thin barrel -> src/tools/splice/ (11 acyclic hunk/stream/span/batch submodules)
-│   │   ├── syntax-validator.ts / preprocessor.ts # Lexical masking, native syntax & XML/SVG well-formedness
-│   │   └── outline.ts / create.ts / diff-patch.ts / fmt.ts / parity-gate.ts
-│   ├── mcp/                # Strict 2-tool MCP stdio server (aice_read, aice_splice)
-│   ├── rules/              # Single-file <= 300-token AGENTS.md rule SSOT (mandatory-rules.ts)
-│   ├── tokenomics/         # Cached exact js-tiktoken BPE (cl100k_base & o200k_base)
-│   └── telemetry/          # Honest signed < 250 B JSONL ledger (aice gain & aice analyze)
-├── benchmarks/             # Live real-agent (RW-01..RW-11) & deterministic offline (RW-01..RW-10) suites
-├── docs/                   # Architecture, EBNF spec, CST trivia, research synthesis & benchmark reports
-└── tests/                  # Unit & integration test suites (barrels/DAGs, universal files, polyglot, MCP, CLI)
+├── Cargo.toml                  # Rust Edition 2024 workspace manifest (10 crates)
+├── crates/
+│   ├── aice-governance/        # aice.config.json/.aicerc discovery, enabled gate, path/binary guard, AGENTS.md sync
+│   ├── aice-lang-registry/     # LanguageId (23 R5 + 9 R6 + PlainText), detection & core traits
+│   ├── aice-ast-engine/        # 25 tree-sitter grammars, RD parsers, intra-AST, dep graph & SyntaxFirewall
+│   ├── aice-aice-ir/           # Bidirectional AICE IR lexer, parser, printer, decompile & compile
+│   ├── aice-find-engine/       # Parallel ignore-aware walker & trigram + AST symbol fuzzy guesser
+│   ├── aice-telemetry/         # Honest bpe-openai cl100k/o200k metering, gains.jsonl & gain/analyze
+│   ├── aice-batch-read/        # Unified selectors, water-filling budget, topological packing & search
+│   ├── aice-batch-write/       # Heredoc/JSON manifest, 5-tier hunk/AST/line splicer & atomic rollback
+│   ├── aice-pipeline/          # Compile-time type-state PipelineExecutor, StdoutWriter & benchmark runner
+│   └── aice-cli/               # Thin pure-std CLI parser + strict 2-tool MCP stdio JSON-RPC server
+├── tests/
+│   ├── golden/                 # Frozen Wave 0 baseline (01_governance..09_anti_bypass)
+│   ├── corpus/                 # 12 real-world multi-language workloads (C-01..C-12, 32 languages)
+│   ├── e2e/                    # Opaque-box E2E test suite (Tiers 1–4, 215 cases)
+│   └── integration/            # Workspace parity, modularity (<=300L), clippy & anti-bypass audits
+├── tools/                      # check_line_limits.py & bench_vs_ts_rtk.py
+├── docs/                       # Rust architecture, 3-way benchmarks, R7 report & formal specs
+├── install.sh / uninstall.sh   # Pure-Rust POSIX Linux installer & uninstaller
+└── AGENTS.md / aice.config.json
 ```
 
 ---
@@ -274,9 +248,9 @@ aice/
 ```bibtex
 @software{forart82_aice_2026,
   author       = {forart82},
-  title        = {{AICE: On-the-Fly AI Context Engine \& Multi-Language \$idioms Splicer}},
+  title        = {{AICE: 100\% Rust AI Co-Engine \& Atomic Multi-Language AST Splicer}},
   year         = {2026},
-  version = {0.9.53},
+  version      = {0.9.53},
   publisher    = {GitHub},
   url          = {https://github.com/forart82/aice},
   license      = {Apache-2.0}

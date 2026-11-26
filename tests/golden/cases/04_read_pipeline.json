@@ -1,0 +1,513 @@
+{
+  "suite": "04_read_pipeline",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "READ-01",
+      "description": "Bare <=120L supported TS file read (TS v0.9.53 defaults rawNative:true vs Rust R3 mandatory AICE)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/math.ts"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "export interface CalcResult {\n  value: number;\n  label: string;\n}\n\nexport class Calculator {\n  private offset: number;\n\n  constructor(offset = 0) {\n    this.offset = offset;\n  }\n\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n\n  public mul(a: number, b: number): CalcResult {\n    return { value: a * b + this.offset, label: \"product\" };\n  }\n}\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Exits 0",
+          "Preserves CalcResult, Calculator, add, mul semantics",
+          "Rust MUST emit AICE IR by default (closing B-R1)"
+        ],
+        "deltaNote": "Law 3 + R3: TS v0.9.53 emitted raw native TS when --dsl was omitted; Rust emits compact AICE IR by default."
+      }
+    },
+    {
+      "id": "READ-02",
+      "description": "read --dsl emits AICE representation for supported TS file",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/math.ts",
+          "--dsl"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/math.ts\nmodule math\n\ntype CalcResult:\n  value:int\n  label:str\n\npub class Calculator(pub offset:int = 0):\n  fn add(a:int, b:int) -> CalcResult = { value: a + b + this.offset, label: \"sum\" }\n  fn mul(a:int, b:int) -> CalcResult = { value: a * b + this.offset, label: \"product\" }\n\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Emits AICE symbols for CalcResult and Calculator",
+          "Rust preserves private visibility and number type losslessly"
+        ],
+        "deltaNote": "Rust AICE IR fixes TS lossy decompilation (number->int and dropped private modifier)."
+      }
+    },
+    {
+      "id": "READ-03",
+      "description": "Bare >120L TS file triggers auto-outline with symbol landmarks",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/big.ts"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// Auto-outlined src/big.ts (124L) — batch symbols: aice read src/big.ts:runBatchPipeline src/big.ts:clampMetric or aice search <pat> src/big.ts\ntype PipelineMetrics: # [L1-L5]\n  processed: int # [L2-L2]\n  checksum: int # [L3-L3]\n  warnings: [str] # [L4-L4]\n\nfn runBatchPipeline(seed: int, limit: int) -> PipelineMetrics: ... # [L7-L113]\nfn clampMetric(value: int, minVal: int, maxVal: int) -> int: ... # [L115-L117]\nfn summarizeMetrics(metrics: PipelineMetrics) -> str: ... # [L119-L124]\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Auto-outlines src/big.ts (>120L)",
+          "Includes runBatchPipeline, clampMetric, summarizeMetrics with line spans"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "READ-04",
+      "description": "Symbol slice src/math.ts:Calculator.add extracts exact method + siblings",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/math.ts:Calculator.add"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/math.ts:13-15\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n// siblings in Calculator: mul\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Extracts Calculator.add",
+          "Includes sibling hint (mul/offset)",
+          "Rust emits AICE IR slice"
+        ],
+        "deltaNote": "Rust transforms symbol slice to AICE IR."
+      }
+    },
+    {
+      "id": "READ-05",
+      "description": "Line range slice src/big.ts:L1-L15 extracts requested lines",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/big.ts:L1-L15"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/big.ts:1-15\nexport interface PipelineMetrics {\n  processed: number;\n  checksum: number;\n  warnings: string[];\n}\n\nexport function runBatchPipeline(seed: number, limit: number): PipelineMetrics {\n  const warnings: string[] = [];\n  let acc = seed;\n  let processed = 0;\n\n  if (limit <= 0) {\n    warnings.push(\"limit-non-positive\");\n    return { processed: 0, checksum: acc, warnings };\n  }\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Extracts lines 1..15 of src/big.ts",
+          "Rust emits AICE IR for supported slice"
+        ],
+        "deltaNote": "Rust transforms line range slice to AICE IR on supported languages."
+      }
+    },
+    {
+      "id": "READ-06",
+      "description": "Intra-symbol pattern selector src/big.ts:runBatchPipeline@divisible",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/big.ts:runBatchPipeline@divisible"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/big.ts:runBatchPipeline@divisible\n7: export function runBatchPipeline(seed: number, limit: number): PipelineMetrics {\n8:   const warnings: string[] = [];\n9:   let acc = seed;\n10:   let processed = 0;\n11: \n// ... [L12-L39 skipped — 28 unrelated lines] ...\n40:     const stepW = stepV + stepN;\n41:     const stepX = stepW + stepO;\n42:     const stepY = stepX + stepP;\n43:     const stepZ = stepY + stepQ;\n44: \n45:     if (stepZ % 11 === 0) {\n46:       warnings.push(`divisible-${idx}`);\n47:       acc += stepZ + stepR + stepS;\n48:     } else if (stepZ % 7 === 0) {\n49:       acc += stepZ + stepT + stepU;\n50:     } else {\n51:       acc += stepZ + stepV + stepW + stepX + stepY;\n52:     }\n// ... [L53-L113 skipped — 61 unrelated lines] ...\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Locates divisible block inside runBatchPipeline",
+          "Rust intra-AST slicer extracts the exact branch block"
+        ],
+        "deltaNote": "Rust R8 intra-function AST engine indexes control-flow blocks natively."
+      }
+    },
+    {
+      "id": "READ-07",
+      "description": "Multi-target coalescing across same-file symbols and other files",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/app.ts",
+          "src/math.ts:Calculator.add",
+          "src/math.ts:Calculator.mul"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/app.ts:1-21\nimport { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}\n\n// src/math.ts:13-15\n  public add(a: number, b: number): CalcResult {\n    return { value: a + b + this.offset, label: \"sum\" };\n  }\n// src/math.ts:17-19\n  public mul(a: number, b: number): CalcResult {\n    return { value: a * b + this.offset, label: \"product\" };\n  }\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Returns deduplicated context pack containing App, Calculator.add, Calculator.mul"
+        ],
+        "deltaNote": "Rust orders multi-target packs topologically (dependencies/types before callers)."
+      }
+    },
+    {
+      "id": "READ-08",
+      "description": "Binary files (logo.png and NUL-byte data.bin) are skipped cleanly without raw byte dump",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "bin/logo.png",
+          "bin/data.bin"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// [binary file skipped: bin/logo.png (67 bytes)]\n\n// [binary file skipped: bin/data.bin (11 bytes)]\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Exits 0",
+          "Emits binary skip notice for both files",
+          "Contains zero raw PNG/NUL bytes"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "READ-09",
+      "description": "Plain text file (notes.txt) passes through via Law 3 PlainText exception",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/notes.txt"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "Plain text operational notes for AICE golden baseline.\nLine 2: Special regex chars like [a+b]*(c?) and $price.\nLine 3: End of operational notes.\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Exits 0",
+          "Emits notes.txt content without AST transformation error",
+          "Honest telemetry still recorded"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "READ-10",
+      "description": "Polyglot --dsl read across R5 (Python, Rust, Go, TOML, Dart, Ruby) and R6 DB dialects (SQL, Prisma, GraphQL, Cypher)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "--dsl",
+          "src/worker.py",
+          "src/engine.rs",
+          "src/server.go",
+          "src/config.toml",
+          "src/widget.dart",
+          "src/jobs.rb",
+          "src/schema_ansi.sql",
+          "src/schema.prisma",
+          "src/api.graphql",
+          "src/graph.cypher"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/worker.py\nmodule worker\n\nfrom \"dataclasses\" import dataclass\n\npub class TaskJob:\n  job_id: str\n  retries: int = 0\n\nfn run_job(job:TaskJob) -> str:\n  if job.retries > 3: ret `aborted:${job.job_id}`\n  `ok:${job.job_id}`\n\n\n// src/engine.rs\nmodule engine\n\npub class Engine:\n  tick: int\n  fn step(delta:int) -> int:\n    self.tick += delta\n    self.tick\n\n\n// src/server.go\nmodule server\n\nfn startServer(cfg:Config) -> str:\n  fmt.sprintf(\"%s:%d\", cfg.host, cfg.port)\n\ntype Config:\n  port:int\n  host:str\n\n\n// src/config.toml\n[package]\nname = \"aice-golden\"\nversion = \"0.1.0\"\nedition = \"2024\"\n\n[dependencies]\nbpe-openai = \"0.3.2\"\n\n\n// src/widget.dart\nclass StatusBadge {\n  final String label;\n  final int count;\n\n  const StatusBadge(this.label, this.count);\n\n  String renderText() {\n    return '$label ($count)';\n  }\n}\n\n\n// src/jobs.rb\nmodule Jobs\n  class Runner\n    def initialize(name)\n      @name = name\n    end\n\n    def execute(payload)\n      \"#{@name}:#{payload}\"\n    end\n  end\nend\n\n\n// src/schema_ansi.sql\nCREATE TABLE accounts (\n  id BIGINT PRIMARY KEY,\n  owner_name VARCHAR(120) NOT NULL,\n  balance NUMERIC(12, 2) NOT NULL DEFAULT 0.00\n);\n\nWITH active_accounts AS (\n  SELECT id, owner_name, balance\n  FROM accounts\n  WHERE balance > 0\n)\nSELECT id, owner_name, balance\nFROM active_accounts\nORDER BY balance DESC;\n\n\n// src/schema.prisma\ndatasource db {\n  provider = \"postgresql\"\n  url      = env(\"DATABASE_URL\")\n}\n\nmodel Account {\n  id        Int       @id @default(autoincrement())\n  email     String    @unique\n  invoices  Invoice[]\n}\n\nmodel Invoice {\n  id        Int     @id @default(autoincrement())\n  accountId Int\n  account   Account @relation(fields: [accountId], references: [id])\n}\n\n\n// src/api.graphql\ntype Account {\n  id: ID!\n  email: String!\n  balance: Float!\n}\n\ntype Query {\n  account(id: ID!): Account\n}\n\nquery GetAccount($id: ID!) {\n  account(id: $id) {\n    id\n    email\n    balance\n  }\n}\n\n\n// src/graph.cypher\nMATCH (u:Account {id: $accountId})-[r:OWNS]->(inv:Invoice)\nWHERE inv.total > 100\nRETURN u.email, inv.id, r.createdAt\nORDER BY inv.total DESC\nLIMIT 10;\n\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Exits 0",
+          "TS v0.9.53 decompiles Python/Rust/Go but passes through TOML/Dart/Ruby/SQL/Prisma/GraphQL/Cypher as raw",
+          "Rust R3/R5/R6 transforms ALL 10 targets into compact AICE IR"
+        ],
+        "deltaNote": "Rust adds full AST parsers and AICE IR transformation for TOML, Dart, Ruby, ANSI SQL, Postgres, MySQL, SQLite, T-SQL, Prisma, GraphQL, and Cypher."
+      }
+    },
+    {
+      "id": "READ-11",
+      "description": "read --outline src/app.ts emits structural skeleton",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "--outline",
+          "src/app.ts"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "from \"./math.js\" import { Calculator, CalcResult } # [L1-L1]\n\npub class App: # [L3-L21]\n  calc: Calculator # [L4-L4]\n  count # [L5-L5]\n  fn constructor(offset: unknown = ...): ... # [L7-L9]\n  /** Increment counter and compute sum */\n  fn inc(step: int) -> CalcResult: ... # [L12-L15]\n  fn reset() -> int: ... # [L17-L20]\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Lists App class, constructor, inc, reset with line ranges"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "READ-12",
+      "description": "read src/app.ts --json emits structured JSON bundle",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "src/app.ts",
+          "--json"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"targetPath\": \"src/app.ts\",\n  \"targetContent\": \"import { Calculator, type CalcResult } from \\\"./math.js\\\";\\n\\nexport class App {\\n  private calc: Calculator;\\n  private count = 0;\\n\\n  constructor(offset = 1) {\\n    this.calc = new Calculator(offset);\\n  }\\n\\n  /** Increment counter and compute sum */\\n  public inc(step: number): CalcResult {\\n    this.count += step;\\n    return this.calc.add(this.count, step);\\n  }\\n\\n  public reset(): number {\\n    this.count = 0;\\n    return this.count;\\n  }\\n}\",\n  \"targetOutline\": \"\",\n  \"dependencies\": [],\n  \"callers\": [],\n  \"formattedBundle\": \"import { Calculator, type CalcResult } from \\\"./math.js\\\";\\n\\nexport class App {\\n  private calc: Calculator;\\n  private count = 0;\\n\\n  constructor(offset = 1) {\\n    this.calc = new Calculator(offset);\\n  }\\n\\n  /** Increment counter and compute sum */\\n  public inc(step: number): CalcResult {\\n    this.count += step;\\n    return this.calc.add(this.count, step);\\n  }\\n\\n  public reset(): number {\\n    this.count = 0;\\n    return this.count;\\n  }\\n}\",\n  \"tokenCount\": 105\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "targetPath": "src/app.ts",
+          "targetContent": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}",
+          "targetOutline": "",
+          "dependencies": [],
+          "callers": [],
+          "formattedBundle": "import { Calculator, type CalcResult } from \"./math.js\";\n\nexport class App {\n  private calc: Calculator;\n  private count = 0;\n\n  constructor(offset = 1) {\n    this.calc = new Calculator(offset);\n  }\n\n  /** Increment counter and compute sum */\n  public inc(step: number): CalcResult {\n    this.count += step;\n    return this.calc.add(this.count, step);\n  }\n\n  public reset(): number {\n    this.count = 0;\n    return this.count;\n  }\n}",
+          "tokenCount": 105
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Valid JSON",
+          "Contains targetPath, targetContent, targetOutline, dependencies, tokenCount"
+        ],
+        "deltaNote": "Rust tokenCount uses exact bpe-openai count on AICE-transformed output."
+      }
+    },
+    {
+      "id": "READ-13",
+      "description": "Polyglot --dsl read across remaining R5 code/web/Twig targets (TSX, JS, C, C++, C#, Java, Kotlin, PHP, HTML, CSS, Twig)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "--dsl",
+          "src/component.tsx",
+          "src/helper.js",
+          "src/native.c",
+          "src/matrix.cpp",
+          "src/billing.cs",
+          "src/Service.java",
+          "src/Handler.kt",
+          "src/controller.php",
+          "src/page.html",
+          "src/styles.css",
+          "src/card.twig"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/component.tsx\nmodule component\n\n# @ts-nocheck\nfrom \"./math.js\" import CalcResult\n\ntype CardProps:\n  title:str\n  result:CalcResult\n\ncomponent StatusCard(props:CardProps):\n  section(class: \"status-card\"):\n    h2: \"{props.title}\"\n    span: \"{props.result.value}\"\n\n\n// src/helper.js\nexport function formatMetric(name, value) {\n  return `${name}=${value.toFixed(2)}`;\n}\n\nexport function sumList(items) {\n  return items.reduce((acc, item) => acc + item, 0);\n}\n\n\n// src/native.c\n#include <stdint.h>\n\ntypedef struct {\n    int32_t x;\n    int32_t y;\n} Point2D;\n\nint32_t dot_product(Point2D a, Point2D b) {\n    return (a.x * b.x) + (a.y * b.y);\n}\n\n\n// src/matrix.cpp\nmodule math\n\npub class Matrix2:\n  scale_: num\n  fn Matrix2(scale:num) -> explicit = nil\n  fn trace() -> num:\n    scale_ * 2.0\n\n\n// src/billing.cs\nmodule Billing\n\npub class Invoice:\n  readonly Id: str\n  readonly Total: num\n  fn constructor(id:str, total:num):\n    Id = id\n    Total = total\n  fn WithTax(rate:num) -> num:\n    Total + Total * rate\n\n\n// src/Service.java\npackage com.aice.golden;\n\npublic class Service {\n    private final String name;\n\n    public Service(String name) {\n        this.name = name;\n    }\n\n    public String greet(String user) {\n        return this.name + \":\" + user;\n    }\n}\n\n\n// src/Handler.kt\nmodule Handler\n\ntype Request:\n  id:str\n  retries:int\n\npub class Handler(private, readonly prefix:str):\n  fn handle(req:Request) -> str:\n    `${prefix}:${req.id}:${req.retries}`\n\n\n// src/controller.php\nmodule controller\n\npub class Controller:\n  fn index(name:str) -> str:\n    \"hello:\" + name\n\n\n// src/page.html\n<!doctype html>\n<html lang=\"en\">\n  <head>\n    <meta charset=\"utf-8\" />\n    <title>AICE Golden</title>\n  </head>\n  <body>\n    <main id=\"app\">\n      <h1>Golden Fixture</h1>\n    </main>\n  </body>\n</html>\n\n\n// src/styles.css\n.status-card {\n  display: flex;\n  padding: 12px 16px;\n  border: 1px solid #334155;\n  color: #f8fafc;\n}\n\n.status-card h2 {\n  font-size: 16px;\n  margin: 0;\n}\n\n\n// src/card.twig\n{# Status card component #}\n{% if visible %}\n<article class=\"card\">\n  <h3>{{ title|upper }}</h3>\n  <p>{{ summary }}</p>\n</article>\n{% endif %}\n\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Exits 0",
+          "Covers TSX, JS, C, C++, C#, Java, Kotlin, PHP, HTML, CSS, and Twig fixtures",
+          "Rust R3/R5 transforms ALL 11 targets into compact AICE IR"
+        ],
+        "deltaNote": "Rust adds real tree-sitter/RD AST parsers and AICE IR transformation for C, Java, HTML/CSS, and Twig."
+      }
+    },
+    {
+      "id": "READ-14",
+      "description": "Polyglot --dsl read across R5 data/docs/shell targets (JSON, YAML, XML, SVG, Bash, Markdown)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "--dsl",
+          "src/manifest.json",
+          "src/deploy.yaml",
+          "src/config.xml",
+          "src/diagram.svg",
+          "src/build.sh",
+          "src/guide.md"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/manifest.json\n{\n  \"name\": \"golden-fixture\",\n  \"version\": \"1.0.0\",\n  \"features\": {\n    \"ast\": true,\n    \"telemetry\": \"exact-bpe\"\n  }\n}\n\n\n// src/deploy.yaml\nservice: aice-golden\nruntime:\n  workers: 4\n  strict_firewall: true\nroutes:\n  - path: /health\n    method: GET\n\n\n// src/config.xml\n<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<settings version=\"1\">\n  <module name=\"pipeline\" enabled=\"true\" />\n  <module name=\"firewall\" strict=\"true\" />\n</settings>\n\n\n// src/diagram.svg\n<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">\n  <rect x=\"2\" y=\"2\" width=\"20\" height=\"20\" rx=\"4\" fill=\"#0f172a\" />\n  <circle cx=\"12\" cy=\"12\" r=\"5\" fill=\"#38bdf8\" />\n</svg>\n\n\n// src/build.sh\n#!/usr/bin/env bash\nset -euo pipefail\n\nrun_check() {\n  local mode=\"${1:-fast}\"\n  case \"$mode\" in\n    fast) echo \"running fast\" ;;\n    full) echo \"running full\" ;;\n    *) echo \"unknown\" >&2; return 1 ;;\n  esac\n}\n\nrun_check \"fast\"\n\n\n// src/guide.md\n# Golden Architecture Guide\n\nOverview of the multi-language golden fixture workspace.\n\n## Pipeline Stages\n\n1. Governance gate checks `aice.config.json`.\n2. AST engine transforms source into AICE IR.\n\n## Telemetry Notes\n\nReports exact `cl100k_base` and `o200k_base` counts.\n\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Exits 0",
+          "Covers JSON, YAML, XML, SVG, Bash, and Markdown fixtures",
+          "Rust R3/R5 transforms ALL 6 targets into compact AICE IR"
+        ],
+        "deltaNote": "Rust adds real AST parsers and AICE IR transformation for XML/SVG, Bash, and Markdown."
+      }
+    },
+    {
+      "id": "READ-15",
+      "description": "Polyglot --dsl read across remaining R6 DB dialects (PostgreSQL/PLpgSQL, MySQL, SQLite, T-SQL, DB migration)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": true,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "read",
+          "--dsl",
+          "src/trigger_pg.sql",
+          "src/proc_mysql.sql",
+          "src/local_sqlite.sql",
+          "src/report_tsql.sql",
+          "src/migrations/V001__init_ledger.sql"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "// src/trigger_pg.sql\nCREATE OR REPLACE FUNCTION audit_balance_change()\nRETURNS TRIGGER\nLANGUAGE plpgsql\nAS $$\nDECLARE\n  delta NUMERIC;\nBEGIN\n  delta := NEW.balance - OLD.balance;\n  IF delta <> 0 THEN\n    INSERT INTO balance_audit(account_id, delta_amount)\n    VALUES (NEW.id, delta);\n  END IF;\n  RETURN NEW;\nEND;\n$$;\n\n\n// src/proc_mysql.sql\nDELIMITER //\nCREATE PROCEDURE record_invoice(IN p_account_id BIGINT, IN p_total DECIMAL(10,2))\nBEGIN\n  INSERT INTO invoices (account_id, total_amount)\n  VALUES (p_account_id, p_total)\n  ON DUPLICATE KEY UPDATE total_amount = p_total;\nEND //\nDELIMITER ;\n\n\n// src/local_sqlite.sql\nPRAGMA foreign_keys = ON;\n\nCREATE TABLE cache_entries (\n  cache_key TEXT PRIMARY KEY,\n  payload TEXT NOT NULL,\n  updated_at INTEGER NOT NULL\n) STRICT, WITHOUT ROWID;\n\nINSERT INTO cache_entries (cache_key, payload, updated_at)\nVALUES ('k1', 'v1', 100)\nON CONFLICT(cache_key) DO UPDATE SET payload = excluded.payload;\n\n\n// src/report_tsql.sql\nCREATE PROCEDURE dbo.usp_SyncLedger\n  @BatchId INT\nAS\nBEGIN\n  SET NOCOUNT ON;\n  BEGIN TRY\n    SELECT TOP (10) [id], [owner_name], [balance]\n    FROM [dbo].[accounts]\n    WHERE [id] >= @BatchId;\n  END TRY\n  BEGIN CATCH\n    THROW;\n  END CATCH;\nEND;\nGO\n\n\n// src/migrations/V001__init_ledger.sql\n-- +goose Up\nCREATE TABLE ledger_entries (\n  id BIGINT PRIMARY KEY,\n  account_id BIGINT NOT NULL,\n  amount_cents BIGINT NOT NULL,\n  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP\n);\n\nCREATE INDEX idx_ledger_entries_account ON ledger_entries (account_id);\n\n-- +goose Down\nDROP INDEX IF EXISTS idx_ledger_entries_account;\nDROP TABLE IF EXISTS ledger_entries;\n\n",
+        "stderr": ""
+      },
+      "rustParityContract": {
+        "mode": "semantic_aice_upgrade",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "Exits 0",
+          "Covers PostgreSQL PL/pgSQL, MySQL DELIMITER procs, SQLite STRICT/PRAGMA, T-SQL GO/TRY-CATCH, and Flyway/Goose migrations",
+          "Rust R3/R6 parses and transforms ALL 5 DB files into compact AICE IR"
+        ],
+        "deltaNote": "Rust adds dedicated tree-sitter + RD/Pratt parsers for all 9 R6 DB & query dialects."
+      }
+    }
+  ]
+}

@@ -1,0 +1,334 @@
+{
+  "suite": "01_governance_config",
+  "capturedWith": {
+    "aiceVersion": "0.9.53",
+    "entry": "bin/aice.ts",
+    "gitCommit": "0399233f7a54a094c1f8ec71087cb2693bbfebe2"
+  },
+  "cases": [
+    {
+      "id": "GOV-01",
+      "description": "Missing aice.config.json defaults to enabled:true, idiomsEnabled:false, idiomsCount:0",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "none"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "status",
+          "--json"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"projectRoot\": \"<ROOT>\",\n  \"enabled\": true,\n  \"idiomsEnabled\": false,\n  \"idiomsCount\": 0\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "projectRoot": "<ROOT>",
+          "enabled": true,
+          "idiomsEnabled": false,
+          "idiomsCount": 0
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_json",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "stdoutJson.enabled === true",
+          "stdoutJson.idiomsEnabled === false",
+          "stdoutJson.idiomsCount === 0",
+          "stdoutJson.projectRoot === '<ROOT>'"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "GOV-02",
+      "description": "enable creates aice.config.json and AGENTS.md with single marker and <= 650 BPE tokens (idempotent)",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "none"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "enable",
+              "--json"
+            ]
+          },
+          {
+            "args": [
+              "enable"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"projectRoot\": \"<ROOT>\",\n  \"enabled\": true,\n  \"idiomsEnabled\": false,\n  \"idiomsCount\": 0\n}\n\n---SECOND---\n✔ AICE ENABLED (\"enabled\": true) in aice.config.json\n",
+        "stderr": "",
+        "stdoutJson": {
+          "projectRoot": "<ROOT>",
+          "enabled": true,
+          "idiomsEnabled": false,
+          "idiomsCount": 0
+        },
+        "diskFilesAfter": {
+          "aice.config.json": "{\n  \"enabled\": true,\n  \"idiomsEnabled\": false\n}\n",
+          "AGENTS.md": "<!-- AICE:START v0.9.53 -->\n## AICE (v0.9.53)\n- Gate: ONLY if `aice.config.json` has `\"enabled\": true`; blocker: `aice disable` / `aice enable`.\n### Batch Read & Splice\n- ONLY aice read/search/find (aice_read) & aice splice/aice write (aice_splice); no shell writes or `sed`/`grep`/`cat`/`find`.\n- Read: `aice read f1:sym f2:L1-L50`, quote 'f:/a|b/', `aice search <pat> [dir]`, `aice find -d 2`.\n- No paging: NEVER walk `:L1-L150` -> `:L151-L300` across turns; batch `f:sym1 f:sym2` (or multi-file) in 1 `aice read` or `aice search <pat> f`.\n- Splice: `aice splice --stdin << 'EOF'` (=== f:sym ===, === f:L1-L20 ===, --delete, === f ===), multi-line `<<< === >>>` (no 1L).\n- Briefs: \"Use AICE (aice read / aice splice) for all file exploration and edits.\"\n<!-- AICE:END -->\n"
+        },
+        "extraChecks": {
+          "agentsMdMarkers": 1,
+          "agentsMdTokensCl100k": 288,
+          "agentsMdTokensO200k": 288
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "aice.config.json has enabled:true",
+          "AGENTS.md has exactly 1 <!-- AICE:START marker",
+          "AGENTS.md BPE tokens <= 650 (cl100k_base & o200k_base)"
+        ],
+        "deltaNote": "Wave 5 updates AGENTS.md directive text for the redesigned Rust CLI while keeping single marker and <=650 BPE token cap."
+      }
+    },
+    {
+      "id": "GOV-03",
+      "description": "config --idioms-on and --idioms-off toggle idiomsEnabled in aice.config.json",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "enabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "config",
+              "--idioms-on",
+              "--json"
+            ]
+          },
+          {
+            "args": [
+              "config",
+              "--idioms-off",
+              "--json"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"projectRoot\": \"<ROOT>\",\n  \"enabled\": true,\n  \"idiomsEnabled\": false,\n  \"idiomsCount\": 0\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "on": {
+            "projectRoot": "<ROOT>",
+            "enabled": true,
+            "idiomsEnabled": true,
+            "idiomsCount": 0
+          },
+          "off": {
+            "projectRoot": "<ROOT>",
+            "enabled": true,
+            "idiomsEnabled": false,
+            "idiomsCount": 0
+          }
+        },
+        "diskFilesAfter": {
+          "aice.config.json": "{\n  \"enabled\": true,\n  \"idiomsEnabled\": false\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_json",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "on.idiomsEnabled === true",
+          "off.idiomsEnabled === false"
+        ],
+        "deltaNote": "If R7 Idiom Gate deletes aice-idioms in Wave 4, idiomsEnabled flags are retired cleanly while unknown fields in aice.config.json remain tolerated."
+      }
+    },
+    {
+      "id": "GOV-04",
+      "description": "enabled:false blocks read, find, search, and splice with exit code 1 and disabled notice",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "disabled"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "read",
+              "src/app.ts"
+            ]
+          },
+          {
+            "args": [
+              "find"
+            ]
+          },
+          {
+            "args": [
+              "search",
+              "Calculator"
+            ]
+          },
+          {
+            "args": [
+              "splice",
+              "src/app.ts",
+              "-s",
+              "App.reset",
+              "-c",
+              "public reset(): number { return 0; }"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 1,
+        "stdout": "",
+        "stderr": "❌ Error packaging context for src/app.ts: AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'.\n",
+        "extraChecks": {
+          "read": {
+            "exitCode": 1,
+            "stderr": "❌ Error packaging context for src/app.ts: AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'.\n",
+            "stdout": ""
+          },
+          "find": {
+            "exitCode": 1,
+            "stderr": "❌ Error finding files in .: AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'.\n",
+            "stdout": ""
+          },
+          "search": {
+            "exitCode": 1,
+            "stderr": "❌ Error searching .: AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'.\n",
+            "stdout": ""
+          },
+          "splice": {
+            "exitCode": 1,
+            "stderr": "❌ AICE is disabled for this project via aice.config.json (\"enabled\": false). Use native tools or run 'aice enable'.\n",
+            "stdout": ""
+          }
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 1,
+        "requiredInvariants": [
+          "All 4 operations (read, find, search, splice) exit 1",
+          "Error output mentions aice.config.json and enabled: false",
+          "Disk files remain untouched"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "GOV-05",
+      "description": "Legacy .aicerc config file is discovered and parsed",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "legacy_aicerc"
+      },
+      "invocation": {
+        "kind": "cli",
+        "args": [
+          "status",
+          "--json"
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"projectRoot\": \"<ROOT>\",\n  \"enabled\": true,\n  \"idiomsEnabled\": false,\n  \"idiomsCount\": 0\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "projectRoot": "<ROOT>",
+          "enabled": true,
+          "idiomsEnabled": false,
+          "idiomsCount": 0
+        }
+      },
+      "rustParityContract": {
+        "mode": "exact_json",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "stdoutJson.enabled === true",
+          "stdoutJson.idiomsEnabled === false"
+        ],
+        "deltaNote": null
+      }
+    },
+    {
+      "id": "GOV-06",
+      "description": "disable and enable preserve existing idioms definitions in aice.config.json",
+      "fixtureSetup": {
+        "copySrc": true,
+        "copyBin": false,
+        "config": "idioms"
+      },
+      "invocation": {
+        "kind": "cli_sequence",
+        "commands": [
+          {
+            "args": [
+              "disable",
+              "--json"
+            ]
+          },
+          {
+            "args": [
+              "enable",
+              "--json"
+            ]
+          }
+        ]
+      },
+      "observedTs0953": {
+        "exitCode": 0,
+        "stdout": "{\n  \"projectRoot\": \"<ROOT>\",\n  \"enabled\": true,\n  \"idiomsEnabled\": true,\n  \"idiomsCount\": 1\n}\n",
+        "stderr": "",
+        "stdoutJson": {
+          "disabled": {
+            "projectRoot": "<ROOT>",
+            "enabled": false,
+            "idiomsEnabled": false,
+            "idiomsCount": 1
+          },
+          "reenabled": {
+            "projectRoot": "<ROOT>",
+            "enabled": true,
+            "idiomsEnabled": true,
+            "idiomsCount": 1
+          }
+        },
+        "diskFilesAfter": {
+          "aice.config.json": "{\n  \"enabled\": true,\n  \"idiomsEnabled\": true,\n  \"idioms\": {\n    \"$clamp\": {\n      \"name\": \"$clamp\",\n      \"kind\": \"expr\",\n      \"params\": [\n        {\n          \"name\": \"$0\"\n        },\n        {\n          \"name\": \"$1\"\n        },\n        {\n          \"name\": \"$2\"\n        }\n      ],\n      \"templateAice\": \"Math.min(Math.max($0, $1), $2)\",\n      \"occurrences\": 4,\n      \"tokensPerOccurrenceSaved\": 8,\n      \"netTokenSavings\": 24,\n      \"description\": \"Clamp numeric value between min and max\"\n    }\n  }\n}\n"
+        }
+      },
+      "rustParityContract": {
+        "mode": "exit_and_invariants",
+        "exitCode": 0,
+        "requiredInvariants": [
+          "disabled.enabled === false",
+          "reenabled.enabled === true",
+          "aice.config.json preserves idioms.clamp definition"
+        ],
+        "deltaNote": null
+      }
+    }
+  ]
+}

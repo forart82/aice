@@ -1,0 +1,4 @@
+service:
+  name: ledger-worker
+  ports: [8080, 8443
+  replicas: 3
