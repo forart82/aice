@@ -1,8 +1,12 @@
 use crate::ir::TranspileError;
-use crate::ir_code::{Expr, LiteralVal, MemberKind, Stmt, UnaryOp};
+use crate::ir_code::{BinaryOp, Expr, Stmt, UnaryOp};
 use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
-use crate::parser_expr::{assign_op_from_tok, binary_op_from_tok, infix_prec, looks_like_ternary, parse_new_prefix};
+use crate::parser_expr::{
+    assign_op_from_tok, binary_op_from_tok, infix_prec, is_elvis_ahead, lit_expr_from_tok,
+    looks_like_ternary, parse_new_prefix, step_member_infix, try_contextual_infix,
+    try_contextual_unary,
+};
 use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_lit::{looks_like_closure_after_fn, start_record_entry, step_closure_params, step_lit_cont};
 use crate::parser_iter_match::start_match;
@@ -34,6 +38,13 @@ pub(crate) fn step_expr_cont(
                 let lhs = pop_expr(vals);
                 vals.push(ParseVal::Expr(Expr::PostfixTry(Box::new(lhs))));
                 stack.push(ParseCont::ExprInfix(min_prec));
+                return Ok(());
+            }
+            if let Some((op, next_prec)) = try_contextual_infix(p, min_prec) {
+                let lhs = pop_expr(vals);
+                stack.push(ParseCont::ExprInfix(min_prec));
+                stack.push(ParseCont::ExprBinary { left: lhs, op });
+                stack.push(ParseCont::Expr(next_prec));
                 return Ok(());
             }
             let Some((prec, right_assoc)) = infix_prec(p.peek_kind()) else { return Ok(()); };
@@ -137,20 +148,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             stack.push(ParseCont::Expr(16));
         }
         TokenKind::Await => { p.advance(); stack.push(ParseCont::ExprAwait); stack.push(ParseCont::Expr(16)); }
-        TokenKind::Number => {
-            p.advance();
-            let lit = if tok.lexeme.contains('.') || tok.lexeme.contains('e') || tok.lexeme.contains('E') {
-                LiteralVal::Float(tok.lexeme)
-            } else { LiteralVal::Int(tok.lexeme) };
-            vals.push(ParseVal::Expr(Expr::Literal(lit)));
-        }
-        TokenKind::String => { p.advance(); vals.push(ParseVal::Expr(Expr::Literal(LiteralVal::Str { value: tok.lexeme, multiline: false }))); }
-        TokenKind::TripleString => { p.advance(); vals.push(ParseVal::Expr(Expr::Literal(LiteralVal::Str { value: tok.lexeme, multiline: true }))); }
-        TokenKind::Boolean => { p.advance(); vals.push(ParseVal::Expr(Expr::Literal(LiteralVal::Bool(tok.lexeme == "true")))); }
-        TokenKind::Nil => { p.advance(); vals.push(ParseVal::Expr(Expr::Literal(LiteralVal::Nil))); }
-        TokenKind::HexColor => { p.advance(); vals.push(ParseVal::Expr(Expr::Literal(LiteralVal::HexColor(tok.lexeme)))); }
-        TokenKind::Regex => { p.advance(); vals.push(ParseVal::Expr(Expr::Literal(LiteralVal::Regex(tok.lexeme)))); }
-        TokenKind::TemplateNoSubst => { p.advance(); vals.push(ParseVal::Expr(Expr::Template { quasis: vec![tok.lexeme], exprs: Vec::new() })); }
+        _ if let Some(e) = lit_expr_from_tok(&tok) => { p.advance(); vals.push(ParseVal::Expr(e)); }
         TokenKind::TemplateHead => {
             let head = p.advance();
             stack.push(ParseCont::ExprTemplate { quasis: vec![head.lexeme], exprs: Vec::new() });
@@ -196,6 +194,12 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
         TokenKind::Ident if tok.lexeme == "new" && p.peek_n(1).kind == TokenKind::Ident => {
             parse_new_prefix(p, stack, vals)?;
         }
+        _ if let Some(op) = try_contextual_unary(p, &tok) => {
+            p.advance();
+            let arg_prec = if op == UnaryOp::Yield { 2 } else { 16 };
+            stack.push(ParseCont::ExprUnary { op });
+            stack.push(ParseCont::Expr(arg_prec));
+        }
         TokenKind::Ident => { p.advance(); vals.push(ParseVal::Expr(Expr::Ident(tok.lexeme))); }
         _ if tok.is_keyword() => { p.advance(); vals.push(ParseVal::Expr(Expr::Ident(tok.lexeme))); }
         _ => return Err(TranspileError::at(format!("Unexpected token {:?} '{}' in expression", tok.kind, tok.lexeme), tok.span)),
@@ -232,37 +236,7 @@ fn step_infix(
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon => {
-            p.advance();
-            if kind == TokenKind::QuestionDot && p.eat(TokenKind::LParen) {
-                if p.peek_kind() == TokenKind::RParen || p.at_eof() {
-                    p.expect(TokenKind::RParen, "Expected ')'")?;
-                    vals.push(ParseVal::Expr(Expr::Call {
-                        callee: Box::new(lhs), args: Vec::new(), is_optional: true, is_tagged: false, is_new: false,
-                    }));
-                } else {
-                    stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new(), is_optional: true, is_new: false });
-                    stack.push(ParseCont::Expr(1));
-                }
-                return Ok(());
-            }
-            if kind == TokenKind::QuestionDot && p.eat(TokenKind::LBracket) {
-                stack.push(ParseCont::ExprIndex { object: lhs, is_optional: true });
-                stack.push(ParseCont::Expr(1));
-                return Ok(());
-            }
-            let mk = match kind {
-                TokenKind::QuestionDot => MemberKind::SafeNav,
-                TokenKind::ColonColon => MemberKind::Scope,
-                _ => MemberKind::Dot,
-            };
-            let prop = if kind == TokenKind::Dot && p.eat(TokenKind::Hash) {
-                format!("#{}", p.expect_ident_or_kw("Expected private member name")?.lexeme)
-            } else if kind == TokenKind::Dot && p.peek_kind() == TokenKind::HexColor {
-                p.advance().lexeme
-            } else {
-                p.expect_ident_or_kw("Expected member name")?.lexeme
-            };
-            vals.push(ParseVal::Expr(Expr::Member { object: Box::new(lhs), property: prop, kind: mk }));
+            step_member_infix(p, lhs, kind, stack, vals)?;
         }
         TokenKind::PlusPlus | TokenKind::MinusMinus => {
             p.advance();
@@ -270,9 +244,16 @@ fn step_infix(
             vals.push(ParseVal::Expr(Expr::Unary { op, is_postfix: true, operand: Box::new(lhs) }));
         }
         TokenKind::Question => {
-            p.advance();
-            stack.push(ParseCont::ExprTernaryThen { cond: lhs, next_prec });
-            stack.push(ParseCont::Expr(1));
+            if is_elvis_ahead(p) {
+                p.advance();
+                p.advance();
+                stack.push(ParseCont::ExprBinary { left: lhs, op: BinaryOp::Elvis });
+                stack.push(ParseCont::Expr(6));
+            } else {
+                p.advance();
+                stack.push(ParseCont::ExprTernaryThen { cond: lhs, next_prec });
+                stack.push(ParseCont::Expr(1));
+            }
         }
         _ if assign_op_from_tok(kind).is_some() => {
             p.advance();

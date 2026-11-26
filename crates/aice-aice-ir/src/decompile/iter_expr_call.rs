@@ -41,12 +41,9 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
             env.tasks.push(DTask::Expr(cn));
             return;
         }
-        let mut cls = ctor_node.map(|c| node_text(c, env.src))
+        let cls = ctor_node.map(|c| node_text(c, env.src))
             .or_else(|| named_children(node).first().map(|c| node_text(*c, env.src)))
             .unwrap_or("Object").trim().to_string();
-        if env.lang == LanguageId::Php && cls.starts_with('\\') && !cls[1..].contains('\\') {
-            cls = cls[1..].to_string();
-        }
         env.tasks.push(DTask::FinishExpr(ExprFin::Call {
             has_callee_expr: false, callee_name: cls, recv_prop: None,
             argc: arg_nodes.len(), has_ruby_blk: false, is_optional: false, is_new: true,

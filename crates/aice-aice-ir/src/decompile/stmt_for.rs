@@ -191,5 +191,9 @@ pub(crate) fn is_single_stmt_node(kind: &str) -> bool {
             | "declaration"
             | "assignment_expression"
             | "augmented_assignment_expression"
+            | "compound_assignment_expr"
+            | "augmented_assignment"
+            | "assignment_statement"
+            | "operator_assignment"
     )
 }

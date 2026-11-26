@@ -6,7 +6,7 @@ use crate::compile::iter_expr_call::{make_inline_jsx, push_eval_call};
 use crate::compile::iter_expr_fmt::{
     format_closure, format_closure_param, format_record_entry, format_template, unary_op_native,
 };
-use crate::ir_code::{BinaryOp, Expr, FnBody, MemberKind, RecordEntry};
+use crate::ir_code::{BinaryOp, Expr, FnBody, MemberKind, RecordEntry, UnaryOp};
 
 pub(crate) fn step_expr_task<'a>(
     task: CTask<'a>,
@@ -24,15 +24,27 @@ pub(crate) fn step_expr_task<'a>(
                 st.vals.push(l);
                 return;
             }
-            if op == BinaryOp::In {
-                let s = match lang {
-                    LanguageId::Python | LanguageId::Kotlin | LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript => format!("{l} in {r}"),
-                    LanguageId::Ruby => format!("{r}.include?({l})"),
-                    LanguageId::Php => format!("in_array({l}, {r})"),
-                    LanguageId::Rust => format!("{r}.contains(&{l})"),
-                    LanguageId::CSharp => format!("{r}.Contains({l})"),
-                    LanguageId::Java | LanguageId::Dart => format!("{r}.contains({l})"),
-                    _ => format!("contains({r}, {l})"),
+            if matches!(op, BinaryOp::In | BinaryOp::NotIn) {
+                let neg = op == BinaryOp::NotIn;
+                let s = match (lang, neg) {
+                    (LanguageId::Python, false) => format!("{l} in {r}"),
+                    (LanguageId::Python, true) => format!("{l} not in {r}"),
+                    (LanguageId::Kotlin, false) => format!("{l} in {r}"),
+                    (LanguageId::Kotlin, true) => format!("{l} !in {r}"),
+                    (LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript, false) => format!("{l} in {r}"),
+                    (LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript, true) => format!("!({l} in {r})"),
+                    (LanguageId::Ruby, false) => format!("{r}.include?({l})"),
+                    (LanguageId::Ruby, true) => format!("!{r}.include?({l})"),
+                    (LanguageId::Php, false) => format!("in_array({l}, {r})"),
+                    (LanguageId::Php, true) => format!("!in_array({l}, {r})"),
+                    (LanguageId::Rust, false) => format!("{r}.contains(&{l})"),
+                    (LanguageId::Rust, true) => format!("!{r}.contains(&{l})"),
+                    (LanguageId::CSharp, false) => format!("{r}.Contains({l})"),
+                    (LanguageId::CSharp, true) => format!("!{r}.Contains({l})"),
+                    (LanguageId::Java | LanguageId::Dart, false) => format!("{r}.contains({l})"),
+                    (LanguageId::Java | LanguageId::Dart, true) => format!("!{r}.contains({l})"),
+                    (_, false) => format!("contains({r}, {l})"),
+                    (_, true) => format!("!contains({r}, {l})"),
                 };
                 st.vals.push(s);
                 return;
@@ -45,6 +57,19 @@ pub(crate) fn step_expr_task<'a>(
                 (BinaryOp::Eq, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Php) => "===",
                 (BinaryOp::NotEq, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Php) => "!==",
                 (BinaryOp::Add, LanguageId::Php) if is_str => ".",
+                (BinaryOp::FloorDiv, LanguageId::Python) => "//",
+                (BinaryOp::FloorDiv, LanguageId::Dart) => "~/",
+                (BinaryOp::Coalesce, LanguageId::Kotlin) => "?:",
+                (BinaryOp::Elvis, LanguageId::Php | LanguageId::Kotlin) => "?:",
+                (BinaryOp::Elvis, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Ruby) => "||",
+                (BinaryOp::Elvis, _) => "??",
+                (BinaryOp::Is, LanguageId::Python | LanguageId::CSharp | LanguageId::Kotlin | LanguageId::Dart) => "is",
+                (BinaryOp::Is, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Php | LanguageId::Java) => "instanceof",
+                (BinaryOp::Is, _) => "==",
+                (BinaryOp::IsNot, LanguageId::Python | LanguageId::CSharp) => "is not",
+                (BinaryOp::IsNot, LanguageId::Kotlin) => "!is",
+                (BinaryOp::IsNot, LanguageId::Dart) => "is!",
+                (BinaryOp::IsNot, _) => "!=",
                 (o, _) => bin_op_native(o),
             };
             st.vals.push(format!("{l} {op_s} {r}"));
@@ -125,7 +150,7 @@ pub(crate) fn step_expr_task<'a>(
         CTask::MakeAssign(op) => {
             let v = st.vals.pop().unwrap();
             let t = st.vals.pop().unwrap();
-            st.vals.push(format!("{t} {} {v}", assign_native(op)));
+            st.vals.push(format!("{t} {} {v}", assign_native(op, lang)));
         }
         CTask::MakeAwait => { let v = st.vals.pop().unwrap(); st.vals.push(format!("await {v}")); }
         CTask::MakeCall { callee_lit, class_new, n_args, is_optional, is_new } => {
@@ -189,12 +214,17 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             for ex in exprs.iter().rev() { tasks.push(CTask::EvalExpr(ex)); }
         }
         Expr::Binary { op, left, right } => {
+            let lp = crate::printer_expr::needs_binary_parens(left, *op, false);
+            let rp = crate::printer_expr::needs_binary_parens(right, *op, true);
             tasks.push(CTask::MakeBinary { op: *op, is_str: is_str_like(left) || is_str_like(right) });
+            if rp { tasks.push(CTask::WrapParen); }
             tasks.push(CTask::EvalExpr(right));
+            if lp { tasks.push(CTask::WrapParen); }
             tasks.push(CTask::EvalExpr(left));
         }
         Expr::Unary { op, is_postfix, operand } => {
-            let wrap = matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
+            let wrap = *op != UnaryOp::Yield
+                && matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
             tasks.push(CTask::MakeUnary { op: *op, is_postfix: *is_postfix, wrap });
             tasks.push(CTask::EvalExpr(operand));
         }

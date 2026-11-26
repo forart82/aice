@@ -1,4 +1,4 @@
-use crate::ir_code::{Expr, FnBody, MemberKind, Pattern, RecordEntry, Stmt};
+use crate::ir_code::{Expr, FnBody, MemberKind, Pattern, RecordEntry, Stmt, UnaryOp};
 use crate::ir_types::AiceType;
 use crate::printer::assign_op_str;
 use crate::printer_domain::format_ident_or_quoted;
@@ -74,7 +74,8 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             if lp { tasks.push(PTask::Lit("(")); }
         }
         Expr::Unary { op, is_postfix, operand } => {
-            let wrap = matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
+            let wrap = *op != UnaryOp::Yield
+                && matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
             if *is_postfix {
                 tasks.push(PTask::Lit(unary_op_str(*op)));
                 if wrap { tasks.push(PTask::Lit(")")); }

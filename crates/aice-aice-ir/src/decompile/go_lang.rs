@@ -113,12 +113,20 @@ fn decompile_type_spec(node: Node<'_>, src: &str, _opts: &TranspileOpts, tr: Tri
         {
             for fd in named_children(fl) {
                 if fd.kind() == "field_declaration" {
-                    let fnm = field_text(fd, "name", src).unwrap_or("f").to_string();
                     let fty = field_text(fd, "type", src).map(|t| map_type_str(t, LanguageId::Go));
-                    fields.push(FieldDecl {
-                        name: fnm.clone(), vis: go_vis(&fnm), is_readonly: false, is_optional: false,
-                        sigil: FieldSigil::None, ty: fty, default: None, trivia: Trivia::default(),
-                    });
+                    let mut cur = fd.walk();
+                    let names: Vec<String> = fd
+                        .children_by_field_name("name", &mut cur)
+                        .map(|n| node_text(n, src).trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let names = if names.is_empty() { vec!["f".to_string()] } else { names };
+                    for fnm in names {
+                        fields.push(FieldDecl {
+                            vis: go_vis(&fnm), name: fnm, is_readonly: false, is_optional: false,
+                            sigil: FieldSigil::None, ty: fty.clone(), default: None, trivia: Trivia::default(),
+                        });
+                    }
                 }
             }
         } else if ty_node.kind() == "interface_type" {
@@ -149,11 +157,29 @@ fn extract_go_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
     let mut params = Vec::new();
     for pd in named_children(pl) {
         if pd.kind() == "parameter_declaration" {
-            let pnm = field_text(pd, "name", src).unwrap_or("p").to_string();
+            let pty = field_text(pd, "type", src).map(|t| map_type_str(t, LanguageId::Go));
+            let mut cur = pd.walk();
+            let names: Vec<String> = pd
+                .children_by_field_name("name", &mut cur)
+                .map(|n| node_text(n, src).trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect();
+            let names = if names.is_empty() { vec!["p".to_string()] } else { names };
+            for pnm in names {
+                params.push(ParamDecl {
+                    name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
+                    is_optional: false, is_rest: false, ty: pty.clone(), default: None, trivia: Trivia::default(),
+                });
+            }
+        } else if pd.kind() == "variadic_parameter_declaration" {
+            let pnm = field_text(pd, "name", src)
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| "args".to_string());
             let pty = field_text(pd, "type", src).map(|t| map_type_str(t, LanguageId::Go));
             params.push(ParamDecl {
                 name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
-                is_optional: false, is_rest: false, ty: pty, default: None, trivia: Trivia::default(),
+                is_optional: false, is_rest: true, ty: pty, default: None, trivia: Trivia::default(),
             });
         }
     }

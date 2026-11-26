@@ -126,15 +126,7 @@ pub(crate) fn is_obj_destructure_ahead(p: &Parser<'_>) -> bool {
 }
 
 pub(crate) fn eat_assign_op(p: &mut Parser<'_>) -> Option<AssignOp> {
-    let op = match p.peek_kind() {
-        TokenKind::Equal => AssignOp::Assign, TokenKind::PlusEq => AssignOp::AddAssign,
-        TokenKind::MinusEq => AssignOp::SubAssign, TokenKind::StarEq => AssignOp::MulAssign,
-        TokenKind::SlashEq => AssignOp::DivAssign, TokenKind::PercentEq => AssignOp::ModAssign,
-        TokenKind::StarStarEq => AssignOp::PowAssign, TokenKind::AmpEq => AssignOp::BitAndAssign,
-        TokenKind::PipeEq => AssignOp::BitOrAssign, TokenKind::CaretEq => AssignOp::BitXorAssign,
-        TokenKind::ShlEq => AssignOp::ShlAssign, TokenKind::ShrEq => AssignOp::ShrAssign,
-        TokenKind::UshrEq => AssignOp::UshrAssign, _ => return None,
-    };
+    let op = crate::parser_expr::assign_op_from_tok(p.peek_kind())?;
     p.advance();
     Some(op)
 }

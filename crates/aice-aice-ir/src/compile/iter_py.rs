@@ -35,7 +35,7 @@ pub(crate) fn step_py_task<'a>(
         CTask::PyAssign(op) => {
             let r = st.vals.pop().unwrap();
             let l = st.vals.pop().unwrap();
-            ec.line(&format!("{l} {} {r}", assign_native(op)));
+            ec.line(&format!("{l} {} {r}", assign_native(op, LanguageId::Python)));
         }
         CTask::PyReturn(has_val) => {
             if has_val { let v = st.vals.pop().unwrap(); ec.line(&format!("return {v}")); }

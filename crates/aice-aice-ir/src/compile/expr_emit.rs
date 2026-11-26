@@ -74,22 +74,31 @@ pub(crate) fn is_str_like(e: &Expr) -> bool {
 pub(crate) fn bin_op_native(op: BinaryOp) -> &'static str {
     match op {
         BinaryOp::Add => "+", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
-        BinaryOp::Div => "/", BinaryOp::Mod => "%", BinaryOp::Pow => "**",
+        BinaryOp::Div => "/", BinaryOp::FloorDiv => "/", BinaryOp::Mod => "%", BinaryOp::Pow => "**",
         BinaryOp::Eq => "==", BinaryOp::NotEq => "!=",
         BinaryOp::Lt => "<", BinaryOp::LtEq => "<=", BinaryOp::Gt => ">", BinaryOp::GtEq => ">=",
-        BinaryOp::And => "&&", BinaryOp::Or => "||", BinaryOp::Coalesce => "??",
-        BinaryOp::BitAnd => "&", BinaryOp::BitOr => "|", BinaryOp::BitXor => "^",
+        BinaryOp::Spaceship => "<=>",
+        BinaryOp::And => "&&", BinaryOp::Or => "||",
+        BinaryOp::Coalesce => "??", BinaryOp::Elvis => "?:",
+        BinaryOp::BitAnd => "&", BinaryOp::BitClear => "&^", BinaryOp::BitOr => "|", BinaryOp::BitXor => "^",
         BinaryOp::Shl => "<<", BinaryOp::Shr => ">>", BinaryOp::Ushr => ">>>",
-        BinaryOp::In => "in", BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as",
+        BinaryOp::In => "in", BinaryOp::NotIn => "not in",
+        BinaryOp::Is => "is", BinaryOp::IsNot => "is not",
+        BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as",
     }
 }
 
-pub(crate) fn assign_native(op: AssignOp) -> &'static str {
+pub(crate) fn assign_native(op: AssignOp, lang: LanguageId) -> &'static str {
     match op {
         AssignOp::Assign => "=", AssignOp::AddAssign => "+=", AssignOp::SubAssign => "-=",
-        AssignOp::MulAssign => "*=", AssignOp::DivAssign => "/=", AssignOp::ModAssign => "%=",
-        AssignOp::PowAssign => "**=", AssignOp::BitAndAssign => "&=", AssignOp::BitOrAssign => "|=",
-        AssignOp::BitXorAssign => "^=", AssignOp::ShlAssign => "<<=", AssignOp::ShrAssign => ">>=",
-        AssignOp::UshrAssign => ">>>=",
+        AssignOp::MulAssign => "*=", AssignOp::DivAssign => "/=",
+        AssignOp::FloorDivAssign => if lang == LanguageId::Dart { "~/=" } else { "//=" },
+        AssignOp::TruncDivAssign => if lang == LanguageId::Python { "//=" } else { "~/=" },
+        AssignOp::ModAssign => "%=", AssignOp::PowAssign => "**=",
+        AssignOp::BitAndAssign => "&=", AssignOp::BitClearAssign => "&^=",
+        AssignOp::BitOrAssign => "|=", AssignOp::BitXorAssign => "^=",
+        AssignOp::ShlAssign => "<<=", AssignOp::ShrAssign => ">>=", AssignOp::UshrAssign => ">>>=",
+        AssignOp::CoalesceAssign => "??=", AssignOp::AndAssign => "&&=", AssignOp::OrAssign => "||=",
+        AssignOp::ConcatAssign => if lang == LanguageId::Php { ".=" } else { "+=" },
     }
 }

@@ -5,7 +5,6 @@ use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_
 use crate::decompile::stmt_common::find_body_node;
 use crate::decompile::trivia::{collect_header_trailing, is_comment_kind};
 use crate::ir::{TranspileOpts, Trivia};
-use crate::ir_code::AssignOp;
 use crate::ir_types::AiceType;
 
 fn unwrap_c_decl_name(mut decl: Node<'_>, src: &str) -> String {
@@ -191,30 +190,6 @@ pub(crate) fn find_var_decls<'a>(
             (name, is_mut, ty, init)
         })
         .collect()
-}
-
-pub(crate) fn find_assign_parts<'a>(
-    node: Node<'a>,
-    src: &'a str,
-) -> Option<(AssignOp, Node<'a>, Node<'a>)> {
-    let raw = node_text(node, src);
-    let kids = named_children(node);
-    if kids.len() < 2 {
-        return None;
-    }
-    let op_slice = node
-        .child_by_field_name("operator")
-        .map(|o| node_text(o, src))
-        .unwrap_or_else(|| {
-            let (s, e) = (kids[0].end_byte(), kids[kids.len() - 1].start_byte());
-            if s <= e { &src[s..e] } else { raw }
-        });
-    let op = if op_slice.contains("+=") { AssignOp::AddAssign }
-    else if op_slice.contains("-=") { AssignOp::SubAssign }
-    else if op_slice.contains("*=") { AssignOp::MulAssign }
-    else if op_slice.contains("/=") { AssignOp::DivAssign }
-    else { AssignOp::Assign };
-    Some((op, kids[0], kids[kids.len() - 1]))
 }
 
 pub(crate) fn find_catch_parts<'a>(

@@ -23,23 +23,33 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: tr, span: node_span(ch) });
                 }
                 "namespace_definition" => {
-                    let name = field_text(ch, "name", src).map(str::trim).filter(|s| !s.is_empty());
+                    let body = ch
+                        .child_by_field_name("body")
+                        .or_else(|| child_by_kind(ch, "compound_statement"));
+                    let name_node = ch.child_by_field_name("name");
+                    let name = name_node
+                        .map(|n| node_text(n, src).trim())
+                        .filter(|s| !s.is_empty());
                     if let Some(nm) = name {
                         if seen_ns == 0 && m.module_name == "php" {
                             m.module_name = nm.replace('\\', "/");
                         } else {
+                            let mut span = node_span(ch);
+                            if let Some(b) = body {
+                                span.end_byte = name_node
+                                    .map(|n| n.end_byte())
+                                    .unwrap_or_else(|| b.start_byte())
+                                    .min(b.start_byte());
+                            }
                             m.items.push(AiceItem::Directive {
                                 text: format!("namespace {nm};"),
                                 trivia: tr,
-                                span: node_span(ch),
+                                span,
                             });
                         }
                     }
                     seen_ns += 1;
-                    if let Some(body) = ch
-                        .child_by_field_name("body")
-                        .or_else(|| child_by_kind(ch, "compound_statement"))
-                    {
+                    if let Some(body) = body {
                         for item in named_children(body).into_iter().rev() {
                             stack.push(item);
                         }

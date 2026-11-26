@@ -175,7 +175,7 @@ fn print_directive(c: &mut PrintCtx<'_>, text: &str, trivia: &Trivia, d: usize) 
 }
 
 fn is_safe_raw_directive(text: &str) -> bool {
-    if text.is_empty() || text.starts_with('"') || text.starts_with('\'') {
+    if text.is_empty() || text.starts_with('"') || text.starts_with('\'') || text.contains('\\') {
         return false;
     }
     let Ok(toks) = crate::lexer::lex_with_trivia(text) else { return false };
@@ -238,9 +238,13 @@ pub(crate) fn format_params(c: &PrintCtx<'_>, params: &[ParamDecl]) -> String {
 pub(crate) fn assign_op_str(op: AssignOp) -> &'static str {
     match op {
         AssignOp::Assign => "=", AssignOp::AddAssign => "+=", AssignOp::SubAssign => "-=",
-        AssignOp::MulAssign => "*=", AssignOp::DivAssign => "/=", AssignOp::ModAssign => "%=",
-        AssignOp::PowAssign => "**=", AssignOp::BitAndAssign => "&=", AssignOp::BitOrAssign => "|=",
-        AssignOp::BitXorAssign => "^=", AssignOp::ShlAssign => "<<=", AssignOp::ShrAssign => ">>=",
-        AssignOp::UshrAssign => ">>>=",
+        AssignOp::MulAssign => "*=", AssignOp::DivAssign => "/=",
+        AssignOp::FloorDivAssign => "//=", AssignOp::TruncDivAssign => "~/=",
+        AssignOp::ModAssign => "%=", AssignOp::PowAssign => "**=",
+        AssignOp::BitAndAssign => "&=", AssignOp::BitClearAssign => "&^=",
+        AssignOp::BitOrAssign => "|=", AssignOp::BitXorAssign => "^=",
+        AssignOp::ShlAssign => "<<=", AssignOp::ShrAssign => ">>=", AssignOp::UshrAssign => ">>>=",
+        AssignOp::CoalesceAssign => "??=", AssignOp::AndAssign => "&&=",
+        AssignOp::OrAssign => "||=", AssignOp::ConcatAssign => ".=",
     }
 }

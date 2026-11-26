@@ -128,6 +128,7 @@ fn emit_go_body(ec: &mut EmitCtx, body: &FnBody, ectx: &ExprEmitCtx) {
 fn emit_go_params(params: &[ParamDecl]) -> String {
     params.iter().map(|p| {
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Go)).unwrap_or_else(|| "any".into());
-        format!("{} {t}", p.name)
+        let dots = if p.is_rest { "..." } else { "" };
+        format!("{} {dots}{t}", p.name)
     }).collect::<Vec<_>>().join(", ")
 }

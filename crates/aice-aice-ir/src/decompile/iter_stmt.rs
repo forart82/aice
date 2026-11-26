@@ -6,9 +6,10 @@ use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_match::{push_match_task, push_select_task};
 use crate::decompile::iter_stmt_cf::{push_if_task, push_ruby_begin, push_try_task};
 use crate::decompile::iter_stmt_fin::push_for_stmt;
+use crate::decompile::op_map::find_assign_parts;
 use crate::decompile::stmt_common::find_body_node;
 use crate::decompile::stmt_for::{extract_c_for_parts, is_single_stmt_node};
-use crate::decompile::stmt_vars::{find_assign_parts, find_var_decls};
+use crate::decompile::stmt_vars::find_var_decls;
 use crate::decompile::trivia::{collect_header_trailing, collect_trivia};
 use crate::ir::Trivia;
 use crate::ir_code::{AssignOp, Expr, Pattern, Stmt};
@@ -106,7 +107,9 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 "return_expression" | "if_expression" | "for_expression" | "while_expression"
                     | "match_expression" | "loop_expression" | "break_expression" | "continue_expression"
                     | "throw_expression"
-                    | "assignment_expression" | "augmented_assignment_expression" | "assignment" | "operator_assignment"
+                    | "assignment_expression" | "augmented_assignment_expression"
+                    | "compound_assignment_expr" | "augmented_assignment"
+                    | "assignment" | "assignment_statement" | "operator_assignment"
             ) {
                 node = ch;
             } else {
@@ -201,6 +204,10 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "for_statement" | "for_in_statement" | "for_expression" | "for_range_loop"
         | "foreach_statement" | "enhanced_for_statement" | "for" => push_for_stmt(env, node),
         "begin" => push_ruby_begin(env, node),
+        "try_expression" if env.lang == LanguageId::Rust => {
+            env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
+            env.tasks.push(DTask::Expr(node));
+        }
         "try_statement" | "try_expression" => push_try_task(env, node),
         "rethrow_statement" => env.stmts.push(Stmt::Expr { expr: Expr::Ident("rethrow".into()), trivia: Trivia::default() }),
         "throw_statement" | "throw_expression" | "raise_statement" => {
@@ -261,7 +268,9 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 }
             }
         }
-        "assignment_expression" | "augmented_assignment_expression" | "assignment" | "operator_assignment" => {
+        "assignment_expression" | "augmented_assignment_expression"
+        | "compound_assignment_expr" | "augmented_assignment"
+        | "assignment" | "assignment_statement" | "operator_assignment" => {
             if let Some((op, tgt, val)) = find_assign_parts(node, env.src) {
                 env.tasks.push(DTask::FinishStmt(StmtFin::Assign { op }));
                 env.tasks.push(DTask::Expr(val));

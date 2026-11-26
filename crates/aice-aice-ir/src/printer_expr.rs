@@ -48,13 +48,14 @@ pub(crate) fn escape_template(s: &str) -> String {
 
 fn bin_prec(op: BinaryOp) -> u8 {
     match op {
-        BinaryOp::Or => 3, BinaryOp::And => 4, BinaryOp::Coalesce => 5,
+        BinaryOp::Or => 3, BinaryOp::And => 4, BinaryOp::Coalesce | BinaryOp::Elvis => 5,
         BinaryOp::BitOr => 6, BinaryOp::BitXor => 7, BinaryOp::BitAnd => 8,
         BinaryOp::Eq | BinaryOp::NotEq => 9,
-        BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq | BinaryOp::In | BinaryOp::Instanceof => 10,
+        BinaryOp::Lt | BinaryOp::LtEq | BinaryOp::Gt | BinaryOp::GtEq | BinaryOp::Spaceship
+        | BinaryOp::In | BinaryOp::NotIn | BinaryOp::Is | BinaryOp::IsNot | BinaryOp::Instanceof => 10,
         BinaryOp::Shl | BinaryOp::Shr | BinaryOp::Ushr => 11,
         BinaryOp::Add | BinaryOp::Sub => 12,
-        BinaryOp::Mul | BinaryOp::Div | BinaryOp::Mod => 13,
+        BinaryOp::Mul | BinaryOp::Div | BinaryOp::FloorDiv | BinaryOp::Mod | BinaryOp::BitClear => 13,
         BinaryOp::Pow => 14,
         BinaryOp::As => 15,
     }
@@ -64,6 +65,13 @@ pub(crate) fn needs_binary_parens(child: &Expr, parent_op: BinaryOp, is_right: b
     let Expr::Binary { op: child_op, .. } = child else {
         return matches!(child, Expr::Conditional { .. } | Expr::Assign { .. });
     };
+    if matches!(
+        (parent_op, *child_op),
+        (BinaryOp::Coalesce | BinaryOp::Elvis, BinaryOp::And | BinaryOp::Or)
+            | (BinaryOp::And | BinaryOp::Or, BinaryOp::Coalesce | BinaryOp::Elvis)
+    ) {
+        return true;
+    }
     let pp = bin_prec(parent_op);
     let cp = bin_prec(*child_op);
     if cp < pp { return true; }
@@ -80,13 +88,17 @@ pub(crate) fn needs_binary_parens(child: &Expr, parent_op: BinaryOp, is_right: b
 pub(crate) fn bin_op_str(op: BinaryOp) -> &'static str {
     match op {
         BinaryOp::Add => "+", BinaryOp::Sub => "-", BinaryOp::Mul => "*",
-        BinaryOp::Div => "/", BinaryOp::Mod => "%", BinaryOp::Pow => "**",
+        BinaryOp::Div => "/", BinaryOp::FloorDiv => "~/", BinaryOp::Mod => "%", BinaryOp::Pow => "**",
         BinaryOp::Eq => "==", BinaryOp::NotEq => "!=",
         BinaryOp::Lt => "<", BinaryOp::LtEq => "<=", BinaryOp::Gt => ">", BinaryOp::GtEq => ">=",
-        BinaryOp::And => "and", BinaryOp::Or => "or", BinaryOp::Coalesce => "??",
-        BinaryOp::BitAnd => "&", BinaryOp::BitOr => "|", BinaryOp::BitXor => "^",
+        BinaryOp::Spaceship => "<=>",
+        BinaryOp::And => "and", BinaryOp::Or => "or",
+        BinaryOp::Coalesce => "??", BinaryOp::Elvis => "?:",
+        BinaryOp::BitAnd => "&", BinaryOp::BitClear => "&^", BinaryOp::BitOr => "|", BinaryOp::BitXor => "^",
         BinaryOp::Shl => "<<", BinaryOp::Shr => ">>", BinaryOp::Ushr => ">>>",
-        BinaryOp::In => "in", BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as",
+        BinaryOp::In => "in", BinaryOp::NotIn => "not in",
+        BinaryOp::Is => "is", BinaryOp::IsNot => "is not",
+        BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as",
     }
 }
 
@@ -96,5 +108,7 @@ pub(crate) fn unary_op_str(op: UnaryOp) -> &'static str {
         UnaryOp::BitNot => "~", UnaryOp::Inc => "++", UnaryOp::Dec => "--",
         UnaryOp::Spread => "...",
         UnaryOp::Ref => "&", UnaryOp::RefMut => "&mut ", UnaryOp::Deref => "*",
+        UnaryOp::Typeof => "typeof ", UnaryOp::Void => "void ",
+        UnaryOp::Delete => "delete ", UnaryOp::Yield => "yield ",
     }
 }

@@ -1,6 +1,6 @@
 use crate::ir::{Span, TranspileError};
 use crate::lexer_scan_lit::Scanner;
-use crate::lexer_tokens::{TokenKind, keyword_kind};
+use crate::lexer_tokens::{MULTI_PUNCT, TokenKind, keyword_kind};
 
 #[derive(Debug, Clone)]
 pub(crate) enum RawKind {
@@ -139,6 +139,15 @@ fn scan_token(s: &mut Scanner<'_>) -> Result<(), TranspileError> {
     let ch = s.b[s.i];
     match ch {
         b'#' => s.scan_hash(start),
+        b'/' if s.prev_val_tok
+            && s.peek(1) == Some(b'/')
+            && s.peek(2) == Some(b'=')
+            && s.peek(3) != Some(b'=') =>
+        {
+            s.i += 3;
+            s.push_tok(TokenKind::SlashSlashEq, "//=".to_string(), start, s.i);
+            Ok(())
+        }
         b'/' if s.peek(1) == Some(b'/') => {
             s.i += 2;
             let t0 = s.i;
@@ -160,6 +169,7 @@ fn scan_token(s: &mut Scanner<'_>) -> Result<(), TranspileError> {
         }
         b'0'..=b'9' => scan_number(s, start),
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => scan_ident(s, start),
+        b'\\' if s.peek(1).is_some_and(|c| c.is_ascii_alphabetic() || c == b'_') => scan_ident(s, start),
         _ if !ch.is_ascii() => {
             let u = s.src[start..].chars().next().unwrap_or('\0');
             if u.is_alphabetic() || u == '_' {
@@ -209,7 +219,10 @@ fn scan_number(s: &mut Scanner<'_>, start: usize) -> Result<(), TranspileError> 
 fn scan_ident(s: &mut Scanner<'_>, start: usize) -> Result<(), TranspileError> {
     while s.i < s.b.len() {
         let c = s.b[s.i];
-        if c.is_ascii_alphanumeric() || c == b'_' {
+        if c.is_ascii_alphanumeric()
+            || c == b'_'
+            || (c == b'\\' && s.peek(1).is_some_and(|n| n.is_ascii_alphabetic() || n == b'_'))
+        {
             s.i += 1;
         } else if !c.is_ascii() {
             let ch = s.next_char();
@@ -229,27 +242,13 @@ fn scan_ident(s: &mut Scanner<'_>, start: usize) -> Result<(), TranspileError> {
 
 fn scan_punct(s: &mut Scanner<'_>, start: usize) -> Result<(), TranspileError> {
     let rest = &s.src[start..];
-    let multi = [
-        (">>>=", TokenKind::UshrEq), ("...", TokenKind::Ellipsis), (">>>", TokenKind::Ushr),
-        ("::=", TokenKind::ColonColonEqual), ("**=", TokenKind::StarStarEq),
-        ("<<=", TokenKind::ShlEq), (">>=", TokenKind::ShrEq),
-        ("::", TokenKind::ColonColon), (":=", TokenKind::ColonEqual),
-        ("->", TokenKind::Arrow), ("=>", TokenKind::FatArrow),
-        ("**", TokenKind::StarStar), ("++", TokenKind::PlusPlus),
-        ("--", TokenKind::MinusMinus), ("<<", TokenKind::Shl), (">>", TokenKind::Shr),
-        ("==", TokenKind::EqEq), ("!=", TokenKind::NotEq),
-        ("<=", TokenKind::LtEq), (">=", TokenKind::GtEq),
-        ("&&", TokenKind::AmpAmp), ("||", TokenKind::PipePipe),
-        ("??", TokenKind::QuestionQuestion), ("?.", TokenKind::QuestionDot),
-        ("+=", TokenKind::PlusEq), ("-=", TokenKind::MinusEq),
-        ("*=", TokenKind::StarEq), ("/=", TokenKind::SlashEq),
-        ("%=", TokenKind::PercentEq), ("&=", TokenKind::AmpEq),
-        ("|=", TokenKind::PipeEq), ("^=", TokenKind::CaretEq),
-        ("!s", TokenKind::Sigil), ("!i", TokenKind::Sigil),
-        ("!f", TokenKind::Sigil), ("!b", TokenKind::Sigil),
-    ];
-    for (pat, kind) in multi {
+    for &(pat, kind) in MULTI_PUNCT {
         if rest.starts_with(pat) {
+            if kind == TokenKind::DotEq
+                && matches!(s.out.last().map(|t| &t.kind), Some(RawKind::Tok(TokenKind::Dot, _)))
+            {
+                continue;
+            }
             if kind == TokenKind::Sigil
                 && rest.as_bytes().get(pat.len()).is_some_and(|b| b.is_ascii_alphanumeric() || *b == b'_')
             {

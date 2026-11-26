@@ -10,6 +10,8 @@ pub(crate) fn unary_op_native(op: UnaryOp, lang: LanguageId) -> &'static str {
         (UnaryOp::Not, _) => "!",
         (UnaryOp::Neg, _) => "-",
         (UnaryOp::Pos, _) => "+",
+        (UnaryOp::BitNot, LanguageId::Rust) => "!",
+        (UnaryOp::BitNot, LanguageId::Go) => "^",
         (UnaryOp::BitNot, _) => "~",
         (UnaryOp::Inc, _) => "++",
         (UnaryOp::Dec, _) => "--",
@@ -18,6 +20,10 @@ pub(crate) fn unary_op_native(op: UnaryOp, lang: LanguageId) -> &'static str {
         (UnaryOp::RefMut, LanguageId::Rust) => "&mut ",
         (UnaryOp::RefMut, LanguageId::Go | LanguageId::Cpp | LanguageId::C) => "&",
         (UnaryOp::Deref, LanguageId::Rust | LanguageId::Go | LanguageId::Cpp | LanguageId::C) => "*",
+        (UnaryOp::Typeof, _) => "typeof ",
+        (UnaryOp::Void, _) => "void ",
+        (UnaryOp::Delete, _) => "delete ",
+        (UnaryOp::Yield, _) => "yield ",
         _ => "",
     }
 }
@@ -58,7 +64,8 @@ pub(crate) fn format_closure_param(p: &ParamDecl, def: Option<&str>, lang: Langu
             format!("{}{ty}", p.name)
         }
         LanguageId::Go => {
-            let ty = p.ty.as_ref().map(|t| format!(" {}", emit_type(t, lang))).unwrap_or_default();
+            let dots = if p.is_rest { "..." } else { "" };
+            let ty = p.ty.as_ref().map(|t| format!(" {dots}{}", emit_type(t, lang))).unwrap_or_default();
             format!("{}{ty}", p.name)
         }
         LanguageId::Cpp => {

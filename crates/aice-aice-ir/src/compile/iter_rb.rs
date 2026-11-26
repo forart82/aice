@@ -41,7 +41,7 @@ pub(crate) fn step_rb_task<'a>(
         CTask::RbAssign(op) => {
             let r = st.vals.pop().unwrap();
             let l = st.vals.pop().unwrap();
-            emit_rb_line(ec, &format!("{l} {} {r}", assign_native(op)));
+            emit_rb_line(ec, &format!("{l} {} {r}", assign_native(op, LanguageId::Ruby)));
         }
         CTask::RbReturn => { let v = st.vals.pop().unwrap(); emit_rb_line(ec, &format!("return {v}")); }
         CTask::RbIfHdr => { let c = st.vals.pop().unwrap(); ec.line(&format!("if {c}")); }

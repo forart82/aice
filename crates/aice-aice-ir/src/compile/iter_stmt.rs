@@ -52,7 +52,7 @@ pub(crate) fn step_stmt_task<'a>(
         CTask::BraceAssign(op) => {
             let r = st.vals.pop().unwrap();
             let l = st.vals.pop().unwrap();
-            ec.line(&format!("{l} {} {r}{semi}", assign_native(op)));
+            ec.line(&format!("{l} {} {r}{semi}", assign_native(op, lang)));
         }
         CTask::BraceGoReturn(n) => {
             let start = st.vals.len() - n;

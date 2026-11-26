@@ -4,6 +4,7 @@ use tree_sitter::Node;
 use crate::decompile::cst_util::{child_by_kind, named_children, node_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::{ExprFin, ObjSlot};
+use crate::decompile::op_map::{map_binary_op, map_unary_op};
 use crate::ir_code::{BinaryOp, Expr, FnBody, LiteralVal, MemberKind, RecordEntry, UnaryOp};
 
 pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
@@ -48,19 +49,21 @@ pub(crate) fn push_binary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw:
             let (l_end, r_start) = (kids[0].end_byte(), kids[kids.len() - 1].start_byte());
             if l_end <= r_start { env.src[l_end..r_start].trim() } else { "+" }
         });
-    let op = match op_str {
-        "+" | "." if op_str == "+" || env.lang == LanguageId::Php => BinaryOp::Add,
-        "-" => BinaryOp::Sub, "*" => BinaryOp::Mul, "/" => BinaryOp::Div, "%" => BinaryOp::Mod,
-        "**" => BinaryOp::Pow, "==" | "===" => BinaryOp::Eq, "!=" | "!==" => BinaryOp::NotEq,
-        "<" => BinaryOp::Lt, "<=" => BinaryOp::LtEq, ">" => BinaryOp::Gt, ">=" => BinaryOp::GtEq,
-        "&&" | "and" => BinaryOp::And, "||" | "or" => BinaryOp::Or, "??" => BinaryOp::Coalesce,
-        "&" => BinaryOp::BitAnd, "|" => BinaryOp::BitOr, "^" => BinaryOp::BitXor,
-        "<<" => BinaryOp::Shl, ">>" => BinaryOp::Shr, ">>>" => BinaryOp::Ushr,
-        "in" => BinaryOp::In, "instanceof" => BinaryOp::Instanceof,
-        _ => { env.exprs.push(Expr::Ident(raw.to_string())); return; }
+    let Some(op) = map_binary_op(op_str, env.lang) else {
+        env.exprs.push(Expr::Ident(raw.to_string()));
+        return;
     };
+    let rhs = kids[kids.len() - 1];
+    if env.lang == LanguageId::Python
+        && matches!(op, BinaryOp::Is | BinaryOp::IsNot)
+        && node_text(rhs, env.src).trim() == "None"
+    {
+        env.tasks.push(DTask::FinishExpr(ExprFin::BinaryIdentRhs(op, "None".into())));
+        env.tasks.push(DTask::Expr(kids[0]));
+        return;
+    }
     env.tasks.push(DTask::FinishExpr(ExprFin::Binary(op)));
-    env.tasks.push(DTask::Expr(kids[kids.len() - 1]));
+    env.tasks.push(DTask::Expr(rhs));
     env.tasks.push(DTask::Expr(kids[0]));
 }
 
@@ -103,23 +106,9 @@ pub(crate) fn push_unary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
                     .trim()
             }
         });
-    let op = match op_str {
-        "!" | "not" => UnaryOp::Not,
-        "&mut" | "& mut" => UnaryOp::RefMut,
-        "&" => UnaryOp::Ref,
-        "*" => UnaryOp::Deref,
-        "++" => UnaryOp::Inc,
-        "--" => UnaryOp::Dec,
-        "-" => UnaryOp::Neg,
-        "~" => UnaryOp::BitNot,
-        _ => match node.kind() {
-            "inc_statement" => UnaryOp::Inc,
-            "dec_statement" => UnaryOp::Dec,
-            _ => {
-                env.exprs.push(Expr::Ident(raw.to_string()));
-                return;
-            }
-        },
+    let Some(op) = map_unary_op(op_str, node.kind(), env.lang) else {
+        env.exprs.push(Expr::Ident(raw.to_string()));
+        return;
     };
     let is_postfix = matches!(op, UnaryOp::Inc | UnaryOp::Dec)
         && (op_node.is_some_and(|o| o.start_byte() >= arg.end_byte())
@@ -165,7 +154,12 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             let left = Box::new(env.exprs.pop().expect("bin l"));
             Expr::Binary { op, left, right }
         }
+        ExprFin::BinaryIdentRhs(op, rhs) => {
+            let left = Box::new(env.exprs.pop().expect("bin l"));
+            Expr::Binary { op, left, right: Box::new(Expr::Ident(rhs)) }
+        }
         ExprFin::Unary { op, is_postfix } => Expr::Unary { op, is_postfix, operand: Box::new(env.exprs.pop().expect("un")) },
+        ExprFin::PostfixTry => Expr::PostfixTry(Box::new(env.exprs.pop().expect("try"))),
         ExprFin::Assign(op) => {
             let value = Box::new(env.exprs.pop().expect("as val"));
             let target = Box::new(env.exprs.pop().expect("as tgt"));
