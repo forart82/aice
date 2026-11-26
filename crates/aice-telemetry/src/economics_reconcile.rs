@@ -11,7 +11,7 @@ pub const PARALLEL_SLICE_GAP_MS: u64 = 12_000;
 pub const REPEAT_READ_WINDOW_MS: u64 = 90_000;
 pub const HEALTHY_SPLICE_ERR_PCT_MAX: f64 = 5.0;
 
-const CANONICAL_MCP_TOOLS_JSON: &str = r#"[{"name":"aice_read","description":"Read files, dirs, symbols, :L, search, or file list. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch in path or paths.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"targets":{"type":"array","items":{"type":"string"}},"symbol":{"type":"string"},"search":{"type":"string"},"filesOnly":{"type":"boolean"},"contextLines":{"type":"number"},"outline":{"type":"boolean"},"full":{"type":"boolean"},"depth":{"type":"number"},"maxTokens":{"type":"number"},"includeDeps":{"type":"boolean"},"includeCallers":{"type":"boolean"},"compact":{"type":"boolean"},"types":{"type":"boolean"},"stats":{"type":"boolean"},"json":{"type":"boolean"}},"required":[]}},{"name":"aice_splice","description":"Create, overwrite, or splice files/symbols/:L/hunks (aice_write). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code.","inputSchema":{"type":"object","properties":{"filePath":{"type":"string"},"path":{"type":"string"},"symbol":{"type":"string"},"code":{"type":"string"},"delete":{"type":"boolean"},"create":{"type":"boolean"},"force":{"type":"boolean"},"overwrite":{"type":"boolean"},"insertAfter":{"type":"string"},"insertBefore":{"type":"string"},"preserveDocs":{"type":"boolean"},"dryRun":{"type":"boolean"},"edits":{"type":"array","items":{"type":"object"}},"batch":{"type":"array","items":{"type":"object"}}}}}]"#;
+const CANONICAL_MCP_TOOLS_JSON: &str = r#"[{"name":"aice_read","description":"Read files, dirs, symbols, :L, search, or file list. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch in path or paths.","inputSchema":{"type":"object","properties":{"path":{"type":"string"},"paths":{"type":"array","items":{"type":"string"}},"targets":{"type":"array","items":{"type":"string"}},"symbol":{"type":"string"},"search":{"type":"string"},"filesOnly":{"type":"boolean"},"contextLines":{"type":"number"},"outline":{"type":"boolean"},"full":{"type":"boolean"},"depth":{"type":"number"},"maxTokens":{"type":"number"},"includeDeps":{"type":"boolean"},"includeCallers":{"type":"boolean"},"compact":{"type":"boolean"},"types":{"type":"boolean"},"stats":{"type":"boolean"},"json":{"type":"boolean"}},"required":[]}},{"name":"aice_splice","description":"Create, overwrite, or splice files/symbols/:L/hunks (aice_write). MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code.","inputSchema":{"type":"object","properties":{"filePath":{"type":"string"},"path":{"type":"string"},"symbol":{"type":"string"},"code":{"type":"string"},"delete":{"type":"boolean"},"create":{"type":"boolean"},"force":{"type":"boolean"},"overwrite":{"type":"boolean"},"insertAfter":{"type":"string"},"insertBefore":{"type":"string"},"preserveDocs":{"type":"boolean"},"dryRun":{"type":"boolean"},"edits":{"type":"array","items":{"type":"object"}},"batch":{"type":"array","items":{"type":"object"}}},"required":[]}}]"#;
 
 static RULE_BUDGET_CACHE: OnceLock<usize> = OnceLock::new();
 static MCP_BUDGET_CACHE: OnceLock<usize> = OnceLock::new();
@@ -139,7 +139,9 @@ pub(crate) fn reconcile_failures<'a>(
         let mut matched = None;
         for (i, err) in errs.iter().enumerate() {
             if !used[i]
-                && err.surface == "cli"
+                && (ev.surface.is_empty()
+                    || err.surface.is_empty()
+                    || err.surface == ev.surface)
                 && err.operation == ev.operation
                 && (ev.timestamp_ms == 0
                     || err.timestamp_ms == 0

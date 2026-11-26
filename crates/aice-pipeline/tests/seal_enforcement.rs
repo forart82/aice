@@ -535,3 +535,59 @@ fn c1_r2_g1_targeted_search_omitted_or_unmatched_leaves_mf_empty_in_gains() {
     }
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn wave3_f39_mcp_schemas_expose_required_empty_array_on_both_tools() {
+    use aice_governance::{JsonValue, parse_json};
+    use aice_pipeline::{build_tools_list_result, render_mcp_schema_files};
+
+    let list = build_tools_list_result();
+    let tools = list
+        .as_object()
+        .unwrap()
+        .get("tools")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(tools.len(), 2);
+    for expected_name in ["aice_read", "aice_splice"] {
+        let tool = tools
+            .iter()
+            .find(|t| {
+                t.as_object()
+                    .and_then(|o| o.get("name"))
+                    .and_then(JsonValue::as_str)
+                    == Some(expected_name)
+            })
+            .unwrap_or_else(|| panic!("missing tool {expected_name}"));
+        let req = tool
+            .as_object()
+            .unwrap()
+            .get("inputSchema")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("required")
+            .and_then(JsonValue::as_array);
+        assert_eq!(req, Some([].as_slice()), "tool {expected_name} missing required: []");
+    }
+
+    let rendered = render_mcp_schema_files();
+    let splice_raw = rendered
+        .iter()
+        .find(|(name, _)| *name == "aice_splice.json")
+        .map(|(_, body)| body.as_str())
+        .expect("aice_splice.json rendered");
+    let parsed = parse_json(splice_raw).expect("valid aice_splice.json");
+    let obj = parsed.as_object().unwrap();
+    for key in ["inputSchema", "parameters"] {
+        let req = obj
+            .get(key)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("required")
+            .and_then(JsonValue::as_array);
+        assert_eq!(req, Some([].as_slice()), "aice_splice.json {key} missing required: []");
+    }
+}

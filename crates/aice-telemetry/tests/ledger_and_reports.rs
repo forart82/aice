@@ -966,3 +966,263 @@ fn wave2_f32_excluded_and_suppressed_skip_bpe_while_recorded_rows_keep_exact_dua
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn wave3_f46_mcp_single_file_errors_deduplicate_1_to_1_without_double_counting() {
+    use aice_telemetry::CanonicalTelemetryCommand;
+
+    let tmp = unique_temp_dir("w3_f46");
+    let gains = tmp.join("gains.jsonl");
+    let ws = Path::new("/home/test/w3_f46_mcp_ws");
+    let env_empty = |_: &str| -> Option<String> { None };
+
+    // 1. Single-file MCP splice error: writes both <cli-error> (surface=mcp) and errors.jsonl (surface=mcp)
+    record_cli_failure_telemetry(
+        ws,
+        TelemetryOpKind::Splice,
+        "mcp",
+        "Pre-write syntax validation failed in src/a.ts",
+        Some("export function broken( {"),
+        Some(&gains),
+    );
+    record_error_event_with(
+        &RecordTelemetryErrorInput {
+            target_path: None,
+            project_root: Some(ws),
+            file_path: Some("src/a.ts"),
+            operation: "splice",
+            surface: "mcp",
+            agent: Some("mcp"),
+            error_message: "Pre-write syntax validation failed in src/a.ts",
+            wasted_input_tokens: Some(8),
+            explicit_telemetry_path: Some(&gains),
+        },
+        &env_empty,
+    );
+
+    // 2. Batch MCP splice error: writes ONLY errors.jsonl (surface=mcp)
+    record_error_event_with(
+        &RecordTelemetryErrorInput {
+            target_path: None,
+            project_root: Some(ws),
+            file_path: Some("<batch-splice>"),
+            operation: "splice",
+            surface: "mcp",
+            agent: Some("mcp"),
+            error_message: "Batch splice rollback: syntax error in src/b.ts",
+            wasted_input_tokens: Some(15),
+            explicit_telemetry_path: Some(&gains),
+        },
+        &env_empty,
+    );
+
+    // 3. Single-file MCP read error: writes both <cli-error> (surface=mcp) and errors.jsonl (surface=mcp)
+    record_cli_failure_telemetry(
+        ws,
+        TelemetryOpKind::Read,
+        "mcp",
+        "Target file not found: src/missing.ts",
+        None,
+        Some(&gains),
+    );
+    record_error_event_with(
+        &RecordTelemetryErrorInput {
+            target_path: None,
+            project_root: Some(ws),
+            file_path: Some("src/missing.ts"),
+            operation: "read",
+            surface: "mcp",
+            agent: Some("mcp"),
+            error_message: "Target file not found: src/missing.ts",
+            wasted_input_tokens: None,
+            explicit_telemetry_path: Some(&gains),
+        },
+        &env_empty,
+    );
+
+    let report = build_gain_report(&GainQuery {
+        project: None,
+        unique: false,
+        telemetry_path: Some(gains.clone()),
+        drop_ephemeral: false,
+    });
+    assert_eq!(report.economics.failed_retry_turns, 3, "3 MCP fails must NOT double-count as 5");
+    let splice_b = report
+        .economics
+        .by_command
+        .iter()
+        .find(|b| b.command == CanonicalTelemetryCommand::SpliceWrite)
+        .unwrap();
+    let read_b = report
+        .economics
+        .by_command
+        .iter()
+        .find(|b| b.command == CanonicalTelemetryCommand::Read)
+        .unwrap();
+    assert_eq!(splice_b.error_calls, 2);
+    assert_eq!(read_b.error_calls, 1);
+
+    // 4. Cross-surface isolation: simultaneous CLI + MCP single-file splice errors count as 2 (neither 1 nor 4)
+    let tmp2 = unique_temp_dir("w3_f46_cross");
+    let gains2 = tmp2.join("gains.jsonl");
+    let ws2 = Path::new("/home/test/w3_f46_cross_ws");
+    for surf in ["cli", "mcp"] {
+        record_cli_failure_telemetry(
+            ws2,
+            TelemetryOpKind::Splice,
+            surf,
+            "Symbol not found",
+            Some("fn bad() {}"),
+            Some(&gains2),
+        );
+        record_error_event_with(
+            &RecordTelemetryErrorInput {
+                target_path: None,
+                project_root: Some(ws2),
+                file_path: Some("src/lib.rs"),
+                operation: "splice",
+                surface: surf,
+                agent: Some(surf),
+                error_message: "Symbol not found",
+                wasted_input_tokens: Some(4),
+                explicit_telemetry_path: Some(&gains2),
+            },
+            &env_empty,
+        );
+    }
+    let report2 = build_gain_report(&GainQuery {
+        project: None,
+        unique: false,
+        telemetry_path: Some(gains2),
+        drop_ephemeral: false,
+    });
+    assert_eq!(report2.economics.failed_retry_turns, 2);
+
+    let _ = fs::remove_dir_all(&tmp);
+    let _ = fs::remove_dir_all(&tmp2);
+}
+
+#[test]
+fn wave3_f49_error_only_session_surfaces_in_gain_and_honors_project_filter() {
+    let tmp = unique_temp_dir("w3_f49");
+    let gains = tmp.join("gains.jsonl");
+    let env_empty = |_: &str| -> Option<String> { None };
+
+    // Record ONLY errors.jsonl rows (gains.jsonl intentionally absent!)
+    record_error_event_with(
+        &RecordTelemetryErrorInput {
+            target_path: None,
+            project_root: Some(Path::new("/home/test/w3_f49_alpha")),
+            file_path: Some("<batch-splice>"),
+            operation: "splice",
+            surface: "mcp",
+            agent: Some("mcp"),
+            error_message: "SyntaxFirewall rejected batch in alpha",
+            wasted_input_tokens: Some(42),
+            explicit_telemetry_path: Some(&gains),
+        },
+        &env_empty,
+    );
+    record_error_event_with(
+        &RecordTelemetryErrorInput {
+            target_path: None,
+            project_root: Some(Path::new("/home/test/w3_f49_beta")),
+            file_path: Some("<batch-splice>"),
+            operation: "splice",
+            surface: "cli",
+            agent: Some("cli"),
+            error_message: "SyntaxFirewall rejected batch in beta",
+            wasted_input_tokens: Some(18),
+            explicit_telemetry_path: Some(&gains),
+        },
+        &env_empty,
+    );
+    assert!(!gains.exists(), "gains.jsonl must remain absent for error-only test");
+
+    // 1. Global `--all` report surfaces both error-only projects with 100% splice error rate
+    let all_rep = build_gain_report(&GainQuery {
+        project: None,
+        unique: false,
+        telemetry_path: Some(gains.clone()),
+        drop_ephemeral: false,
+    });
+    assert_eq!(all_rep.total_operations, 0);
+    assert_eq!(all_rep.projects.len(), 2);
+    assert_eq!(all_rep.economics.failed_retry_turns, 2);
+    assert!((all_rep.economics.splice_error_rate_pct - 100.0).abs() < 0.01);
+    assert_eq!(all_rep.economics.end_to_end_verdict, "TOKEN-CONSUMING");
+    let names: Vec<&str> = all_rep.projects.iter().map(|p| p.project_name.as_str()).collect();
+    assert!(names.contains(&"w3_f49_alpha") && names.contains(&"w3_f49_beta"), "{names:?}");
+
+    // 2. Project filter selects ONLY the matching error-only project
+    let alpha_rep = build_gain_report(&GainQuery {
+        project: Some("w3_f49_alpha".to_string()),
+        unique: false,
+        telemetry_path: Some(gains.clone()),
+        drop_ephemeral: false,
+    });
+    assert_eq!(alpha_rep.projects.len(), 1);
+    assert_eq!(alpha_rep.projects[0].project_name, "w3_f49_alpha");
+    assert_eq!(alpha_rep.economics.failed_retry_turns, 1);
+    assert!((alpha_rep.economics.splice_error_rate_pct - 100.0).abs() < 0.01);
+    assert_eq!(alpha_rep.economics.end_to_end_verdict, "TOKEN-CONSUMING");
+
+    // 3. Unmatched project filter stays clean/empty
+    let miss_rep = build_gain_report(&GainQuery {
+        project: Some("w3_f49_nonexistent".to_string()),
+        unique: false,
+        telemetry_path: Some(gains.clone()),
+        drop_ephemeral: false,
+    });
+    assert!(miss_rep.projects.is_empty());
+    assert_eq!(miss_rep.economics.failed_retry_turns, 0);
+    assert_eq!(miss_rep.economics.splice_error_rate_pct, 0.0);
+    assert_eq!(miss_rep.economics.end_to_end_verdict, "NEUTRAL");
+
+    // 4. Normalized trailing-slash root between gains.jsonl and errors.jsonl does NOT double-count
+    let tmp_norm = unique_temp_dir("w3_f49_norm");
+    let gains_norm = tmp_norm.join("gains.jsonl");
+    meter_rich_payload(&TelemetryRichInput {
+        project_root: Path::new("/home/test/w3_f49_norm"),
+        file_label: "src/lib.rs",
+        op_kind: TelemetryOpKind::Read,
+        surface_label: "cli",
+        raw_baseline: "pub fn ok() -> i32 { 1 }\n",
+        emitted_payload: "fn ok() -> i32 = 1",
+        realistic_native_payload: None,
+        multi_files: &[],
+        language: None,
+        agent: None,
+        is_search_mode: false,
+        preserved_trivia_tokens: 0,
+        wasted_input_tokens: None,
+        explicit_telemetry_path: Some(&gains_norm),
+        record_ledger: true,
+        should_meter_bpe: true,
+    });
+    record_error_event_with(
+        &RecordTelemetryErrorInput {
+            target_path: None,
+            project_root: Some(Path::new("/home/test/w3_f49_norm/")),
+            file_path: Some("<batch-splice>"),
+            operation: "splice",
+            surface: "mcp",
+            agent: Some("mcp"),
+            error_message: "Syntax error",
+            wasted_input_tokens: Some(10),
+            explicit_telemetry_path: Some(&gains_norm),
+        },
+        &env_empty,
+    );
+    let norm_rep = build_gain_report(&GainQuery {
+        project: None,
+        unique: false,
+        telemetry_path: Some(gains_norm),
+        drop_ephemeral: false,
+    });
+    assert_eq!(norm_rep.projects.len(), 1);
+    assert_eq!(norm_rep.economics.failed_retry_turns, 1);
+
+    let _ = fs::remove_dir_all(&tmp);
+    let _ = fs::remove_dir_all(&tmp_norm);
+}

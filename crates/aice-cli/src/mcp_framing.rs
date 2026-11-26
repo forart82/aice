@@ -4,8 +4,8 @@ use aice_governance::{JsonValue, parse_json};
 
 use crate::mcp_framing_drain::drain_orphaned_body;
 use crate::mcp_framing_probe::{
-    HeaderProbe, find_header_end, inspect_header_state, read_chunk_into, starts_with_ci,
-    trim_ascii_slice,
+    HeaderProbe, find_header_end, inspect_header_state, parse_content_length_header,
+    read_chunk_into, starts_with_ci, trim_ascii_slice,
 };
 
 pub const MAX_MCP_FRAME_BYTES: usize = 64 * 1024 * 1024;
@@ -154,20 +154,6 @@ fn trim_leading_ws(buf: &mut Vec<u8>) {
     if skip > 0 {
         buf.drain(..skip);
     }
-}
-
-fn parse_content_length_header(headers: &str) -> Option<usize> {
-    for line in headers.lines() {
-        let trimmed = line.trim();
-        if trimmed
-            .get(..15)
-            .is_some_and(|p| p.eq_ignore_ascii_case("content-length:"))
-        {
-            let val = trimmed.get(15..).unwrap_or("").trim();
-            return val.parse::<usize>().ok();
-        }
-    }
-    None
 }
 
 fn parse_utf8_json(bytes: &[u8]) -> FrameEvent {

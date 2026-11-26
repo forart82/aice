@@ -90,18 +90,26 @@ pub(crate) fn confirm_header_at<R: Read>(
     }
 }
 
-fn has_valid_content_length(hdr_str: &str) -> bool {
-    let mut has_valid_cl = false;
-    for line in hdr_str.lines() {
-        let t = line.trim();
-        if starts_with_ci(t.as_bytes(), b"content-length:") {
-            if t.get(15..).unwrap_or("").trim().parse::<usize>().is_err() {
-                return false;
+pub(crate) fn parse_content_length_header(headers: &str) -> Option<usize> {
+    let mut found: Option<usize> = None;
+    for line in headers.lines() {
+        let trimmed = line.trim();
+        if starts_with_ci(trimmed.as_bytes(), b"content-length:") {
+            if found.is_some() {
+                return None;
             }
-            has_valid_cl = true;
+            let val = trimmed.get(15..).unwrap_or("").trim();
+            if val.is_empty() || !val.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            found = Some(val.parse::<usize>().ok()?);
         }
     }
-    has_valid_cl
+    found
+}
+
+fn has_valid_content_length(hdr_str: &str) -> bool {
+    parse_content_length_header(hdr_str).is_some()
 }
 
 pub(crate) fn trim_ascii_slice(slice: &[u8]) -> &[u8] {

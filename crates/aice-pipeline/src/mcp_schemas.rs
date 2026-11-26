@@ -84,6 +84,7 @@ fn splice_input_schema() -> JsonValue {
     obj(vec![
         ("type", jstr("object")),
         ("properties", splice_props),
+        ("required", JsonValue::Array(Vec::new())),
     ])
 }
 

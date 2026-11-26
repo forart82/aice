@@ -13,7 +13,7 @@ use crate::env::{
 use crate::error_log::load_non_benign_errors_by_project;
 use crate::gain_buckets::{
     accumulate_lang, accumulate_op, build_project_detail, finalize_lang, finalize_op,
-    get_errors_for_project, summarize_project,
+    get_errors_for_project, normalize_root, summarize_project,
 };
 pub use crate::gain_types::{
     FileGainBucket, FullGainReport, GainQuery, GainReport, LanguageBucket, OperationBucket,
@@ -39,13 +39,18 @@ pub fn summarize_ledger() -> GainReport {
     }
 }
 
-pub fn matches_project_filter(ev: &TelemetryEvent, filter: &str, cwd: &Path) -> bool {
+fn matches_project_root_and_name(
+    project_root: &str,
+    project_name: &str,
+    filter: &str,
+    cwd: &Path,
+) -> bool {
     let trimmed = filter.trim();
     if trimmed.is_empty() {
         return true;
     }
-    let ev_raw = Path::new(&ev.project_root);
-    let ev_canon = (!ev.project_root.is_empty()).then(|| canonicalize_or_normalize(ev_raw));
+    let ev_raw = Path::new(project_root);
+    let ev_canon = (!project_root.is_empty()).then(|| canonicalize_or_normalize(ev_raw));
     if trimmed == "." {
         let target_root = resolve_project_filter_target(Some("."), cwd);
         return ev_raw == find_project_root(cwd)
@@ -57,7 +62,7 @@ pub fn matches_project_filter(ev: &TelemetryEvent, filter: &str, cwd: &Path) -> 
             .file_name()
             .and_then(|s| s.to_str())
             .unwrap_or("");
-        return ev.project_name.eq_ignore_ascii_case(trimmed) || base.eq_ignore_ascii_case(trimmed);
+        return project_name.eq_ignore_ascii_case(trimmed) || base.eq_ignore_ascii_case(trimmed);
     }
     let cand = if Path::new(trimmed).is_absolute() {
         PathBuf::from(trimmed)
@@ -74,6 +79,25 @@ pub fn matches_project_filter(ev: &TelemetryEvent, filter: &str, cwd: &Path) -> 
         || ev_canon.as_deref() == Some(cand_root.as_path())
 }
 
+pub fn matches_project_filter(ev: &TelemetryEvent, filter: &str, cwd: &Path) -> bool {
+    matches_project_root_and_name(&ev.project_root, &ev.project_name, filter, cwd)
+}
+
+fn is_root_covered(proj_events: &BTreeMap<String, Vec<TelemetryEvent>>, err_root: &str) -> bool {
+    if proj_events.contains_key(err_root) {
+        return true;
+    }
+    let norm_err = normalize_root(err_root);
+    let is_bare = !err_root.contains('/') && !err_root.contains('\\') && err_root != "<unknown>";
+    proj_events.iter().any(|(existing_root, pevs)| {
+        (!norm_err.is_empty() && normalize_root(existing_root) == norm_err)
+            || (is_bare
+                && pevs
+                    .first()
+                    .is_some_and(|e| e.project_name.eq_ignore_ascii_case(err_root)))
+    })
+}
+
 pub fn build_gain_report(query: &GainQuery) -> FullGainReport {
     let ledger_path = resolve_gains_path_with(query.telemetry_path.as_deref(), &std_env);
     let mut events = load_telemetry_events(&ledger_path, query.drop_ephemeral);
@@ -82,7 +106,12 @@ pub fn build_gain_report(query: &GainQuery) -> FullGainReport {
         events.retain(|ev| ev.content_hash.is_empty() || seen.insert(ev.content_hash.clone()));
     }
     let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
-    if let Some(filter) = query.project.as_deref().filter(|s| !s.trim().is_empty()) {
+    let project_filter = query
+        .project
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    if let Some(filter) = project_filter {
         events.retain(|ev| matches_project_filter(ev, filter, &cwd));
     }
 
@@ -94,11 +123,36 @@ pub fn build_gain_report(query: &GainQuery) -> FullGainReport {
             .or_default()
             .push(ev.clone());
     }
+    for (err_root, err_list) in &errors_by_root {
+        let err_pname = err_list
+            .first()
+            .map(|e| e.project_name.as_str())
+            .unwrap_or("root");
+        if let Some(filter) = project_filter
+            && !matches_project_root_and_name(err_root, err_pname, filter, &cwd)
+        {
+            continue;
+        }
+        if is_root_covered(&proj_events, err_root) {
+            continue;
+        }
+        proj_events.entry(err_root.clone()).or_default();
+    }
 
     let mut all_errors = Vec::new();
     let mut projects = Vec::new();
     for (root, pevs) in &proj_events {
-        let pname = pevs.first().map(|e| e.project_name.as_str()).unwrap_or("root");
+        let pname = pevs
+            .first()
+            .map(|e| e.project_name.as_str())
+            .or_else(|| {
+                errors_by_root
+                    .get(root)
+                    .and_then(|es| es.first())
+                    .map(|e| e.project_name.as_str())
+            })
+            .or_else(|| Path::new(root).file_name().and_then(|s| s.to_str()))
+            .unwrap_or("root");
         let perrs = get_errors_for_project(&errors_by_root, root, pname);
         all_errors.extend(perrs.iter().cloned());
         projects.push(summarize_project(root, pname, pevs, &perrs));

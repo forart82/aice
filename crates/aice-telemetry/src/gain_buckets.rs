@@ -134,7 +134,7 @@ pub(crate) fn build_project_detail(
     }
 }
 
-fn normalize_root(raw: &str) -> String {
+pub(crate) fn normalize_root(raw: &str) -> String {
     let replaced = raw.trim().replace('\\', "/");
     let trimmed = replaced.trim_end_matches('/');
     if trimmed.is_empty() && replaced.starts_with('/') {

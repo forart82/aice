@@ -450,3 +450,161 @@ fn wave2_f32_mcp_frame_cap_shrink_and_non_ledger_dry_run() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn wave3_f38_f39_f46_f49_dup_content_length_schema_mcp_dedup_and_error_only_gain() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let bin = env!("CARGO_BIN_EXE_aice");
+    let run_aice = |args: &[&str], stdin_data: Option<&str>, cwd: &Path, aice_home: &Path| {
+        let mut cmd = Command::new(bin);
+        cmd.args(args)
+            .current_dir(cwd)
+            .env("HOME", aice_home)
+            .env("AICE_HOME", aice_home)
+            .env_remove("AICE_TELEMETRY_PATH")
+            .env_remove("AICE_TELEMETRY_ERRORS_PATH")
+            .env_remove("AICE_TELEMETRY_SUPPRESS")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if stdin_data.is_some() {
+            cmd.stdin(Stdio::piped());
+        }
+        let mut child = cmd.spawn().unwrap();
+        if let Some(input) = stdin_data {
+            child.stdin.as_mut().unwrap().write_all(input.as_bytes()).unwrap();
+        }
+        child.wait_with_output().unwrap()
+    };
+
+    // 1. F-38: Duplicate/conflicting/invalid Content-Length headers reject with ParseError (-32700)
+    let dup_conflict = concat!(
+        "Content-Length: 40\r\nContent-Length: 999\r\n\r\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":5,\"method\":\"ping\"}",
+        "Content-Length: 40\r\n\r\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":6,\"method\":\"ping\"}"
+    );
+    let mut r = McpFrameReader::new(Cursor::new(dup_conflict.as_bytes()));
+    assert!(matches!(r.next_frame().unwrap(), Some(FrameEvent::ParseError)));
+    assert!(matches!(r.next_frame().unwrap(), Some(FrameEvent::Message(_))));
+    assert!(r.next_frame().unwrap().is_none());
+
+    for bad_hdr in [
+        "Content-Length: 40\r\ncontent-length: 40\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}",
+        "Content-Length: 40\r\nContent-Length: bad\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}",
+        "Content-Length: +40\r\n\r\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"}",
+    ] {
+        let mut br = McpFrameReader::new(Cursor::new(bad_hdr.as_bytes()));
+        assert!(matches!(br.next_frame().unwrap(), Some(FrameEvent::ParseError)), "{bad_hdr}");
+        assert!(br.next_frame().unwrap().is_none(), "{bad_hdr}");
+    }
+
+    // 2. F-39: Both `aice_read` and `aice_splice` expose `"required": []` in `inputSchema`
+    let tools_list = build_tools_list_result();
+    let tools = tools_list.as_object().unwrap().get("tools").unwrap().as_array().unwrap();
+    assert_eq!(tools.len(), 2);
+    for tool in tools {
+        let req = tool
+            .as_object()
+            .unwrap()
+            .get("inputSchema")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("required")
+            .and_then(JsonValue::as_array);
+        assert_eq!(req, Some([].as_slice()), "missing required: [] on {tool:?}");
+    }
+
+    // End-to-end `aice mcp`: F-38 (-32700 + recovery) + F-39 (`tools/list` required: [])
+    let dir = temp_dir("w3_mcp_f38_f39");
+    let home = dir.join("aice_home");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("aice.config.json"), "{\"enabled\":true}\n").unwrap();
+    std::fs::write(dir.join("src/a.ts"), "export function alpha(): number { return 1; }\n").unwrap();
+    std::fs::write(dir.join("src/b.ts"), "export function beta(): number { return 2; }\n").unwrap();
+
+    let mcp_f38 = run_aice(&["mcp"], Some(dup_conflict), &dir, &home);
+    assert_eq!(mcp_f38.status.code(), Some(0));
+    let f38_out = String::from_utf8_lossy(&mcp_f38.stdout);
+    assert!(f38_out.contains("-32700"), "expected -32700 on duplicate Content-Length: {f38_out}");
+    assert!(!f38_out.contains("\"id\":5"), "smuggled id=5 must be rejected: {f38_out}");
+    assert!(f38_out.contains("\"id\":6"), "following valid ping id=6 must recover: {f38_out}");
+
+    let mcp_list = run_aice(
+        &["mcp"],
+        Some("{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}\n"),
+        &dir,
+        &home,
+    );
+    assert_eq!(mcp_list.status.code(), Some(0));
+    let list_json = aice_governance::parse_json(String::from_utf8_lossy(&mcp_list.stdout).trim())
+        .expect("valid tools/list json");
+    let rpc_tools = list_json
+        .as_object()
+        .unwrap()
+        .get("result")
+        .unwrap()
+        .as_object()
+        .unwrap()
+        .get("tools")
+        .unwrap()
+        .as_array()
+        .unwrap();
+    assert_eq!(rpc_tools.len(), 2);
+    for t in rpc_tools {
+        let req = t
+            .as_object()
+            .unwrap()
+            .get("inputSchema")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("required")
+            .and_then(JsonValue::as_array);
+        assert_eq!(req, Some([].as_slice()), "tools/list missing required: [] on {t:?}");
+    }
+
+    // 3. F-46 E2E: 1 single-file MCP splice fail + 1 batch MCP splice fail + 1 MCP read fail -> failedRetryTurns == 3
+    let f46_home = dir.join("f46_home");
+    let f46_msgs = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"aice_splice\",\"arguments\":{\"filePath\":\"src/a.ts\",\"symbol\":\"alpha\",\"code\":\"export function alpha( { broken ===\"}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"aice_splice\",\"arguments\":{\"code\":\"=== src/a.ts:alpha ===\\nexport function alpha(): number { return 11; }\\n=== src/b.ts:beta ===\\nexport function beta( { broken ===\\n\"}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"aice_read\",\"arguments\":{\"path\":\"src/does_not_exist.ts\"}}}\n",
+    );
+    let f46_mcp = run_aice(&["mcp"], Some(f46_msgs), &dir, &f46_home);
+    assert_eq!(f46_mcp.status.code(), Some(0));
+    let f46_gain = run_aice(&["gain", "--all", "--json"], None, &dir, &f46_home);
+    assert_eq!(f46_gain.status.code(), Some(0));
+    let f46_str = String::from_utf8_lossy(&f46_gain.stdout);
+    let f46_val = aice_governance::parse_json(&f46_str).expect("valid f46 gain json");
+    assert_eq!(
+        f46_val.as_object().unwrap().get("failedRetryTurns").and_then(JsonValue::as_u64),
+        Some(3),
+        "expected 3 failedRetryTurns (not 5): {f46_str}"
+    );
+
+    // 4. F-49 E2E: Only 1 failing batch splice into fresh AICE_HOME (no gains.jsonl) -> failedRetryTurns: 1, spliceErrorRatePct: 100
+    let f49_home = dir.join("f49_home");
+    let bad_batch = "=== src/a.ts:alpha ===\nexport function alpha(): number { return 99; }\n=== src/b.ts:beta ===\nexport function beta( { broken ===\n";
+    let f49_fail = run_aice(&["splice", "--stdin"], Some(bad_batch), &dir, &f49_home);
+    assert_eq!(f49_fail.status.code(), Some(1));
+    assert!(!f49_home.join("telemetry/gains.jsonl").exists());
+    assert!(f49_home.join("telemetry/errors.jsonl").is_file());
+
+    let f49_gain = run_aice(&["gain", "--all", "--json"], None, &dir, &f49_home);
+    assert_eq!(f49_gain.status.code(), Some(0));
+    let f49_str = String::from_utf8_lossy(&f49_gain.stdout);
+    let f49_val = aice_governance::parse_json(&f49_str).expect("valid f49 gain json");
+    let f49_obj = f49_val.as_object().unwrap();
+    assert_eq!(f49_obj.get("failedRetryTurns").and_then(JsonValue::as_u64), Some(1), "{f49_str}");
+    assert_eq!(f49_obj.get("spliceErrorRatePct").and_then(JsonValue::as_f64), Some(100.0), "{f49_str}");
+    assert_eq!(
+        f49_obj.get("endToEndVerdict").and_then(JsonValue::as_str),
+        Some("TOKEN-CONSUMING"),
+        "{f49_str}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
