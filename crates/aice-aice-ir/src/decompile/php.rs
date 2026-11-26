@@ -81,11 +81,23 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
 fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
     let mut decorators = extract_php_attrs(node, src);
-    let extends = child_by_kind(node, "base_clause")
-        .and_then(|bc| named_children(bc).into_iter().next())
-        .map(|n| node_text(n, src).trim().to_string())
-        .filter(|s| !s.is_empty());
-    let implements = child_by_kind(node, "class_interface_clause")
+    if node.kind() == "trait_declaration" {
+        decorators.insert(0, "trait".into());
+    } else if node.kind() == "interface_declaration" {
+        decorators.insert(0, "interface".into());
+    }
+    let mut base_parents: Vec<String> = child_by_kind(node, "base_clause")
+        .map(|bc| {
+            named_children(bc)
+                .into_iter()
+                .filter(|n| !is_comment_kind(n.kind()))
+                .map(|n| node_text(n, src).trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let extends = if base_parents.is_empty() { None } else { Some(base_parents.remove(0)) };
+    let mut implements: Vec<String> = child_by_kind(node, "class_interface_clause")
         .map(|ic| {
             named_children(ic).into_iter()
                 .map(|n| node_text(n, src).trim().to_string())
@@ -93,6 +105,9 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                 .collect()
         })
         .unwrap_or_default();
+    if node.kind() == "interface_declaration" && !base_parents.is_empty() {
+        implements.extend(base_parents);
+    }
     let is_abstract = child_by_kind(node, "abstract_modifier").is_some();
     let mut props = Vec::new();
     let mut methods = Vec::new();
@@ -139,7 +154,7 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                     let f = decompile_php_fn(ch, src, opts, mtr);
                     let accessor = if f.name == "__construct" { AccessorKind::Constructor } else { AccessorKind::Normal };
                     methods.push(MethodDecl {
-                        vis: mvis, is_static: node_text(ch, src).contains("static "), is_async: false,
+                        vis: mvis, is_static: child_by_kind(ch, "static_modifier").is_some(), is_async: false,
                         is_const: false, accessor, name: f.name, type_params: Vec::new(),
                         params: f.params, return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
                     });

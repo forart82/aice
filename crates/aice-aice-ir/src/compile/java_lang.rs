@@ -8,7 +8,7 @@ use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
-use crate::ir_code::{AccessorKind, ClassDecl, Expr, FnBody, FnDecl, MethodDecl, PropDecl};
+use crate::ir_code::{AccessorKind, ClassDecl, Expr, FnBody, FnDecl, MethodDecl, PropDecl, Stmt};
 use crate::ir_types::{EnumDecl, ParamDecl, TypeDecl};
 
 enum JavaNested<'a> {
@@ -184,6 +184,17 @@ fn emit_java_prop(ec: &mut EmitCtx, p: &PropDecl, ectx: &ExprEmitCtx) {
     ec.line(&format!("{}{st}{fin}{t} {}{init};", j_vis(p.vis), p.name));
 }
 
+fn emit_java_static_blocks(ec: &mut EmitCtx, blocks: &[Vec<Stmt>], ectx: &ExprEmitCtx) {
+    for sb in blocks {
+        ec.blank();
+        ec.line("static {");
+        ec.push();
+        emit_brace_stmts(sb, LanguageId::Java, ec, ectx, false);
+        ec.pop();
+        ec.line("}");
+    }
+}
+
 fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<String, Vec<JavaNested<'_>>>, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
@@ -195,7 +206,7 @@ fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMa
         ec.push();
         let variants: Vec<&PropDecl> = cd.props.iter().filter(|p| has_attr(&p.trivia, "variant")).collect();
         let fields: Vec<&PropDecl> = cd.props.iter().filter(|p| !has_attr(&p.trivia, "variant")).collect();
-        let has_body = !fields.is_empty() || !cd.methods.is_empty() || !kids.is_empty();
+        let has_body = !fields.is_empty() || !cd.static_blocks.is_empty() || !cd.methods.is_empty() || !kids.is_empty();
         for (idx, v) in variants.iter().enumerate() {
             let entry = match &v.init {
                 Some(Expr::Call { args, .. }) => {
@@ -209,6 +220,7 @@ fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMa
             ec.line(&format!("{entry}{sep}"));
         }
         for p in fields { emit_java_prop(ec, p, ectx); }
+        emit_java_static_blocks(ec, &cd.static_blocks, ectx);
         for m in &cd.methods { emit_java_method(ec, m, &cd.name, ectx); }
         emit_java_nested_kids(ec, path, kids, nested, ectx);
         ec.pop();
@@ -224,6 +236,7 @@ fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMa
     }
     ec.push();
     for p in &cd.props { emit_java_prop(ec, p, ectx); }
+    emit_java_static_blocks(ec, &cd.static_blocks, ectx);
     for m in &cd.methods { emit_java_method(ec, m, &cd.name, ectx); }
     emit_java_nested_kids(ec, path, kids, nested, ectx);
     ec.pop();

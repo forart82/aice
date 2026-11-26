@@ -55,7 +55,7 @@ fn emit_dart_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
             let sep = if idx + 1 == variants.len() { if has_body { ";" } else { "" } } else { "," };
             ec.line(&format!("{entry}{sep}"));
         }
-        emit_dart_props(ec, &fields);
+        emit_dart_props(ec, &fields, ectx);
         for m in &cd.methods { emit_dart_method(ec, m, &cd.name, &cd.props, ectx); }
         ec.pop();
         ec.line("}");
@@ -77,18 +77,19 @@ fn emit_dart_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     }
     ec.push();
     let all_props: Vec<&PropDecl> = cd.props.iter().collect();
-    emit_dart_props(ec, &all_props);
+    emit_dart_props(ec, &all_props, ectx);
     for m in &cd.methods { emit_dart_method(ec, m, &cd.name, &cd.props, ectx); }
     ec.pop();
     ec.line("}");
 }
 
-fn emit_dart_props(ec: &mut EmitCtx, props: &[&PropDecl]) {
+fn emit_dart_props(ec: &mut EmitCtx, props: &[&PropDecl], ectx: &ExprEmitCtx) {
     for p in props {
         let st = if p.is_static { "static " } else { "" };
         let fin = if p.is_readonly { "final " } else { "" };
         let t = p.ty.as_ref().map(emit_dart_type).unwrap_or_else(|| "dynamic".into());
-        ec.line(&format!("{st}{fin}{t} {};", p.name));
+        let init = p.init.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Dart, ectx))).unwrap_or_default();
+        ec.line(&format!("{st}{fin}{t} {}{init};", p.name));
     }
 }
 

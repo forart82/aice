@@ -2,7 +2,10 @@ use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, strip_quotes, with_ts_root};
-use crate::decompile::dart_params::{dart_params, decompile_dart_enum, decompile_dart_extension, decompile_dart_mixin};
+use crate::decompile::dart_params::{
+    dart_params, decompile_dart_enum, decompile_dart_extension, decompile_dart_mixin,
+    extract_dart_field_init,
+};
 use crate::decompile::kotlin_dart::{extract_dart_heritage, extract_dart_type_params};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
@@ -177,11 +180,12 @@ fn extract_dart_member(
                     .unwrap_or_else(|| node_text(id, src).split('=').next().unwrap_or("f"))
                     .trim()
                     .to_string();
+                let init = extract_dart_field_init(id, src);
+                let is_ro = raw.contains("final ") || raw.contains("const ");
                 props.push(PropDecl {
                     vis: if pnm.starts_with('_') { Visibility::Private } else { Visibility::Public },
                     name: pnm, aliases: Vec::new(), is_static: raw.contains("static "),
-                    is_readonly: raw.contains("final ") || raw.contains("const "),
-                    is_mut: !raw.contains("final "), is_optional: false, ty: ty.clone(), init: None, trivia: tr.clone(),
+                    is_readonly: is_ro, is_mut: !is_ro, is_optional: false, ty: ty.clone(), init, trivia: tr.clone(),
                 });
             }
         }

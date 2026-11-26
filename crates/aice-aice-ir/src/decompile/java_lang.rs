@@ -8,8 +8,15 @@ use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
-use crate::ir_code::{AccessorKind, ClassDecl, Expr, FnBody, MethodDecl, PropDecl};
+use crate::ir_code::{AccessorKind, ClassDecl, Expr, FnBody, MethodDecl, PropDecl, Stmt};
 use crate::ir_types::{EnumDecl, EnumVariant, ParamDecl, TypeDecl, TypeKind, VariantPayload};
+
+#[derive(Default)]
+struct JavaBodyMembers {
+    props: Vec<PropDecl>,
+    methods: Vec<MethodDecl>,
+    static_blocks: Vec<Vec<Stmt>>,
+}
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     with_ts_root(tree, |root| {
@@ -89,8 +96,7 @@ fn decompile_java_enum(
         None => name.clone(),
     };
     let mut consts: Vec<(String, Option<Vec<Expr>>, Trivia)> = Vec::new();
-    let mut props = Vec::new();
-    let mut methods = Vec::new();
+    let mut members = JavaBodyMembers::default();
     let mut nested = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
         for c in named_children(body) {
@@ -107,17 +113,17 @@ fn decompile_java_enum(
                     });
                 consts.push((vn, args, ctr));
             } else if c.kind() == "enum_body_declarations" {
-                decompile_java_body_members(c, &name, &cur_path, src, opts, &mut props, &mut methods, &mut nested);
+                decompile_java_body_members(c, &name, &cur_path, src, opts, &mut members, &mut nested);
             }
         }
     }
     let has_args = consts.iter().any(|(_, a, _)| a.is_some());
-    let is_rich = has_args || !props.is_empty() || !methods.is_empty();
+    let is_rich = has_args || !members.props.is_empty() || !members.methods.is_empty() || !members.static_blocks.is_empty();
     if is_rich {
         let mut decorators = Vec::new();
         if let Some(p) = parent { decorators.push(format!("nested({p})")); }
         decorators.push("enum".into());
-        let mut all_props = Vec::with_capacity(consts.len() + props.len());
+        let mut all_props = Vec::with_capacity(consts.len() + members.props.len());
         for (vn, args, mut ctr) in consts {
             push_attrs_to_trivia(&mut ctr, vec!["@variant".into()]);
             let init = args.map(|a| Expr::Call {
@@ -132,11 +138,11 @@ fn decompile_java_enum(
                 is_readonly: false, is_mut: false, is_optional: false, ty: None, init, trivia: ctr,
             });
         }
-        all_props.extend(props);
+        all_props.extend(members.props);
         out.push(AiceItem::Class(ClassDecl {
             vis, is_abstract: false, decorators, name, type_params: Vec::new(),
             primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
-            props: all_props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+            props: all_props, methods: members.methods, static_blocks: members.static_blocks, trivia: tr, span: node_span(node),
         }));
     } else {
         if let Some(p) = parent {
@@ -157,8 +163,7 @@ fn decompile_java_body_members(
     cur_path: &str,
     src: &str,
     opts: &TranspileOpts,
-    props: &mut Vec<PropDecl>,
-    methods: &mut Vec<MethodDecl>,
+    out: &mut JavaBodyMembers,
     nested_out: &mut Vec<AiceItem>,
 ) {
     for ch in named_children(body) {
@@ -166,6 +171,12 @@ fn decompile_java_body_members(
         let mtr = collect_trivia(ch, src, opts);
         let mvis = java_vis(ch, src);
         match ch.kind() {
+            "static_initializer" => {
+                let blk = child_by_kind(ch, "block")
+                    .or_else(|| ch.child_by_field_name("body"))
+                    .unwrap_or(ch);
+                out.static_blocks.push(decompile_block(blk, src, LanguageId::Java, opts));
+            }
             "field_declaration" => {
                 let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Java));
                 let mod_txt = child_by_kind(ch, "modifiers").map(|m| node_text(m, src)).unwrap_or("");
@@ -173,7 +184,7 @@ fn decompile_java_body_members(
                     if d.kind() == "variable_declarator" {
                         let fnm = field_text(d, "name", src).unwrap_or("f").to_string();
                         let init = d.child_by_field_name("value").map(|v| decompile_expr(v, src, LanguageId::Java));
-                        props.push(PropDecl {
+                        out.props.push(PropDecl {
                             name: fnm, aliases: Vec::new(), vis: mvis,
                             is_static: mod_txt.contains("static"), is_readonly: mod_txt.contains("final"),
                             is_mut: !mod_txt.contains("final"), is_optional: false, ty: ty.clone(), init, trivia: mtr.clone(),
@@ -189,7 +200,7 @@ fn decompile_java_body_members(
                 let ret = if is_ctor { None } else { field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Java)) };
                 let mbody = ch.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, LanguageId::Java, opts))).unwrap_or(FnBody::SignatureOnly);
                 let mod_txt = child_by_kind(ch, "modifiers").map(|m| node_text(m, src)).unwrap_or("");
-                methods.push(MethodDecl {
+                out.methods.push(MethodDecl {
                     vis: mvis, is_static: mod_txt.contains("static"), is_async: false, is_const: false,
                     accessor: if is_ctor { AccessorKind::Constructor } else { AccessorKind::Normal },
                     name: if is_ctor { "constructor".into() } else { mname },
@@ -219,10 +230,9 @@ fn decompile_java_class(
         Some(p) => format!("{p}.{name}"),
         None => name.clone(),
     };
-    let mut props = Vec::new();
-    let mut methods = Vec::new();
+    let mut members = JavaBodyMembers::default();
     if let Some(body) = node.child_by_field_name("body") {
-        decompile_java_body_members(body, &name, &cur_path, src, opts, &mut props, &mut methods, nested_out);
+        decompile_java_body_members(body, &name, &cur_path, src, opts, &mut members, nested_out);
     }
     let mut decorators = Vec::new();
     if let Some(p) = parent { decorators.push(format!("nested({p})")); }
@@ -234,7 +244,8 @@ fn decompile_java_class(
     ClassDecl {
         vis, is_abstract: false, decorators, name, type_params,
         primary_ctor, extends: None, implements: Vec::new(),
-        props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+        props: members.props, methods: members.methods, static_blocks: members.static_blocks,
+        trivia: tr, span: node_span(node),
     }
 }
 

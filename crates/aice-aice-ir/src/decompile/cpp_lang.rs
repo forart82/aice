@@ -1,6 +1,9 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
+use crate::decompile::c_cpp::{
+    build_c_return_type, extract_c_type_quals, find_c_fn_declarator, prepend_c_type_quals,
+};
 use crate::decompile::c_lang::unwrap_c_declarator;
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::stmt_common::decompile_block;
@@ -89,7 +92,7 @@ fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                     else { Visibility::Private };
                 }
                 "field_declaration" | "declaration" => {
-                    if let Some((fn_decl, ret_quals)) = find_cpp_method_fn_decl(ch) {
+                    if let Some((fn_decl, ret_quals)) = find_c_fn_declarator(ch, src) {
                         methods.push(decompile_cpp_method_proto(ch, &name, cur_vis, fn_decl, &ret_quals, Vec::new(), src, opts));
                     } else if ch.kind() == "field_declaration" {
                         let fnm = field_text(ch, "declarator", src).unwrap_or("f").trim().to_string();
@@ -109,7 +112,7 @@ fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                         if sub.kind() == "function_definition" {
                             methods.push(decompile_cpp_method_def(sub, &name, cur_vis, tps.clone(), src, opts));
                         } else if matches!(sub.kind(), "field_declaration" | "declaration")
-                            && let Some((fn_decl, ret_quals)) = find_cpp_method_fn_decl(sub)
+                            && let Some((fn_decl, ret_quals)) = find_c_fn_declarator(sub, src)
                         {
                             methods.push(decompile_cpp_method_proto(sub, &name, cur_vis, fn_decl, &ret_quals, tps.clone(), src, opts));
                         }
@@ -137,24 +140,6 @@ fn extract_cpp_bases(node: Node<'_>, src: &str) -> (Option<String>, Vec<String>)
         }
     }
     if bases.is_empty() { (None, Vec::new()) } else { let first = bases.remove(0); (Some(first), bases) }
-}
-
-fn find_cpp_method_fn_decl(node: Node<'_>) -> Option<(Node<'_>, String)> {
-    let mut cur = node.child_by_field_name("declarator")?;
-    let mut quals = String::new();
-    while matches!(cur.kind(), "pointer_declarator" | "reference_declarator") {
-        quals.push(if cur.kind() == "reference_declarator" { '&' } else { '*' });
-        cur = cur.child_by_field_name("declarator")
-            .or_else(|| named_children(cur).into_iter().find(|c| {
-                matches!(c.kind(), "function_declarator" | "pointer_declarator" | "reference_declarator")
-            }))?;
-    }
-    if cur.kind() != "function_declarator"
-        || cur.child_by_field_name("declarator").is_some_and(|d| d.kind() == "parenthesized_declarator")
-    {
-        return None;
-    }
-    Some((cur, quals))
 }
 
 fn collect_cpp_method_attrs(node: Node<'_>, fn_decl: Option<Node<'_>>, is_proto: bool, src: &str) -> (Vec<String>, bool) {
@@ -203,7 +188,7 @@ fn decompile_cpp_method_proto(
     let mname = field_text(fn_decl, "declarator", src).unwrap_or("method").trim().to_string();
     let accessor = if mname == cls_name { AccessorKind::Constructor } else { AccessorKind::Normal };
     let params = fn_decl.child_by_field_name("parameters").map(|pl| extract_cpp_params(pl, src)).unwrap_or_default();
-    let return_type = field_text(ch, "type", src).map(|t| map_type_str(&format!("{}{ret_quals}", t.trim()), LanguageId::Cpp));
+    let return_type = build_c_return_type(ch, ret_quals, src, LanguageId::Cpp);
     let is_const = node_text(fn_decl, src).contains(") const");
     MethodDecl {
         vis, is_static, is_async: false, is_const, accessor, name: mname,
@@ -215,7 +200,7 @@ fn decompile_cpp_method_def(
     ch: Node<'_>, cls_name: &str, vis: Visibility, type_params: Vec<TypeParam>, src: &str, opts: &TranspileOpts,
 ) -> MethodDecl {
     let mut f = decompile_cpp_fn(ch, src, opts, collect_trivia(ch, src, opts));
-    let fn_decl = find_cpp_method_fn_decl(ch).map(|(fd, _)| fd);
+    let fn_decl = find_c_fn_declarator(ch, src).map(|(fd, _)| fd);
     let (attrs, is_static) = collect_cpp_method_attrs(ch, fn_decl, false, src);
     push_attrs_to_trivia(&mut f.trivia, attrs);
     let accessor = if f.name == cls_name { AccessorKind::Constructor } else { AccessorKind::Normal };
@@ -231,10 +216,12 @@ fn extract_cpp_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
     for pd in named_children(pl) {
         if matches!(pd.kind(), "parameter_declaration" | "optional_parameter_declaration") {
             let raw_ty = field_text(pd, "type", src).unwrap_or("auto").trim();
+            let quals = extract_c_type_quals(pd, src);
             let (pnm, ptrs) = pd.child_by_field_name("declarator")
                 .map(|d| unwrap_c_declarator(d, src))
                 .unwrap_or_else(|| ("p".into(), String::new()));
-            let pty = Some(map_type_str(&format!("{raw_ty}{ptrs}"), LanguageId::Cpp));
+            let full_ty = prepend_c_type_quals(&quals, raw_ty, &ptrs);
+            let pty = Some(map_type_str(&full_ty, LanguageId::Cpp));
             let default = pd.child_by_field_name("default_value")
                 .map(|dv| crate::decompile::expr_common::decompile_expr(dv, src, LanguageId::Cpp));
             params.push(ParamDecl {
@@ -247,9 +234,9 @@ fn extract_cpp_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
 }
 
 fn decompile_cpp_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
-    let found = find_cpp_method_fn_decl(node);
+    let found = find_c_fn_declarator(node, src);
     let ret_quals = found.as_ref().map(|(_, q)| q.as_str()).unwrap_or("");
-    let return_type = field_text(node, "type", src).map(|t| map_type_str(&format!("{}{ret_quals}", t.trim()), LanguageId::Cpp));
+    let return_type = build_c_return_type(node, ret_quals, src, LanguageId::Cpp);
     let fn_decl = found.map(|(fd, _)| fd).or_else(|| {
         node.child_by_field_name("declarator")
             .and_then(|d| if d.kind() == "function_declarator" { Some(d) } else { child_by_kind(d, "function_declarator") })

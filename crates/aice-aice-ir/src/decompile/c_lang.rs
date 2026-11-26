@@ -1,6 +1,10 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
+use crate::decompile::c_cpp::{
+    build_c_return_type, extract_c_type_quals, find_c_fn_declarator, prepend_c_type_quals,
+    unwrap_c_param_declarator,
+};
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
@@ -95,25 +99,37 @@ fn extract_c_struct(node: Node<'_>, name: String, src: &str, tr: Trivia) -> Type
 fn decompile_c_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
     let raw = node_text(node, src);
     let vis = if raw.trim_start().starts_with("static ") { Visibility::Private } else { Visibility::Public };
-    let return_type = field_text(node, "type", src).map(|t| map_type_str(t, LanguageId::C));
-    let decl = node.child_by_field_name("declarator");
-    let fn_decl = decl.and_then(|d| if d.kind() == "function_declarator" { Some(d) } else { child_by_kind(d, "function_declarator") });
+    let found = find_c_fn_declarator(node, src);
+    let ret_quals = found.as_ref().map(|(_, q)| q.as_str()).unwrap_or("");
+    let return_type = build_c_return_type(node, ret_quals, src, LanguageId::C);
+    let fn_decl = found.map(|(fd, _)| fd).or_else(|| {
+        node.child_by_field_name("declarator").and_then(|d| {
+            if d.kind() == "function_declarator" { Some(d) } else { child_by_kind(d, "function_declarator") }
+        })
+    });
     let name = fn_decl.and_then(|d| field_text(d, "declarator", src)).unwrap_or("fn_anon").trim().to_string();
     let mut params = Vec::new();
     if let Some(pl) = fn_decl.and_then(|d| d.child_by_field_name("parameters")) {
-        for pd in named_children(pl) {
-            if pd.kind() == "parameter_declaration" {
-                let raw_ty = field_text(pd, "type", src).unwrap_or("void").trim();
-                let (pnm, ptrs) = pd.child_by_field_name("declarator")
-                    .map(|d| unwrap_c_declarator(d, src))
-                    .unwrap_or_else(|| ("p".into(), String::new()));
-                let full_ty = format!("{raw_ty}{ptrs}");
-                let pty = Some(map_type_str(&full_ty, LanguageId::C));
-                params.push(ParamDecl {
-                    name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
-                    is_optional: false, is_rest: false, ty: pty, default: None, trivia: Trivia::default(),
-                });
+        let pdecls: Vec<Node<'_>> = named_children(pl)
+            .into_iter()
+            .filter(|pd| pd.kind() == "parameter_declaration")
+            .collect();
+        for pd in &pdecls {
+            let raw_ty = field_text(*pd, "type", src).unwrap_or("void").trim();
+            let quals = extract_c_type_quals(*pd, src);
+            let decl_node = pd.child_by_field_name("declarator");
+            if pdecls.len() == 1 && decl_node.is_none() && raw_ty == "void" && quals.is_empty() {
+                continue;
             }
+            let (pnm, ptrs) = decl_node
+                .map(|d| unwrap_c_declarator(d, src))
+                .unwrap_or_else(|| ("p".into(), String::new()));
+            let full_ty = prepend_c_type_quals(&quals, raw_ty, &ptrs);
+            let pty = Some(map_type_str(&full_ty, LanguageId::C));
+            params.push(ParamDecl {
+                name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
+                is_optional: false, is_rest: false, ty: pty, default: None, trivia: Trivia::default(),
+            });
         }
     }
     let body = node.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, LanguageId::C, opts))).unwrap_or(FnBody::SignatureOnly);
@@ -123,21 +139,6 @@ fn decompile_c_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -
     }
 }
 
-pub(crate) fn unwrap_c_declarator(mut node: Node<'_>, src: &str) -> (String, String) {
-    let mut quals = String::new();
-    while matches!(node.kind(), "pointer_declarator" | "reference_declarator" | "abstract_pointer_declarator") {
-        if node.kind() == "reference_declarator" {
-            quals.push('&');
-        } else {
-            quals.push('*');
-        }
-        if let Some(inner) = node.child_by_field_name("declarator").or_else(|| named_children(node).into_iter().next()) {
-            node = inner;
-        } else {
-            break;
-        }
-    }
-    let name = node_text(node, src).trim().trim_start_matches(['*', '&']).trim().to_string();
-    let clean = if name.is_empty() { "p".to_string() } else { name };
-    (clean, quals)
+pub(crate) fn unwrap_c_declarator(node: Node<'_>, src: &str) -> (String, String) {
+    unwrap_c_param_declarator(node, src)
 }
