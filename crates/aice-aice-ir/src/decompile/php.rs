@@ -12,7 +12,9 @@ use crate::ir_types::ParamDecl;
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     with_ts_root(tree, |root| {
         let mut m = AiceModule::new(LanguageId::Php, "php");
-        for ch in named_children(root) {
+        let mut seen_ns = 0usize;
+        let mut stack: Vec<Node<'_>> = named_children(root).into_iter().rev().collect();
+        while let Some(ch) = stack.pop() {
             if is_comment_kind(ch.kind()) { continue; }
             let tr = collect_trivia(ch, src, opts);
             match ch.kind() {
@@ -21,8 +23,26 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: tr, span: node_span(ch) });
                 }
                 "namespace_definition" => {
-                    if let Some(nm) = field_text(ch, "name", src) {
-                        m.module_name = nm.trim().replace('\\', "/");
+                    let name = field_text(ch, "name", src).map(str::trim).filter(|s| !s.is_empty());
+                    if let Some(nm) = name {
+                        if seen_ns == 0 && m.module_name == "php" {
+                            m.module_name = nm.replace('\\', "/");
+                        } else {
+                            m.items.push(AiceItem::Directive {
+                                text: format!("namespace {nm};"),
+                                trivia: tr,
+                                span: node_span(ch),
+                            });
+                        }
+                    }
+                    seen_ns += 1;
+                    if let Some(body) = ch
+                        .child_by_field_name("body")
+                        .or_else(|| child_by_kind(ch, "compound_statement"))
+                    {
+                        for item in named_children(body).into_iter().rev() {
+                            stack.push(item);
+                        }
                     }
                 }
                 "namespace_use_declaration" => {

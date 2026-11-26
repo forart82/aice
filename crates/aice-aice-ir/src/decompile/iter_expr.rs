@@ -4,7 +4,7 @@ use tree_sitter::Node;
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
 use crate::decompile::expr_lit::{parse_dollar_interp, parse_interp_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
-use crate::decompile::iter_expr_call::{push_call_task, push_php_array_task};
+use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task};
 use crate::decompile::iter_expr_fin::{
     push_binary_task, push_lambda_task, push_unary_task,
 };
@@ -114,10 +114,20 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         }
         "regex" => env.exprs.push(Expr::Literal(LiteralVal::Regex(raw.to_string()))),
         "ternary_expression" | "conditional_expression" | "if_expression" => {
-            let kids = named_children(node);
-            let cond = node.child_by_field_name("condition").or_else(|| kids.first().copied());
-            let then_n = node.child_by_field_name("consequence").or_else(|| kids.get(1).copied());
-            let else_n = node.child_by_field_name("alternative").or_else(|| kids.get(2).copied()).map(|e| {
+            let kids: Vec<_> = named_children(node)
+                .into_iter()
+                .filter(|c| !is_comment_kind(c.kind()))
+                .collect();
+            let (cond, then_n, raw_else) = if env.lang == LanguageId::Python && node.kind() == "conditional_expression" {
+                (kids.get(1).copied(), kids.first().copied(), kids.get(2).copied())
+            } else {
+                (
+                    node.child_by_field_name("condition").or_else(|| kids.first().copied()),
+                    node.child_by_field_name("consequence").or_else(|| kids.get(1).copied()),
+                    node.child_by_field_name("alternative").or_else(|| kids.get(2).copied()),
+                )
+            };
+            let else_n = raw_else.map(|e| {
                 if e.kind() == "else_clause" {
                     named_children(e).into_iter().find(|c| !is_comment_kind(c.kind())).unwrap_or(e)
                 } else {
@@ -224,38 +234,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             env.tasks.push(DTask::FinishExpr(ExprFin::StructExpr { sname, slots }));
             for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }
         }
-        "object" | "dictionary" | "hash" | "set_or_map_literal" => {
-            let non_ty: Vec<_> = named_children(node).into_iter()
-                .filter(|c| !matches!(c.kind(), "type_arguments" | "type_argument_list")).collect();
-            let (mut slots, mut vals) = (Vec::new(), Vec::new());
-            for ch in &non_ty {
-                match ch.kind() {
-                    "pair" | "field_initializer" | "map_entry" => {
-                        let k = field_text(*ch, "key", env.src).or_else(|| field_text(*ch, "field", env.src))
-                            .or_else(|| field_text(*ch, "name", env.src))
-                            .or_else(|| named_children(*ch).into_iter().next().map(|n| node_text(n, env.src))).map(strip_quotes);
-                        let vn = ch.child_by_field_name("value").or_else(|| named_children(*ch).into_iter().last());
-                        if let (Some(key), Some(v)) = (k, vn) { slots.push(ObjSlot::Field(key)); vals.push(v); }
-                    }
-                    "spread_element" => {
-                        if let Some(inner) = named_children(*ch).into_iter().next() {
-                            slots.push(ObjSlot::Spread);
-                            vals.push(inner);
-                        }
-                    }
-                    "shorthand_property_identifier" | "shorthand_property_identifier_pattern" => {
-                        slots.push(ObjSlot::Shorthand);
-                        vals.push(*ch);
-                    }
-                    _ => {}
-                }
-            }
-            if slots.is_empty() && !non_ty.is_empty() { env.exprs.push(Expr::Ident(raw.to_string())); }
-            else {
-                env.tasks.push(DTask::FinishExpr(ExprFin::Object(slots)));
-                for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }
-            }
-        }
+        "object" | "dictionary" | "hash" | "set_or_map_literal" => push_object_task(env, node, raw),
         "array_creation_expression" => push_php_array_task(env, node),
         "array" | "array_expression" | "list" | "array_literal" | "list_literal" => {
             let xs: Vec<_> = named_children(node).into_iter()
@@ -264,7 +243,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             for c in xs.into_iter().rev() { env.tasks.push(DTask::Expr(c)); }
         }
         "arrow_function" | "closure_expression" | "lambda" | "lambda_expression"
-        | "function_expression" | "function_declaration" => push_lambda_task(env, node),
+        | "function_expression" | "function_declaration" | "method_definition" => push_lambda_task(env, node),
         "type_cast_expression" | "as_expression" => {
             let val = node.child_by_field_name("value").or_else(|| named_children(node).into_iter().next());
             let ty = node.child_by_field_name("type").or_else(|| named_children(node).into_iter().nth(1));

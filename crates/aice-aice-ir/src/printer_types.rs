@@ -7,9 +7,13 @@ pub(crate) fn push_type<'a>(tasks: &mut Vec<PTask<'a>>, ty: &'a AiceType, out: &
     match ty {
         AiceType::Primitive(p) => out.push_str(p.aice_name()),
         AiceType::Raw(s) => {
-            out.push('"');
-            out.push_str(&escape_str(s));
-            out.push('"');
+            if let Some((clean, _)) = format_quoted_str_lit_union(s) {
+                out.push_str(&clean);
+            } else {
+                out.push('"');
+                out.push_str(&escape_str(s));
+                out.push('"');
+            }
         }
         AiceType::Array(inner) => {
             tasks.push(PTask::Lit("]"));
@@ -42,7 +46,8 @@ pub(crate) fn push_type<'a>(tasks: &mut Vec<PTask<'a>>, ty: &'a AiceType, out: &
             out.push_str("Result[");
         }
         AiceType::Option(inner) => {
-            let wrap = matches!(inner.as_ref(), AiceType::Union(_) | AiceType::Intersection(_) | AiceType::Fn { .. });
+            let wrap = matches!(inner.as_ref(), AiceType::Union(_) | AiceType::Intersection(_) | AiceType::Fn { .. })
+                || matches!(inner.as_ref(), AiceType::Raw(s) if format_quoted_str_lit_union(s).is_some_and(|(_, is_u)| is_u));
             if wrap {
                 tasks.push(PTask::Lit(")?"));
                 tasks.push(PTask::Ty(inner));
@@ -134,4 +139,84 @@ pub(crate) fn push_pattern<'a>(tasks: &mut Vec<PTask<'a>>, pat: &'a Pattern, out
             tasks.push(PTask::Ty(ty));
         }
     }
+}
+
+fn format_quoted_str_lit_union(raw: &str) -> Option<(String, bool)> {
+    let trimmed = raw.trim();
+    let body = trimmed.strip_prefix('|').unwrap_or(trimmed).trim();
+    let parts = split_top_level_pipes(body)?;
+    if parts.is_empty() {
+        return None;
+    }
+    let mut has_quoted = false;
+    for &p in &parts {
+        if is_single_line_quoted_str(p) {
+            has_quoted = true;
+        } else if !is_simple_type_ident(p) {
+            return None;
+        }
+    }
+    if !has_quoted {
+        return None;
+    }
+    Some((parts.join(" | "), parts.len() > 1))
+}
+
+fn split_top_level_pipes(s: &str) -> Option<Vec<&str>> {
+    let b = s.as_bytes();
+    let mut parts = Vec::new();
+    let (mut i, mut start) = (0usize, 0usize);
+    let mut quote: Option<u8> = None;
+    while i < b.len() {
+        let c = b[i];
+        if let Some(q) = quote {
+            if c == b'\\' {
+                if i + 1 >= b.len() { return None; }
+                i += 2;
+                continue;
+            }
+            if c == q { quote = None; }
+        } else if c == b'"' || c == b'\'' {
+            quote = Some(c);
+        } else if c == b'|' {
+            let seg = s[start..i].trim();
+            if seg.is_empty() { return None; }
+            parts.push(seg);
+            start = i + 1;
+        }
+        i += 1;
+    }
+    if quote.is_some() { return None; }
+    let tail = s[start..].trim();
+    if tail.is_empty() { return None; }
+    parts.push(tail);
+    Some(parts)
+}
+
+fn is_single_line_quoted_str(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() < 2 { return false; }
+    let q = b[0];
+    if (q != b'"' && q != b'\'') || b[b.len() - 1] != q { return false; }
+    let mut i = 1;
+    while i < b.len() - 1 {
+        let c = b[i];
+        if c == b'\n' || c == b'\r' { return false; }
+        if c == b'\\' {
+            if i + 1 >= b.len() - 1 { return false; }
+            i += 2;
+            continue;
+        }
+        if c == q { return false; }
+        i += 1;
+    }
+    true
+}
+
+fn is_simple_type_ident(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && s != "fn"
+        && (b[0].is_ascii_alphabetic() || b[0] == b'_')
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_')
 }

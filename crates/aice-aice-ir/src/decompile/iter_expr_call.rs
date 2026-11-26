@@ -1,9 +1,10 @@
 use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{child_by_kind, named_children, node_text, strip_quotes};
+use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::{ExprFin, ObjSlot};
+use crate::decompile::trivia::is_comment_kind;
 use crate::ir::Trivia;
 use crate::ir_code::Expr;
 use crate::ir_types::ParamDecl;
@@ -123,6 +124,70 @@ pub(crate) fn push_php_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     } else {
         let vals: Vec<_> = elems.into_iter().filter_map(|el| named_children(el).into_iter().next()).collect();
         env.tasks.push(DTask::FinishExpr(ExprFin::Array(vals.len())));
+        for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }
+    }
+}
+
+pub(crate) fn push_object_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    let non_ty: Vec<_> = named_children(node)
+        .into_iter()
+        .filter(|c| !matches!(c.kind(), "type_arguments" | "type_argument_list") && !is_comment_kind(c.kind()))
+        .collect();
+    let (mut slots, mut vals) = (Vec::new(), Vec::new());
+    for ch in &non_ty {
+        match ch.kind() {
+            "pair" | "field_initializer" | "map_entry" => {
+                let k = field_text(*ch, "key", env.src)
+                    .or_else(|| field_text(*ch, "field", env.src))
+                    .or_else(|| field_text(*ch, "name", env.src))
+                    .or_else(|| named_children(*ch).into_iter().next().map(|n| node_text(n, env.src)))
+                    .map(strip_quotes);
+                let vn = ch.child_by_field_name("value").or_else(|| named_children(*ch).into_iter().last());
+                if let (Some(key), Some(v)) = (k, vn) {
+                    slots.push(ObjSlot::Field(key));
+                    vals.push(v);
+                }
+            }
+            "method_definition" => {
+                let name_node = ch.child_by_field_name("name").or_else(|| {
+                    named_children(*ch).into_iter().find(|n| {
+                        matches!(
+                            n.kind(),
+                            "property_identifier" | "string" | "computed_property_name" | "number" | "private_property_identifier"
+                        )
+                    })
+                });
+                if let Some(nn) = name_node {
+                    let nm = strip_quotes(node_text(nn, env.src));
+                    let hdr = env.src.get(ch.start_byte()..nn.start_byte()).unwrap_or("");
+                    let key = if hdr.split_whitespace().any(|w| w == "get") {
+                        format!("get {nm}")
+                    } else if hdr.split_whitespace().any(|w| w == "set") {
+                        format!("set {nm}")
+                    } else {
+                        nm
+                    };
+                    slots.push(ObjSlot::Field(key));
+                    vals.push(*ch);
+                }
+            }
+            "spread_element" => {
+                if let Some(inner) = named_children(*ch).into_iter().next() {
+                    slots.push(ObjSlot::Spread);
+                    vals.push(inner);
+                }
+            }
+            "shorthand_property_identifier" | "shorthand_property_identifier_pattern" => {
+                slots.push(ObjSlot::Shorthand);
+                vals.push(*ch);
+            }
+            _ => {}
+        }
+    }
+    if slots.is_empty() && !non_ty.is_empty() {
+        env.exprs.push(Expr::Ident(raw.to_string()));
+    } else {
+        env.tasks.push(DTask::FinishExpr(ExprFin::Object(slots)));
         for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }
     }
 }

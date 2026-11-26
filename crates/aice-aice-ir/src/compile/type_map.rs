@@ -1,6 +1,7 @@
 use aice_lang_registry::LanguageId;
 
 use crate::compile::type_map_c::{emit_c_raw_type, map_c_scalar};
+use crate::compile::type_map_ts::emit_ts_raw_type;
 use crate::ir_types::{AiceType, PrimitiveType};
 
 enum TyEmit<'a> {
@@ -180,6 +181,9 @@ fn step_eval_type<'a>(
         }
         AiceType::Named { path, args } => step_eval_named(path, args, lang, tasks, vals),
         AiceType::Raw(s) if lang == LanguageId::C => vals.push(emit_c_raw_type(s)),
+        AiceType::Raw(s) if matches!(lang, LanguageId::TypeScript | LanguageId::Tsx) => {
+            vals.push(emit_ts_raw_type(s));
+        }
         AiceType::Raw(s) => vals.push(s.clone()),
     }
 }

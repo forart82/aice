@@ -38,6 +38,7 @@ pub mod twig;
 pub mod type_map;
 pub mod type_map_c;
 pub mod type_map_c_kw;
+mod type_map_ts;
 pub mod web_html_css;
 
 use aice_lang_registry::LanguageId;

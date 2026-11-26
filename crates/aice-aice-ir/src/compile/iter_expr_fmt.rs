@@ -1,7 +1,7 @@
 use aice_lang_registry::LanguageId;
 
 use crate::compile::type_map::emit_type;
-use crate::ir_code::UnaryOp;
+use crate::ir_code::{Expr, RecordEntry, UnaryOp};
 use crate::ir_types::{AiceType, ParamDecl};
 
 pub(crate) fn unary_op_native(op: UnaryOp, lang: LanguageId) -> &'static str {
@@ -151,4 +151,75 @@ pub(crate) fn format_closure(
             format!("{asy}({}){rt} => {rhs}", ps.join(", "))
         }
     }
+}
+
+pub(crate) fn format_record_entry(entry: &RecordEntry, val: String, lang: LanguageId) -> String {
+    match entry {
+        RecordEntry::Spread(_) => if lang == LanguageId::Rust { format!("..{val}") } else { format!("...{val}") },
+        RecordEntry::Field { key: None, .. } => val,
+        RecordEntry::Field { key: Some(k), value } => match lang {
+            LanguageId::Python | LanguageId::Dart => format!("\"{k}\": {val}"),
+            LanguageId::Php => format!("\"{k}\" => {val}"),
+            LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript => {
+                if matches!(value, Expr::Closure { .. })
+                    && let Some(acc) = format_js_accessor_entry(k, &val)
+                {
+                    return acc;
+                }
+                if is_js_prop_key(k) {
+                    format!("{k}: {val}")
+                } else {
+                    format!("\"{}\": {val}", crate::printer_expr::escape_str(k))
+                }
+            }
+            _ => format!("{k}: {val}"),
+        },
+    }
+}
+
+fn is_js_prop_key(k: &str) -> bool {
+    if k.starts_with('[') && k.ends_with(']') && k.len() >= 3 {
+        return true;
+    }
+    let b = k.as_bytes();
+    !b.is_empty()
+        && (b[0].is_ascii_alphabetic() || b[0] == b'_' || b[0] == b'$')
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'$')
+}
+
+fn format_js_accessor_entry(key: &str, val: &str) -> Option<String> {
+    let (acc, name) = key.strip_prefix("get ").map(|n| ("get", n))
+        .or_else(|| key.strip_prefix("set ").map(|n| ("set", n)))?;
+    let name = name.trim();
+    if name.is_empty() { return None; }
+    let rest = val.trim_start();
+    if !rest.starts_with('(') { return None; }
+    let mut depth = 0usize;
+    let mut close_idx = None;
+    for (i, ch) in rest.char_indices() {
+        match ch {
+            '(' => depth += 1,
+            ')' => {
+                depth -= 1;
+                if depth == 0 { close_idx = Some(i); break; }
+            }
+            _ => {}
+        }
+    }
+    let ci = close_idx?;
+    let params = &rest[..=ci];
+    let after = &rest[ci + 1..];
+    let (ret_part, body_raw) = after.split_once(" => ")?;
+    let body_tr = body_raw.trim();
+    let body = if body_tr.starts_with('{') {
+        body_tr.to_string()
+    } else {
+        format!("{{ return {body_tr}; }}")
+    };
+    let prop = if is_js_prop_key(name) {
+        name.to_string()
+    } else {
+        format!("\"{}\"", crate::printer_expr::escape_str(name))
+    };
+    Some(format!("{acc} {prop}{params}{ret_part} {body}"))
 }

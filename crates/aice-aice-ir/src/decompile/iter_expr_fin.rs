@@ -21,7 +21,18 @@ pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         Some(b) => (2u8, Some(b)),
         None => (0u8, None),
     };
-    let is_async = node_text(node, env.src).trim_start().starts_with("async ");
+    let hdr_end = node
+        .child_by_field_name("name")
+        .or_else(|| node.child_by_field_name("parameters"))
+        .or_else(|| node.child_by_field_name("parameter"))
+        .map(|n| n.start_byte())
+        .unwrap_or(node.end_byte());
+    let is_async = env
+        .src
+        .get(node.start_byte()..hdr_end)
+        .unwrap_or("")
+        .split_whitespace()
+        .any(|w| w == "async");
     env.tasks.push(DTask::FinishExpr(ExprFin::Closure { is_async, params, default_mask, ret, body_kind }));
     if let Some(tn) = target_n {
         if body_kind == 1 { env.tasks.push(DTask::Block(tn)); } else { env.tasks.push(DTask::Expr(tn)); }

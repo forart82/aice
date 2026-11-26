@@ -3,7 +3,9 @@ use aice_lang_registry::LanguageId;
 use crate::compile::expr_emit::{ExprEmitCtx, assign_native, bin_op_native, emit_ident, emit_lit, is_str_like};
 use crate::compile::iter_emit::{CTask, EvalState, body_kind_of};
 use crate::compile::iter_expr_call::{make_inline_jsx, push_eval_call};
-use crate::compile::iter_expr_fmt::{format_closure, format_closure_param, format_template, unary_op_native};
+use crate::compile::iter_expr_fmt::{
+    format_closure, format_closure_param, format_record_entry, format_template, unary_op_native,
+};
 use crate::ir_code::{BinaryOp, Expr, FnBody, MemberKind, RecordEntry};
 
 pub(crate) fn step_expr_task<'a>(
@@ -78,15 +80,11 @@ pub(crate) fn step_expr_task<'a>(
         CTask::MakeRecord { entries, n_vals } => {
             let start = st.vals.len() - n_vals;
             let vs: Vec<String> = st.vals.drain(start..).collect();
-            let ps: Vec<String> = entries.iter().zip(vs).map(|(e, v)| match e {
-                RecordEntry::Spread(_) => if lang == LanguageId::Rust { format!("..{v}") } else { format!("...{v}") },
-                RecordEntry::Field { key: Some(k), .. } => match lang {
-                    LanguageId::Python | LanguageId::Dart => format!("\"{k}\": {v}"),
-                    LanguageId::Php => format!("\"{k}\" => {v}"),
-                    _ => format!("{k}: {v}"),
-                },
-                RecordEntry::Field { key: None, .. } => v,
-            }).collect();
+            let ps: Vec<String> = entries
+                .iter()
+                .zip(vs)
+                .map(|(e, v)| format_record_entry(e, v, lang))
+                .collect();
             if lang == LanguageId::Php {
                 st.vals.push(format!("[{}]", ps.join(", ")));
             } else {
