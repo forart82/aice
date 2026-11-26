@@ -1,6 +1,7 @@
 use aice_lang_registry::{IntraBlockKind, IntraBlockNode, LanguageId};
 
 use crate::intra_ast_kinds::classify_ts_kind;
+use crate::intra_ast_struct::TaggedIntraBlock;
 use crate::r5::cst_helpers::{child_kind_text, field_text, node_text};
 use crate::r6::sql_symbols::find_sql_name;
 
@@ -9,7 +10,7 @@ pub(crate) fn extract_ts_intra_blocks(
     root: tree_sitter::Node<'_>,
     src: &str,
     span: Option<(usize, usize)>,
-) -> Vec<IntraBlockNode> {
+) -> Vec<TaggedIntraBlock> {
     let mut out = Vec::new();
     let mut stack: Vec<(tree_sitter::Node<'_>, Option<tree_sitter::Node<'_>>)> = vec![(root, None)];
     while let Some((node, parent)) = stack.pop() {
@@ -22,13 +23,16 @@ pub(crate) fn extract_ts_intra_blocks(
             && span.is_none_or(|(s_b, e_b)| node.start_byte() >= s_b && node.end_byte() <= e_b)
         {
             let (start_line, end_line) = node_lines(node.start_position(), node.end_position());
-            out.push(IntraBlockNode {
-                kind,
-                label: extract_block_label(kind, node, parent, src),
-                start_line,
-                end_line,
-                start_byte: node.start_byte(),
-                end_byte: node.end_byte(),
+            out.push(TaggedIntraBlock {
+                node: IntraBlockNode {
+                    kind,
+                    label: extract_block_label(kind, node, parent, src),
+                    start_line,
+                    end_line,
+                    start_byte: node.start_byte(),
+                    end_byte: node.end_byte(),
+                },
+                ast_kind: Some(node.kind().to_string()),
             });
         }
         if lang == LanguageId::Dart && node.kind() == "try_statement" {
@@ -54,7 +58,7 @@ fn push_dart_try_clauses(
     try_node: tree_sitter::Node<'_>,
     src: &str,
     span: Option<(usize, usize)>,
-    out: &mut Vec<IntraBlockNode>,
+    out: &mut Vec<TaggedIntraBlock>,
 ) {
     let try_body_id = try_node.child_by_field_name("body").map(|b| b.id());
     let mut pending_start: Option<tree_sitter::Node<'_>> = None;
@@ -70,13 +74,16 @@ fn push_dart_try_clauses(
                     let (start_byte, end_byte) = (start_node.start_byte(), c.end_byte());
                     if span.is_none_or(|(s_b, e_b)| start_byte >= s_b && end_byte <= e_b) {
                         let (start_line, end_line) = node_lines(start_node.start_position(), c.end_position());
-                        out.push(IntraBlockNode {
-                            kind: IntraBlockKind::ErrorHandler,
-                            label: bounded_first_line(src.get(start_byte..end_byte).unwrap_or("")),
-                            start_line,
-                            end_line,
-                            start_byte,
-                            end_byte,
+                        out.push(TaggedIntraBlock {
+                            node: IntraBlockNode {
+                                kind: IntraBlockKind::ErrorHandler,
+                                label: bounded_first_line(src.get(start_byte..end_byte).unwrap_or("")),
+                                start_line,
+                                end_line,
+                                start_byte,
+                                end_byte,
+                            },
+                            ast_kind: Some(start_node.kind().to_string()),
                         });
                     }
                 }

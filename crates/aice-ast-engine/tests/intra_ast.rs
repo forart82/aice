@@ -1065,3 +1065,96 @@ fn dart_on_catch_finally_intra_blocks() {
         assert!(!s.content.contains("cleanup()") && !s.content.contains("try {"), "@{pat}:\n{}", s.content);
     }
 }
+
+#[test]
+fn regression_f30_structural_keywords_never_false_match_string_literals() {
+    use aice_ast_engine::intra_ast::find_intra_block_in_span;
+
+    let reg = EngineRegistry::new();
+    let rs_adp = reg.adapter(LanguageId::Rust).unwrap();
+    let rs_sl = reg.slicer(LanguageId::Rust).unwrap();
+
+    // 1. Repro S2-025: function with "match_block", "switch_block", "when_expression", "case" in strings/closures, zero real match
+    let rs_no_match = concat!(
+        "fn push_match_task(kind: &str) -> &str {\n",
+        "    let res = if kind == \"when_expression\" {\n",
+        "        \"when\"\n",
+        "    } else if kind == \"case\" {\n",
+        "        \"case\"\n",
+        "    } else {\n",
+        "        \"other\"\n",
+        "    };\n",
+        "    let fallback = || find_child(\"match_block\");\n",
+        "    let sw = || find_child(\"switch_block\");\n",
+        "    if kind == \"match\" { return fallback(); }\n",
+        "    let _ = (res, sw);\n",
+        "    \"done\"\n",
+        "}\n",
+        "fn tiny_str() -> &'static str {\n",
+        "    \"match_block while_loop for_each try_catch\"\n",
+        "}\n",
+    );
+    let t_rs = rs_adp.parse_cst(rs_no_match).unwrap();
+    for kw in ["match", "switch", "for", "while", "loop", "try", "catch", "finally", "cte", "subquery"] {
+        assert!(
+            rs_sl.slice_intra_block(&t_rs, rs_no_match, &IntraBlockSelector { symbol: "push_match_task".into(), pattern: kw.into() }).is_err(),
+            "push_match_task@{kw} must not false-match string literal or unrelated block"
+        );
+    }
+    // Small symbol <= 8 lines must also reject structural keyword inside string literal
+    for kw in ["match", "while", "for", "try", "catch", "if"] {
+        assert!(
+            rs_sl.slice_intra_block(&t_rs, rs_no_match, &IntraBlockSelector { symbol: "tiny_str".into(), pattern: kw.into() }).is_err(),
+            "tiny_str@{kw} must not fall back to string literal"
+        );
+    }
+    // Real blocks inside push_match_task still match
+    let if_sl = rs_sl.slice_intra_block(&t_rs, rs_no_match, &IntraBlockSelector { symbol: "push_match_task".into(), pattern: "if".into() }).unwrap();
+    assert!(if_sl.content.contains("if kind =="), "{}", if_sl.content);
+    let cl_sl = rs_sl.slice_intra_block(&t_rs, rs_no_match, &IntraBlockSelector { symbol: "push_match_task".into(), pattern: "closure".into() }).unwrap();
+    assert!(cl_sl.content.contains("|| find_child("), "{}", cl_sl.content);
+
+    // 2. Real iter_match.rs from workspace: push_match_task@match errors, push_match_arms@match matches real match_expression
+    let iter_match = fs::read_to_string(workspace_root().join("crates/aice-aice-ir/src/decompile/iter_match.rs")).unwrap();
+    let t_im = rs_adp.parse_cst(&iter_match).unwrap();
+    let im_syms = rs_adp.extract_symbols(&t_im, &iter_match);
+    assert!(
+        rs_sl.slice_intra_block(&t_im, &iter_match, &IntraBlockSelector { symbol: "push_match_task".into(), pattern: "match".into() }).is_err(),
+        "real iter_match.rs:push_match_task@match must error"
+    );
+    let task_sym = im_syms.iter().find(|s| s.name == "push_match_task").unwrap();
+    assert!(find_intra_block_in_span(&t_im, &iter_match, task_sym.start_byte, task_sym.end_byte, "match").is_none());
+
+    let arms_match = rs_sl
+        .slice_intra_block(&t_im, &iter_match, &IntraBlockSelector { symbol: "push_match_arms".into(), pattern: "match".into() })
+        .unwrap();
+    assert!(arms_match.content.contains("match ch.kind()"), "expected real match block:\n{}", arms_match.content);
+
+    // 3. True match/switch/case/when nodes across Rust, TS, Kotlin, C, Bash win over earlier if-with-string
+    let rs_real = "fn f(s: &str, x: i32) -> i32 {\n  if s == \"match\" { return -1; }\n  match x {\n    1 => 10,\n    _ => 20,\n  }\n}\n";
+    let t_r2 = rs_adp.parse_cst(rs_real).unwrap();
+    let r2 = rs_sl.slice_intra_block(&t_r2, rs_real, &IntraBlockSelector { symbol: "f".into(), pattern: "match".into() }).unwrap();
+    assert!(r2.content.contains("match x") && !r2.content.contains("return -1"), "{}", r2.content);
+
+    let ts_real = "function f(s: string, x: number): number {\n  if (s === \"match\" || s === \"switch\") { return -1; }\n  switch (x) {\n    case 1: return 10;\n    default: return 20;\n  }\n}\n";
+    let ts_t = reg.adapter(LanguageId::TypeScript).unwrap().parse_cst(ts_real).unwrap();
+    for kw in ["match", "switch"] {
+        let ts_s = reg.slicer(LanguageId::TypeScript).unwrap().slice_intra_block(&ts_t, ts_real, &IntraBlockSelector { symbol: "f".into(), pattern: kw.into() }).unwrap();
+        assert!(ts_s.content.contains("switch (x)") && !ts_s.content.contains("return -1"), "ts @{kw}:\n{}", ts_s.content);
+    }
+
+    let kt_real = "fun f(s: String, x: Int): Int {\n  if (s == \"match\") return -1\n  return when (x) {\n    1 -> 10\n    else -> 20\n  }\n}\n";
+    let kt_t = reg.adapter(LanguageId::Kotlin).unwrap().parse_cst(kt_real).unwrap();
+    let kt_s = reg.slicer(LanguageId::Kotlin).unwrap().slice_intra_block(&kt_t, kt_real, &IntraBlockSelector { symbol: "f".into(), pattern: "match".into() }).unwrap();
+    assert!(kt_s.content.contains("when (x)") && !kt_s.content.contains("return -1"), "{}", kt_s.content);
+
+    let c_real = "int f(const char *s, int x) {\n  if (s[0] == 'm') { return -1; }\n  switch (x) {\n    case 1: return 10;\n    default: return 20;\n  }\n}\n";
+    let c_t = reg.adapter(LanguageId::C).unwrap().parse_cst(c_real).unwrap();
+    let c_s = reg.slicer(LanguageId::C).unwrap().slice_intra_block(&c_t, c_real, &IntraBlockSelector { symbol: "f".into(), pattern: "match".into() }).unwrap();
+    assert!(c_s.content.contains("switch (x)") && c_s.content.contains("default: return 20;"), "{}", c_s.content);
+
+    let sh_real = "f() {\n  if [ \"$1\" = \"match\" ]; then return 1; fi\n  case \"$2\" in\n    a) echo A ;;\n    *) echo B ;;\n  esac\n}\n";
+    let sh_t = reg.adapter(LanguageId::Bash).unwrap().parse_cst(sh_real).unwrap();
+    let sh_s = reg.slicer(LanguageId::Bash).unwrap().slice_intra_block(&sh_t, sh_real, &IntraBlockSelector { symbol: "f".into(), pattern: "match".into() }).unwrap();
+    assert!(sh_s.content.contains("case \"$2\" in") && !sh_s.content.contains("return 1"), "{}", sh_s.content);
+}

@@ -6,40 +6,61 @@ use aice_governance::escape_json_str;
 use crate::types::{JsonSpliceInfo, VirtualFile, split_lines_keep};
 
 fn compute_lcs_ops<'a>(a: &'a [String], b: &'a [String]) -> Vec<(char, &'a str)> {
-    let (n, m) = (a.len(), b.len());
-    if n.saturating_mul(m) > 250_000 {
-        let mut ops = Vec::with_capacity(n + m);
-        for l in a { ops.push(('-', l.as_str())); }
-        for l in b { ops.push(('+', l.as_str())); }
-        return ops;
+    let mut prefix = 0;
+    while prefix < a.len() && prefix < b.len() && a[prefix] == b[prefix] {
+        prefix += 1;
     }
-    let mut dp = vec![vec![0u32; m + 1]; n + 1];
-    for i in (0..n).rev() {
-        for j in (0..m).rev() {
-            dp[i][j] = if a[i] == b[j] {
-                dp[i + 1][j + 1] + 1
+    let mut suffix = 0;
+    let max_suffix = (a.len() - prefix).min(b.len() - prefix);
+    while suffix < max_suffix && a[a.len() - 1 - suffix] == b[b.len() - 1 - suffix] {
+        suffix += 1;
+    }
+    let mid_a = &a[prefix..a.len() - suffix];
+    let mid_b = &b[prefix..b.len() - suffix];
+    let (n, m) = (mid_a.len(), mid_b.len());
+
+    let mut ops = Vec::with_capacity(prefix + suffix + n + m);
+    for l in &a[..prefix] {
+        ops.push((' ', l.as_str()));
+    }
+    if n == 0 {
+        for l in mid_b { ops.push(('+', l.as_str())); }
+    } else if m == 0 {
+        for l in mid_a { ops.push(('-', l.as_str())); }
+    } else if n.saturating_mul(m) > 250_000 {
+        for l in mid_a { ops.push(('-', l.as_str())); }
+        for l in mid_b { ops.push(('+', l.as_str())); }
+    } else {
+        let mut dp = vec![vec![0u32; m + 1]; n + 1];
+        for i in (0..n).rev() {
+            for j in (0..m).rev() {
+                dp[i][j] = if mid_a[i] == mid_b[j] {
+                    dp[i + 1][j + 1] + 1
+                } else {
+                    dp[i + 1][j].max(dp[i][j + 1])
+                };
+            }
+        }
+        let (mut i, mut j) = (0, 0);
+        while i < n && j < m {
+            if mid_a[i] == mid_b[j] {
+                ops.push((' ', mid_a[i].as_str()));
+                i += 1;
+                j += 1;
+            } else if dp[i + 1][j] >= dp[i][j + 1] {
+                ops.push(('-', mid_a[i].as_str()));
+                i += 1;
             } else {
-                dp[i + 1][j].max(dp[i][j + 1])
-            };
+                ops.push(('+', mid_b[j].as_str()));
+                j += 1;
+            }
         }
+        while i < n { ops.push(('-', mid_a[i].as_str())); i += 1; }
+        while j < m { ops.push(('+', mid_b[j].as_str())); j += 1; }
     }
-    let (mut i, mut j) = (0, 0);
-    let mut ops = Vec::new();
-    while i < n && j < m {
-        if a[i] == b[j] {
-            ops.push((' ', a[i].as_str()));
-            i += 1;
-            j += 1;
-        } else if dp[i + 1][j] >= dp[i][j + 1] {
-            ops.push(('-', a[i].as_str()));
-            i += 1;
-        } else {
-            ops.push(('+', b[j].as_str()));
-            j += 1;
-        }
+    for l in &a[a.len() - suffix..] {
+        ops.push((' ', l.as_str()));
     }
-    while i < n { ops.push(('-', a[i].as_str())); i += 1; }
-    while j < m { ops.push(('+', b[j].as_str())); j += 1; }
     ops
 }
 
@@ -89,7 +110,7 @@ pub fn render_dry_run_diff(vfs: &BTreeMap<PathBuf, VirtualFile>) -> String {
         if vf.has_changed() {
             let orig = vf.original_disk.as_deref().unwrap_or("");
             out.push_str(&unified_diff(&vf.canonical.display().to_string(), orig, &vf.current));
-            out.push_str(&format!("[Dry Run] Successfully spliced {}\n{}\n", vf.rel_label, vf.current));
+            out.push_str(&format!("[Dry Run] Successfully spliced {}\n", vf.rel_label));
         }
     }
     if out.is_empty() {

@@ -5440,3 +5440,139 @@ fn regression_w3m2b_bash_edge_cases() {
     assert!(errs.is_empty(), "w3m2b failures ({}):\n{}", errs.len(), errs.join("\n"));
 }
 
+#[test]
+fn regression_f31_cargo_workspace_crate_and_scoped_deps() {
+    let reg = EngineRegistry::new();
+    let root = Path::new("/virtual/cargo_ws");
+
+    // 1. Virtual Cargo workspace with crates/aice-cli, crates/aice-governance, and decoy root src/cli.rs
+    let files = vec![
+        parse_input(
+            &reg,
+            "crates/aice-cli/src/main.rs",
+            LanguageId::Rust,
+            "use std::process;\nfn main() {\n    let code = aice_cli::run_cli();\n    process::exit(code);\n}\n",
+        ),
+        parse_input(
+            &reg,
+            "crates/aice-cli/src/lib.rs",
+            LanguageId::Rust,
+            "pub mod cli;\npub mod cmd_read;\nuse aice_governance::{OutputSurface, json::{self, parse_json}};\npub fn run_cli() -> i32 { cmd_read::exec(OutputSurface::Cli); let _ = parse_json(\"{}\"); 0 }\n",
+        ),
+        parse_input(
+            &reg,
+            "crates/aice-cli/src/cli.rs",
+            LanguageId::Rust,
+            "pub enum CliAction { Read }\n",
+        ),
+        parse_input(
+            &reg,
+            "crates/aice-cli/src/cmd_read.rs",
+            LanguageId::Rust,
+            "use crate::cli::CliAction;\nuse aice_governance::parse_json;\npub fn exec(_s: aice_governance::OutputSurface) -> CliAction { let _ = parse_json(\"{}\"); CliAction::Read }\n",
+        ),
+        parse_input(
+            &reg,
+            "crates/aice-governance/src/lib.rs",
+            LanguageId::Rust,
+            "pub mod json;\npub use json::parse_json;\npub enum OutputSurface { Cli }\n",
+        ),
+        parse_input(
+            &reg,
+            "crates/aice-governance/src/json.rs",
+            LanguageId::Rust,
+            "pub fn parse_json(_s: &str) -> bool { true }\n",
+        ),
+        parse_input(
+            &reg,
+            "src/cli.rs",
+            LanguageId::Rust,
+            "pub struct UnrelatedRootCli;\n",
+        ),
+    ];
+
+    let idx = WorkspaceIndex::build(&files, root);
+
+    // crate:: inside workspace crate resolves to crate's own src/, NOT repo-root src/
+    let crate_local = resolve_dep_edge(
+        3,
+        &files[3],
+        &DepEdge { source: "crate".into(), target: "crate::cli::CliAction".into(), kind: DepKind::Import },
+        &idx,
+        root,
+    );
+    assert_eq!(crate_local, ResolveOutcome::WorkspaceFile("crates/aice-cli/src/cli.rs".into()));
+
+    // Workspace crate re-export resolves to lib.rs, submodule import resolves to submodule file
+    let gov_reexport = resolve_dep_edge(
+        3,
+        &files[3],
+        &DepEdge { source: "crate".into(), target: "aice_governance::parse_json".into(), kind: DepKind::Import },
+        &idx,
+        root,
+    );
+    assert_eq!(gov_reexport, ResolveOutcome::WorkspaceFile("crates/aice-governance/src/lib.rs".into()));
+
+    let gov_sub = resolve_dep_edge(
+        3,
+        &files[3],
+        &DepEdge { source: "crate".into(), target: "aice_governance::json::parse_json".into(), kind: DepKind::Import },
+        &idx,
+        root,
+    );
+    assert_eq!(gov_sub, ResolveOutcome::WorkspaceFile("crates/aice-governance/src/json.rs".into()));
+
+    // External std / third-party crates stay ExternalPackage
+    let ext_std = resolve_dep_edge(
+        0,
+        &files[0],
+        &DepEdge { source: "crate".into(), target: "std::process".into(), kind: DepKind::Import },
+        &idx,
+        root,
+    );
+    assert_eq!(ext_std, ResolveOutcome::ExternalPackage);
+
+    // Depth-1 and Depth-2 closure from crates/aice-cli/src/main.rs (inline call aice_cli::run_cli)
+    let d1 = expand_dependency_closure(&["crates/aice-cli/src/main.rs".into()], 1, &files, root);
+    assert!(d1.contains(&"crates/aice-cli/src/lib.rs".to_string()), "d1={d1:?}");
+    assert!(d1.contains(&"crates/aice-cli/src/main.rs".to_string()), "d1={d1:?}");
+    assert!(!d1.contains(&"src/cli.rs".to_string()), "leaked root src/cli.rs: {d1:?}");
+
+    let d2 = expand_dependency_closure(&["crates/aice-cli/src/main.rs".into()], 2, &files, root);
+    for expected in [
+        "crates/aice-cli/src/main.rs",
+        "crates/aice-cli/src/lib.rs",
+        "crates/aice-cli/src/cli.rs",
+        "crates/aice-cli/src/cmd_read.rs",
+        "crates/aice-governance/src/lib.rs",
+        "crates/aice-governance/src/json.rs",
+    ] {
+        assert!(d2.contains(&expected.to_string()), "d2 missing {expected}: {d2:?}");
+    }
+    assert!(!d2.contains(&"src/cli.rs".to_string()), "leaked root src/cli.rs: {d2:?}");
+
+    // 2. Disk Cargo workspace where [package] name differs from crate directory name
+    let dir = std::env::temp_dir().join(format!("aice_f31_cargo_ws_{}", std::process::id()));
+    let _ = fs::remove_dir_all(&dir);
+    fs::create_dir_all(dir.join("crates/dir-a/src")).unwrap();
+    fs::create_dir_all(dir.join("crates/dir-b/src")).unwrap();
+    fs::write(dir.join("crates/dir-a/Cargo.toml"), "[package]\nname = \"custom-alpha\"\nversion = \"0.1.0\"\n").unwrap();
+    fs::write(dir.join("crates/dir-b/Cargo.toml"), "[package]\nname = \"custom-beta\"\nversion = \"0.1.0\"\n").unwrap();
+    let a_src = "pub mod util;\npub fn boot() -> i32 { util::val() }\n";
+    let a_util = "pub fn val() -> i32 { 7 }\n";
+    let b_src = "use custom_alpha::util::val;\npub fn run() -> i32 { custom_alpha::boot() + val() }\n";
+    fs::write(dir.join("crates/dir-a/src/lib.rs"), a_src).unwrap();
+    fs::write(dir.join("crates/dir-a/src/util.rs"), a_util).unwrap();
+    fs::write(dir.join("crates/dir-b/src/lib.rs"), b_src).unwrap();
+
+    let disk_ws = vec![
+        parse_input(&reg, "crates/dir-a/src/lib.rs", LanguageId::Rust, a_src),
+        parse_input(&reg, "crates/dir-a/src/util.rs", LanguageId::Rust, a_util),
+        parse_input(&reg, "crates/dir-b/src/lib.rs", LanguageId::Rust, b_src),
+    ];
+    let disk_closure = expand_dependency_closure(&["crates/dir-b/src/lib.rs".into()], 1, &disk_ws, &dir);
+    assert!(disk_closure.contains(&"crates/dir-a/src/lib.rs".to_string()), "{disk_closure:?}");
+    assert!(disk_closure.contains(&"crates/dir-a/src/util.rs".to_string()), "{disk_closure:?}");
+    let _ = fs::remove_dir_all(&dir);
+}
+

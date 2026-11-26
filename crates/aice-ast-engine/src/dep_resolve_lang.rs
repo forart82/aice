@@ -6,6 +6,7 @@ use crate::dep_callers_other_ext::{split_as_ci, strip_kw_ci, strip_php_kind};
 use crate::dep_resolve::{WorkspaceIndex, parent_dir, probe_contained};
 use crate::dep_resolve_cs::resolve_csharp;
 use crate::dep_resolve_jvm::resolve_jvm;
+use crate::dep_resolve_rust::resolve_rust;
 use crate::r5::php_lang::strip_php_comments;
 
 pub(crate) fn resolve_import(
@@ -96,70 +97,6 @@ fn resolve_python(from_dir: &str, spec: &str, idx: &WorkspaceIndex, root: &Path)
         }
     }
     None
-}
-
-fn resolve_rust(
-    from_norm: &str,
-    from_dir: &str,
-    spec: &str,
-    idx: &WorkspaceIndex,
-    root: &Path,
-) -> Vec<String> {
-    if let Some(m) = spec.strip_prefix("mod:") {
-        let fstem = from_norm.strip_suffix(".rs").unwrap_or(from_norm);
-        for cand in [format!("{m}.rs"), format!("{m}/mod.rs")] {
-            if let Some(p) = probe_contained(from_dir, &cand, idx, root) {
-                return vec![p];
-            }
-            if let Some(p) = probe_contained(fstem, &cand, idx, root) {
-                return vec![p];
-            }
-        }
-        return Vec::new();
-    }
-    let mut out = Vec::new();
-    for item in expand_rust_braces(spec) {
-        let clean = item.split(" as ").next().unwrap_or(&item).trim().trim_end_matches("::*");
-        let (base_dirs, rest) = if let Some(r) = clean.strip_prefix("crate::") {
-            (vec!["src", ""], r)
-        } else if let Some(r) = clean.strip_prefix("super::") {
-            (vec![parent_dir(from_dir)], r)
-        } else if let Some(r) = clean.strip_prefix("self::") {
-            (vec![from_dir], r)
-        } else {
-            continue;
-        };
-        let segs: Vec<&str> = rest.split("::").filter(|s| !s.is_empty()).collect();
-        for b in &base_dirs {
-            for take in [segs.len(), segs.len().saturating_sub(1)] {
-                if take == 0 {
-                    continue;
-                }
-                let sub = segs[..take].join("/");
-                if let Some(p) = probe_contained(b, &format!("{sub}.rs"), idx, root)
-                    .or_else(|| probe_contained(b, &format!("{sub}/mod.rs"), idx, root))
-                {
-                    out.push(p);
-                    break;
-                }
-            }
-        }
-    }
-    out
-}
-
-fn expand_rust_braces(spec: &str) -> Vec<String> {
-    if let Some(open) = spec.find('{')
-        && let Some(close) = spec.rfind('}')
-        && close > open
-    {
-        let prefix = &spec[..open];
-        return spec[open + 1..close]
-            .split(',')
-            .map(|p| format!("{prefix}{}", p.trim()))
-            .collect();
-    }
-    vec![spec.to_string()]
 }
 
 fn resolve_go(from_idx: usize, spec: &str, idx: &WorkspaceIndex) -> Vec<String> {

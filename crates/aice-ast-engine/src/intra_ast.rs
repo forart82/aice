@@ -9,11 +9,14 @@ use crate::intra_ast_match::{
     else_if_label_matches, error_handler_sub_rank, label_word_matches, pat_matches,
 };
 use crate::intra_ast_rd::extract_rd_intra_blocks;
+use crate::intra_ast_struct::{
+    TaggedIntraBlock, is_structural_block_keyword, match_structural_keyword,
+};
 use crate::intra_ast_ts::extract_ts_intra_blocks;
 use crate::r5::cst_helpers::{slice_symbol_from_list, with_ts_root};
 
 pub fn extract_intra_blocks(tree: &ParsedTree, src: &str) -> Vec<IntraBlockNode> {
-    extract_blocks_opt(tree, src, None)
+    extract_blocks_opt(tree, src, None).into_iter().map(|b| b.node).collect()
 }
 
 pub fn extract_intra_blocks_in_span(
@@ -26,17 +29,43 @@ pub fn extract_intra_blocks_in_span(
         return Vec::new();
     }
     extract_blocks_opt(tree, src, Some((start_byte, end_byte)))
+        .into_iter()
+        .map(|b| b.node)
+        .collect()
+}
+
+pub fn find_intra_block_in_span(
+    tree: &ParsedTree,
+    src: &str,
+    start_byte: usize,
+    end_byte: usize,
+    pat: &str,
+) -> Option<IntraBlockNode> {
+    if end_byte <= start_byte || pat.trim().is_empty() {
+        return None;
+    }
+    let all_blocks = extract_blocks_opt(tree, src, Some((start_byte, end_byte)));
+    let strict: Vec<&TaggedIntraBlock> = all_blocks
+        .iter()
+        .filter(|b| (b.node.start_byte, b.node.end_byte) != (start_byte, end_byte))
+        .collect();
+    let candidates: Vec<&TaggedIntraBlock> = if strict.is_empty() {
+        all_blocks.iter().collect()
+    } else {
+        strict
+    };
+    select_best_block(&candidates, src, pat.trim()).cloned()
 }
 
 fn extract_blocks_opt(
     tree: &ParsedTree,
     src: &str,
     span: Option<(usize, usize)>,
-) -> Vec<IntraBlockNode> {
+) -> Vec<TaggedIntraBlock> {
     match tree {
         ParsedTree::TreeSitter { lang, .. } => with_ts_root(tree, Vec::new(), |root| {
             let mut blocks = extract_ts_intra_blocks(*lang, root, src, span);
-            blocks.sort_by_key(|b| (b.start_byte, Reverse(b.end_byte), b.kind as u8));
+            blocks.sort_by_key(|b| (b.node.start_byte, Reverse(b.node.end_byte), b.node.kind as u8));
             blocks
         }),
         ParsedTree::Rd(rd) => {
@@ -44,10 +73,67 @@ fn extract_blocks_opt(
             if let Some((s_b, e_b)) = span {
                 blocks.retain(|b| b.start_byte >= s_b && b.end_byte <= e_b);
             }
-            blocks
+            blocks.into_iter().map(|node| TaggedIntraBlock { node, ast_kind: None }).collect()
         }
         ParsedTree::PlainText { .. } => Vec::new(),
     }
+}
+
+fn select_best_block<'a>(
+    candidates: &[&'a TaggedIntraBlock],
+    src: &str,
+    pat: &str,
+) -> Option<&'a IntraBlockNode> {
+    let structural = is_structural_block_keyword(pat);
+    let case_sensitive = pat.chars().any(|c| c.is_ascii_uppercase());
+    let mut best: Option<(u8, u8, usize, usize, &'a IntraBlockNode)> = None;
+    for tagged in candidates {
+        let blk = &tagged.node;
+        let (tier, sub_rank) = if structural {
+            let Some(rank) =
+                match_structural_keyword(blk.kind, tagged.ast_kind.as_deref(), &blk.label, pat)
+            else {
+                continue;
+            };
+            rank
+        } else {
+            let label_word = label_word_matches(&blk.label, pat, case_sensitive)
+                || else_if_label_matches(blk.kind, &blk.label, pat);
+            let kind_alias = !label_word && kind_alias_matches(blk.kind, pat);
+            let label_sub =
+                !label_word && !kind_alias && pat_matches(&blk.label, pat, case_sensitive);
+            let body = src.get(blk.start_byte..blk.end_byte).unwrap_or("");
+            let body_hit =
+                !label_word && !kind_alias && !label_sub && pat_matches(body, pat, case_sensitive);
+            let tier = if label_word {
+                0
+            } else if kind_alias {
+                1
+            } else if label_sub {
+                2
+            } else if body_hit {
+                3
+            } else {
+                continue;
+            };
+            let sub_rank = if tier == 1 && blk.kind == IntraBlockKind::ErrorHandler {
+                error_handler_sub_rank(&blk.label)
+            } else {
+                0
+            };
+            (tier, sub_rank)
+        };
+        let key = (
+            tier,
+            sub_rank,
+            blk.end_byte.saturating_sub(blk.start_byte),
+            blk.start_byte,
+        );
+        if best.is_none_or(|cur| key < (cur.0, cur.1, cur.2, cur.3)) {
+            best = Some((key.0, key.1, key.2, key.3, blk));
+        }
+    }
+    best.map(|(_, _, _, _, b)| b)
 }
 
 pub fn slice_intra_block(
@@ -67,60 +153,24 @@ pub fn slice_intra_block(
         message: format!("Symbol '{}' not found", sel.symbol),
     })?;
 
-    let all_blocks = extract_intra_blocks_in_span(tree, src, sym.start_byte, sym.end_byte);
-    let strict: Vec<&IntraBlockNode> = all_blocks
+    let all_blocks = extract_blocks_opt(tree, src, Some((sym.start_byte, sym.end_byte)));
+    let strict: Vec<&TaggedIntraBlock> = all_blocks
         .iter()
-        .filter(|b| (b.start_byte, b.end_byte) != (sym.start_byte, sym.end_byte))
+        .filter(|b| (b.node.start_byte, b.node.end_byte) != (sym.start_byte, sym.end_byte))
         .collect();
-    let candidates: Vec<&IntraBlockNode> = if strict.is_empty() {
+    let candidates: Vec<&TaggedIntraBlock> = if strict.is_empty() {
         all_blocks.iter().collect()
     } else {
         strict
     };
 
-    let case_sensitive = pat.chars().any(|c| c.is_ascii_uppercase());
-    let mut best: Option<(u8, u8, usize, usize, &IntraBlockNode)> = None;
-    for blk in &candidates {
-        let label_word = label_word_matches(&blk.label, pat, case_sensitive)
-            || else_if_label_matches(blk.kind, &blk.label, pat);
-        let kind_alias = !label_word && kind_alias_matches(blk.kind, pat);
-        let label_sub = !label_word && !kind_alias && pat_matches(&blk.label, pat, case_sensitive);
-        let body = src.get(blk.start_byte..blk.end_byte).unwrap_or("");
-        let body_hit =
-            !label_word && !kind_alias && !label_sub && pat_matches(body, pat, case_sensitive);
-        let tier = if label_word {
-            0
-        } else if kind_alias {
-            1
-        } else if label_sub {
-            2
-        } else if body_hit {
-            3
-        } else {
-            continue;
-        };
-        let sub_rank = if tier == 1 && blk.kind == IntraBlockKind::ErrorHandler {
-            error_handler_sub_rank(&blk.label)
-        } else {
-            0
-        };
-        let key = (
-            tier,
-            sub_rank,
-            blk.end_byte.saturating_sub(blk.start_byte),
-            blk.start_byte,
-        );
-        if best.is_none_or(|cur| key < (cur.0, cur.1, cur.2, cur.3)) {
-            best = Some((key.0, key.1, key.2, key.3, *blk));
-        }
-    }
-
-    if let Some((_, _, _, _, matched)) = best {
+    if let Some(matched) = select_best_block(&candidates, src, pat) {
         return Ok(format_block_slice(src, sym, matched));
     }
 
+    let case_sensitive = pat.chars().any(|c| c.is_ascii_uppercase());
     let sym_lines = sym.end_line.saturating_sub(sym.start_line) + 1;
-    if candidates.is_empty() || sym_lines <= 8 {
+    if !is_structural_block_keyword(pat) && (candidates.is_empty() || sym_lines <= 8) {
         let base = slice_symbol_from_list(
             syms,
             src,

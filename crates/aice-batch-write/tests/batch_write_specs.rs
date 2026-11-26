@@ -1681,3 +1681,89 @@ fn wave1_f15_multiline_imports_across_js_py_go_rs_and_bom() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn regression_f21_dry_run_diff_trim_prefix_suffix_and_no_body_dump() {
+    use aice_batch_write::diff::unified_diff;
+
+    // 1. 3,100-line file with a 1-line edit at line 1500: O(1) trimmed LCS, compact ~11-line diff
+    let mut old_lines: Vec<String> = (1..=3100).map(|i| format!("const line_{i} = {i};")).collect();
+    let old = format!("{}\n", old_lines.join("\n"));
+    old_lines[1499] = "const line_1500 = 99999;".to_string();
+    let new = format!("{}\n", old_lines.join("\n"));
+
+    let diff = unified_diff("big.ts", &old, &new);
+    let diff_lines: Vec<&str> = diff.lines().collect();
+    assert!(
+        diff_lines.len() <= 15,
+        "expected compact diff (~11 lines), got {} lines:\n{}",
+        diff_lines.len(),
+        diff
+    );
+    assert!(diff.contains("@@ -1497,7 +1497,7 @@"), "bad hunk header:\n{diff}");
+    assert!(diff.contains("-const line_1500 = 1500;"));
+    assert!(diff.contains("+const line_1500 = 99999;"));
+    assert!(!diff.contains("line_1 = 1;") && !diff.contains("line_3100 = 3100;"));
+
+    // 2. Identical 3,100-line files emit header only, zero hunks
+    let same_diff = unified_diff("big.ts", &old, &old);
+    assert_eq!(same_diff, "--- a/big.ts\n+++ b/big.ts\n");
+
+    // 3. Pure insertion & pure deletion in 3,100-line file emit compact hunks
+    let mut ins_lines: Vec<String> = (1..=3100).map(|i| format!("const line_{i} = {i};")).collect();
+    ins_lines.insert(1500, "const inserted = 42;".to_string());
+    let ins_src = format!("{}\n", ins_lines.join("\n"));
+    let ins_diff = unified_diff("big.ts", &old, &ins_src);
+    assert!(ins_diff.lines().count() <= 15 && ins_diff.contains("+const inserted = 42;"), "{ins_diff}");
+    let del_diff = unified_diff("big.ts", &ins_src, &old);
+    assert!(del_diff.lines().count() <= 15 && del_diff.contains("-const inserted = 42;"), "{del_diff}");
+
+    // 4. execute_batch_write with --dry-run --diff emits ONLY unified diff + concise banner (no full body dump)
+    let dir = std::env::temp_dir().join(format!("aice_f21_dry_run_diff_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    let file = dir.join("big.ts");
+    std::fs::write(&file, &old).unwrap();
+    let mut op = empty_op();
+    op.path = Some(PathBuf::from("big.ts"));
+    op.symbol = Some("L1500-L1500".into());
+    op.code = Some("const line_1500 = 99999;".into());
+    op.dry_run = true;
+    op.diff = true;
+    let gov = authorize(PipelineRequest::new(op.clone(), dir.clone(), OutputSurface::Cli)).unwrap();
+    let rep = execute_batch_write(gov.state(), &op).unwrap();
+    assert_eq!(rep.exit_code, 0, "err: {}", rep.emitted_output);
+    assert_eq!(std::fs::read_to_string(&file).unwrap(), old, "dry-run must not modify disk");
+    let out_lines: Vec<&str> = rep.emitted_output.lines().collect();
+    assert!(
+        out_lines.len() <= 16,
+        "dry-run --diff dumped body ({} lines):\n{}",
+        out_lines.len(),
+        rep.emitted_output
+    );
+    assert!(rep.emitted_output.contains("-const line_1500 = 1500;"));
+    assert!(rep.emitted_output.contains("+const line_1500 = 99999;"));
+    assert!(rep.emitted_output.ends_with("[Dry Run] Successfully spliced big.ts\n"), "out={:?}", rep.emitted_output);
+    assert!(!rep.emitted_output.contains("const line_1 = 1;"));
+    assert!(!rep.emitted_output.contains("const line_3100 = 3100;"));
+
+    // 5. Intra-block splice @match must not false-match string literal "match_block"
+    let rs_no_match = "fn f(k: &str) -> &'static str {\n    let c = || \"match_block\";\n    if k == \"match\" { return c(); }\n    \"ok\"\n}\n";
+    let err = apply_ast_splice(
+        rs_no_match,
+        Some(rs_no_match),
+        Path::new("f.rs"),
+        LanguageId::Rust,
+        "\n",
+        "f@match",
+        "match k { _ => \"x\" }",
+        false,
+        true,
+        false,
+    )
+    .err()
+    .expect("f@match must fail when no match_expression exists");
+    assert!(err.contains("not found"), "err={err}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

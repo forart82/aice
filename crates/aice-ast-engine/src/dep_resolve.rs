@@ -6,6 +6,8 @@ use aice_lang_registry::{DepEdge, DepKind, LanguageFamily, LanguageId, SymbolKin
 use crate::dep_graph::FileDepInput;
 use crate::dep_resolve_jvm::index_jvm_file;
 use crate::dep_resolve_lang::resolve_import;
+use crate::dep_resolve_rust::resolve_rust_scoped_ref;
+use crate::dep_resolve_rust_idx::index_rust_crates;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ResolveOutcome {
@@ -23,6 +25,7 @@ pub struct WorkspaceIndex {
     pub(crate) module_definers: HashMap<String, Vec<usize>>,
     pub(crate) go_pkg_dirs: HashMap<String, Vec<usize>>,
     pub(crate) jvm_defs: HashMap<String, Vec<usize>>,
+    pub(crate) rust_crates: HashMap<String, Vec<String>>,
 }
 
 impl WorkspaceIndex {
@@ -72,14 +75,10 @@ impl WorkspaceIndex {
                 }
             }
         }
+        let rust_crates = index_rust_crates(&known_files, project_root);
         Self {
-            canon_root,
-            known_files,
-            type_definers,
-            schema_definers,
-            module_definers,
-            go_pkg_dirs,
-            jvm_defs,
+            canon_root, known_files, type_definers, schema_definers,
+            module_definers, go_pkg_dirs, jvm_defs, rust_crates,
         }
     }
 
@@ -159,9 +158,18 @@ pub(crate) fn resolve_dep_edges(
     }
     let resolved_paths = match edge.kind {
         DepKind::SchemaRef => resolve_schema_ref(from_idx, from_dir, spec, idx, project_root),
-        DepKind::TypeRef => resolve_type_ref(from_idx, from, spec, idx),
+        DepKind::TypeRef => {
+            let mut paths = resolve_type_ref(from_idx, from, spec, idx);
+            if paths.is_empty() && from.lang == LanguageId::Rust && spec.contains("::") {
+                paths = resolve_rust_scoped_ref(&from_norm, from_dir, spec, idx, project_root);
+            }
+            paths
+        }
         DepKind::Import => {
             resolve_import(from_idx, from.lang, &from_norm, from_dir, spec, idx, project_root)
+        }
+        DepKind::Call if from.lang == LanguageId::Rust && spec.contains("::") => {
+            resolve_rust_scoped_ref(&from_norm, from_dir, spec, idx, project_root)
         }
         DepKind::Call => Vec::new(),
     };

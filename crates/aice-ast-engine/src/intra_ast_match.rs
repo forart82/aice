@@ -32,7 +32,7 @@ pub(crate) fn error_handler_sub_rank(label: &str) -> u8 {
     2
 }
 
-fn starts_with_word(low: &str, kw: &str) -> bool {
+pub(crate) fn starts_with_word(low: &str, kw: &str) -> bool {
     low.strip_prefix(kw)
         .is_some_and(|rest| rest.chars().next().is_none_or(|c| !is_word_char(c)))
 }

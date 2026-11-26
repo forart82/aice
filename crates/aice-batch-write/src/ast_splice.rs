@@ -1,13 +1,10 @@
 use std::path::Path;
 
-use aice_ast_engine::intra_ast::extract_intra_blocks_in_span;
+use aice_ast_engine::intra_ast::find_intra_block_in_span;
 use aice_ast_engine::{DefaultSyntaxFirewall, EngineRegistry};
-use aice_lang_registry::{
-    AdapterLookup, IntraBlockNode, LanguageId, SymbolKind, SymbolNode,
-};
+use aice_lang_registry::{AdapterLookup, LanguageId, SymbolKind, SymbolNode};
 
 use crate::aice_lower::lower_for_splice;
-use crate::ast_select::find_intra_block;
 pub use crate::ast_select::{ParsedSel, parse_ast_selector, resolve_symbol_node};
 use crate::hunk::{extract_hunk_blocks, has_hunk_markers};
 use crate::hunk_match::{EnclosingContext, apply_hunk_blocks};
@@ -114,10 +111,8 @@ pub fn apply_ast_splice(
         }
         ParsedSel::IntraBlock { symbol, pattern } => {
             let s = resolve_symbol_node(&syms, symbol, None)?;
-            let blocks = extract_intra_blocks_in_span(&tree, src, s.start_byte, s.end_byte);
-            let strict: Vec<IntraBlockNode> = blocks.iter().filter(|b| (b.start_byte, b.end_byte) != (s.start_byte, s.end_byte)).cloned().collect();
-            let cands = if strict.is_empty() { &blocks } else { &strict };
-            let blk = find_intra_block(cands, src, pattern).ok_or_else(|| format!("Intra-block '{pattern}' not found inside '{symbol}'"))?;
+            let blk = find_intra_block_in_span(&tree, src, s.start_byte, s.end_byte, pattern)
+                .ok_or_else(|| format!("Intra-block '{pattern}' not found inside '{symbol}'"))?;
             (s, blk.start_byte, blk.end_byte, blk.start_line, blk.end_line)
         }
     };
