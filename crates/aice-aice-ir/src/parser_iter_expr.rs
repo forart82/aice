@@ -4,7 +4,7 @@ use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
 use crate::parser_expr::{assign_op_from_tok, binary_op_from_tok, infix_prec, looks_like_ternary};
 use crate::parser_iter::{ParseCont, ParseVal};
-use crate::parser_iter_lit::{start_record_entry, step_closure_params, step_lit_cont};
+use crate::parser_iter_lit::{looks_like_closure_after_fn, start_record_entry, step_closure_params, step_lit_cont};
 use crate::parser_iter_match::start_match;
 
 pub(crate) fn pop_expr(vals: &mut Vec<ParseVal>) -> Expr {
@@ -58,22 +58,22 @@ pub(crate) fn step_expr_cont(
         ParseCont::ExprParenClose => {
             p.expect(TokenKind::RParen, "Expected ')'")?;
         }
-        ParseCont::ExprCallArg { callee, mut args } => {
+        ParseCont::ExprCallArg { callee, mut args, is_optional } => {
             args.push(pop_expr(vals));
             if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RParen && !p.at_eof() {
-                stack.push(ParseCont::ExprCallArg { callee, args });
+                stack.push(ParseCont::ExprCallArg { callee, args, is_optional });
                 stack.push(ParseCont::Expr(1));
             } else {
                 p.expect(TokenKind::RParen, "Expected ')'")?;
                 vals.push(ParseVal::Expr(Expr::Call {
-                    callee: Box::new(callee), args, is_optional: false, is_tagged: false,
+                    callee: Box::new(callee), args, is_optional, is_tagged: false,
                 }));
             }
         }
-        ParseCont::ExprIndex { object } => {
+        ParseCont::ExprIndex { object, is_optional } => {
             let idx = pop_expr(vals);
             p.expect(TokenKind::RBracket, "Expected ']'")?;
-            vals.push(ParseVal::Expr(Expr::Index { object: Box::new(object), index: Box::new(idx) }));
+            vals.push(ParseVal::Expr(Expr::Index { object: Box::new(object), index: Box::new(idx), is_optional }));
         }
         ParseCont::ExprTernaryThen { cond, next_prec } => {
             let then_expr = pop_expr(vals);
@@ -176,7 +176,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
                 start_record_entry(p, Vec::new(), stack)?;
             }
         }
-        TokenKind::Fn => {
+        TokenKind::Fn if looks_like_closure_after_fn(p) => {
             p.expect(TokenKind::Fn, "Expected 'fn'")?;
             p.expect(TokenKind::LParen, "Expected '('")?;
             step_closure_params(p, false, Vec::new(), stack, vals)?;
@@ -219,17 +219,34 @@ fn step_infix(
                     callee: Box::new(lhs), args: Vec::new(), is_optional: false, is_tagged: false,
                 }));
             } else {
-                stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new() });
+                stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new(), is_optional: false });
                 stack.push(ParseCont::Expr(1));
             }
         }
         TokenKind::LBracket => {
             p.advance();
-            stack.push(ParseCont::ExprIndex { object: lhs });
+            stack.push(ParseCont::ExprIndex { object: lhs, is_optional: false });
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon => {
             p.advance();
+            if kind == TokenKind::QuestionDot && p.eat(TokenKind::LParen) {
+                if p.peek_kind() == TokenKind::RParen || p.at_eof() {
+                    p.expect(TokenKind::RParen, "Expected ')'")?;
+                    vals.push(ParseVal::Expr(Expr::Call {
+                        callee: Box::new(lhs), args: Vec::new(), is_optional: true, is_tagged: false,
+                    }));
+                } else {
+                    stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new(), is_optional: true });
+                    stack.push(ParseCont::Expr(1));
+                }
+                return Ok(());
+            }
+            if kind == TokenKind::QuestionDot && p.eat(TokenKind::LBracket) {
+                stack.push(ParseCont::ExprIndex { object: lhs, is_optional: true });
+                stack.push(ParseCont::Expr(1));
+                return Ok(());
+            }
             let mk = match kind {
                 TokenKind::QuestionDot => MemberKind::SafeNav,
                 TokenKind::ColonColon => MemberKind::Scope,

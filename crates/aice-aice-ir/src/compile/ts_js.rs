@@ -3,10 +3,10 @@ use aice_lang_registry::LanguageId;
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
+use crate::compile::ts_jsx::emit_component;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl};
-use crate::ir_domain::{ComponentDecl, LayoutNode};
 use crate::ir_types::{EnumDecl, ParamDecl, TypeDecl, TypeKind, TypeParam};
 
 pub fn compile(module: &AiceModule, target: LanguageId) -> Result<String, TranspileError> {
@@ -120,6 +120,13 @@ fn emit_class_decl(ec: &mut EmitCtx, cd: &ClassDecl, target: LanguageId, ectx: &
     ec.blank();
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
     let is_js = target == LanguageId::JavaScript;
+    if !is_js {
+        for dec in &cd.decorators {
+            if !matches!(dec.as_str(), "record" | "struct" | "data") && !dec.starts_with("#[") {
+                ec.line(&if dec.starts_with('@') { dec.clone() } else { format!("@{dec}") });
+            }
+        }
+    }
     let exp = if cd.vis == Visibility::Public { "export " } else { "" };
     let abs = if cd.is_abstract && !is_js { "abstract " } else { "" };
     let tps = if is_js { String::new() } else { emit_ts_type_params(&cd.type_params, target) };
@@ -149,6 +156,7 @@ fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, target: LanguageId, ectx: &Expr
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let is_js = target == LanguageId::JavaScript;
+    if !is_js { ec.emit_attrs(&m.trivia); }
     let vis = if is_js || m.accessor == AccessorKind::Constructor { "" } else { ts_vis(m.vis) };
     let st = if m.is_static { "static " } else { "" };
     let asy = if m.is_async { "async " } else { "" };
@@ -188,65 +196,14 @@ fn emit_fn_body(ec: &mut EmitCtx, body: &FnBody, target: LanguageId, ectx: &Expr
     }
 }
 
-fn emit_component(ec: &mut EmitCtx, comp: &ComponentDecl, target: LanguageId, ectx: &ExprEmitCtx) {
-    ec.blank();
-    ec.emit_trivia(&comp.trivia, CommentStyle::Slash);
-    let exp = if comp.vis == Visibility::Public { "export " } else { "" };
-    let ps = emit_ts_params(&comp.params, target, target != LanguageId::JavaScript);
-    ec.line(&format!("{exp}function {}({ps}) {{", comp.name));
-    ec.push();
-    ec.line("return (");
-    ec.push();
-    for node in &comp.layout { emit_jsx_node(ec, node, target, ectx); }
-    ec.pop();
-    ec.line(");");
-    ec.pop();
-    ec.line("}");
-}
-
-fn emit_jsx_node(ec: &mut EmitCtx, root: &LayoutNode, target: LanguageId, ectx: &ExprEmitCtx) {
-    enum JOp<'a> { Node(&'a LayoutNode), Close(String) }
-    let mut tasks = vec![JOp::Node(root)];
-    while let Some(op) = tasks.pop() {
-        match op {
-            JOp::Close(tag) => { ec.pop(); ec.line(&format!("</{tag}>")); }
-            JOp::Node(node) => {
-                let LayoutNode::Element { tag, attrs, text, child_expr, children, .. } = node else { continue };
-                if tag == "#text" {
-                    if let Some(t) = text { ec.line(t); }
-                    continue;
-                }
-                if tag == "#expr" {
-                    if let Some(ex) = child_expr { ec.line(&format!("{{{}}}", emit_expr(ex, target, ectx))); }
-                    continue;
-                }
-                let mut attr_s = String::new();
-                for a in attrs {
-                    match &a.value {
-                        Some(crate::ir_code::Expr::Literal(crate::ir_code::LiteralVal::Str { value, .. })) => {
-                            attr_s.push_str(&format!(" {}=\"{value}\"", a.name));
-                        }
-                        Some(ex) => attr_s.push_str(&format!(" {}={{{}}}", a.name, emit_expr(ex, target, ectx))),
-                        None => attr_s.push_str(&format!(" {}", a.name)),
-                    }
-                }
-                if let Some(t) = text { ec.line(&format!("<{tag}{attr_s}>{t}</{tag}>")); }
-                else if let Some(ex) = child_expr { ec.line(&format!("<{tag}{attr_s}>{{{}}}</{tag}>", emit_expr(ex, target, ectx))); }
-                else if children.is_empty() { ec.line(&format!("<{tag}{attr_s} />")); }
-                else {
-                    ec.line(&format!("<{tag}{attr_s}>"));
-                    ec.push();
-                    tasks.push(JOp::Close(tag.clone()));
-                    for ch in children.iter().rev() { tasks.push(JOp::Node(ch)); }
-                }
-            }
-        }
-    }
-}
-
-fn emit_ts_params(params: &[ParamDecl], target: LanguageId, include_types: bool) -> String {
+pub(crate) fn emit_ts_params(params: &[ParamDecl], target: LanguageId, include_types: bool) -> String {
     params.iter().map(|p| {
-        let mut s = if p.is_rest { "...".into() } else { String::new() };
+        let mut s = String::new();
+        if include_types {
+            s.push_str(ts_vis(p.vis));
+            if p.is_readonly { s.push_str("readonly "); }
+        }
+        if p.is_rest { s.push_str("..."); }
         s.push_str(&p.name);
         if p.is_optional && include_types { s.push('?'); }
         if include_types && let Some(ref ty) = p.ty { s.push_str(&format!(": {}", emit_type(ty, target))); }
@@ -264,7 +221,7 @@ fn ts_vis(v: Visibility) -> &'static str {
     }
 }
 
-fn emit_ts_type_params(tps: &[TypeParam], target: LanguageId) -> String {
+pub(crate) fn emit_ts_type_params(tps: &[TypeParam], target: LanguageId) -> String {
     if tps.is_empty() { return String::new(); }
     let items: Vec<String> = tps.iter().map(|tp| {
         let mut s = tp.name.clone();

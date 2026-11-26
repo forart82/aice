@@ -78,7 +78,10 @@ pub(crate) fn print_enum_decl(c: &mut PrintCtx<'_>, ed: &EnumDecl, d: usize) {
 
 pub(crate) fn print_class_decl(c: &mut PrintCtx<'_>, cd: &ClassDecl, d: usize) {
     c.emit_trivia(&cd.trivia, d);
-    for dec in &cd.decorators { c.line(d, &format!("@{dec}")); }
+    for dec in &cd.decorators {
+        if dec.starts_with("#[") || dec.starts_with('@') { c.line(d, dec); }
+        else { c.line(d, &format!("@{dec}")); }
+    }
     let abs = if cd.is_abstract { "abstract " } else { "" };
     let ctor = if cd.primary_ctor.is_empty() { String::new() } else { format!("({})", format_params(c, &cd.primary_ctor)) };
     let ext = cd.extends.as_ref().map(|e| format!(" extends {e}")).unwrap_or_default();
@@ -132,7 +135,10 @@ fn print_method_decl(c: &mut PrintCtx<'_>, m: &MethodDecl, d: usize) {
 
 pub(crate) fn print_fn_decl(c: &mut PrintCtx<'_>, f: &FnDecl, d: usize) {
     c.emit_trivia(&f.trivia, d);
-    for dec in &f.decorators { c.line(d, &format!("@{dec}")); }
+    for dec in &f.decorators {
+        if dec.starts_with("#[") || dec.starts_with('@') { c.line(d, dec); }
+        else { c.line(d, &format!("@{dec}")); }
+    }
     let asy = if f.is_async { "async " } else { "" };
     let ret = if c.opts.include_types {
         f.return_type.as_ref().map(|t| format!(" -> {}", print_type(t))).unwrap_or_default()

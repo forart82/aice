@@ -61,6 +61,8 @@ fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl) {
     ec.line(&format!("{}{kw} {} {{", rs_vis(td.vis), td.name));
     ec.push();
     for f in &td.fields {
+        ec.emit_trivia(&f.trivia, CommentStyle::Slash);
+        ec.emit_attrs(&f.trivia);
         let t = f.ty.as_ref().map(|x| emit_type(x, LanguageId::Rust)).unwrap_or_else(|| "()".into());
         ec.line(&format!("{}{}: {t},", rs_vis(f.vis), f.name));
     }
@@ -108,6 +110,8 @@ fn emit_struct_impl(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
             ec.line(&format!("{}struct {} {{", rs_vis(cd.vis), cd.name));
             ec.push();
             for p in &cd.props {
+                ec.emit_trivia(&p.trivia, CommentStyle::Slash);
+                ec.emit_attrs(&p.trivia);
                 let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Rust)).unwrap_or_else(|| "()".into());
                 ec.line(&format!("{}{}: {t},", rs_vis(p.vis), p.name));
             }

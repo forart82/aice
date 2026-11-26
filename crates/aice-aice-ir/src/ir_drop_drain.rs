@@ -141,7 +141,7 @@ pub(crate) fn drain_expr(e: &mut Expr, work: &mut Vec<DropWork>) {
             work.extend(std::mem::take(args).into_iter().map(DropWork::Expr));
         }
         Expr::Member { object, .. } => push_expr(object, work),
-        Expr::Index { object, index } => {
+        Expr::Index { object, index, .. } => {
             push_expr(object, work);
             push_expr(index, work);
         }

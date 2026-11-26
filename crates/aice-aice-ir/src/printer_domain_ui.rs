@@ -1,22 +1,35 @@
 use crate::ir_domain::{ComponentDecl, LayoutNode, StyleDecl, TemplateCtrlKind};
 use crate::printer::{PrintCtx, format_params};
+use crate::printer_decl::format_type_params;
 use crate::printer_domain::format_ident_or_quoted;
 use crate::printer_expr::{escape_str, print_expr};
+use crate::printer_stmt::print_block_stmts;
 
 pub(crate) fn print_component(c: &mut PrintCtx<'_>, comp: &ComponentDecl, d: usize) {
     c.emit_trivia(&comp.trivia, d);
+    let tps = format_type_params(&comp.type_params);
     let ps = if comp.params.is_empty() { String::new() } else { format!("({})", format_params(c, &comp.params)) };
     let dt = if comp.has_doctype { " [doctype]" } else { "" };
-    c.line_tr(d, &format!("{}component {}{}{dt}:", comp.vis.aice_prefix(), comp.name, ps), &comp.trivia);
-    if comp.layout.is_empty() {
+    c.line_tr(d, &format!("{}component {}{}{}{dt}:", comp.vis.aice_prefix(), comp.name, tps, ps), &comp.trivia);
+    if comp.body_stmts.is_empty() && comp.layout.is_empty() {
         c.line(d + 1, "pass");
         return;
     }
+    let layout_d = if !comp.body_stmts.is_empty() {
+        print_block_stmts(c, &comp.body_stmts, d + 1);
+        if comp.layout.is_empty() {
+            return;
+        }
+        c.line(d + 1, "ret:");
+        d + 2
+    } else {
+        d + 1
+    };
     enum Task<'a> {
         Node(&'a LayoutNode, usize),
         BranchHdr(&'a str, usize),
     }
-    let mut tasks: Vec<Task<'_>> = comp.layout.iter().rev().map(|n| Task::Node(n, d + 1)).collect();
+    let mut tasks: Vec<Task<'_>> = comp.layout.iter().rev().map(|n| Task::Node(n, layout_d)).collect();
     while let Some(t) = tasks.pop() {
         match t {
             Task::BranchHdr(cond, bd) => {

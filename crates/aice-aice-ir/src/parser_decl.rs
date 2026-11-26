@@ -66,7 +66,9 @@ pub(crate) fn parse_type_decl(p: &mut Parser<'_>, vis: Visibility, default_kind:
             p.skip_newlines();
             if p.eat(TokenKind::Indent) {
                 while !p.at_eof() && p.peek_kind() != TokenKind::Dedent {
-                    let mtr = p.collect_leading_trivia();
+                    let mut mtr = p.collect_leading_trivia();
+                    if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
+                    p.collect_member_attrs(&mut mtr);
                     if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
                     if p.eat(TokenKind::Pass) { p.eat_stmt_end(); continue; }
                     let mvis = p.parse_visibility();

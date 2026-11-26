@@ -33,7 +33,9 @@ pub(crate) fn parse_class_decl(
         p.skip_newlines();
         if p.eat(TokenKind::Indent) {
             while !p.at_eof() && p.peek_kind() != TokenKind::Dedent {
-                let mtr = p.collect_leading_trivia();
+                let mut mtr = p.collect_leading_trivia();
+                if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
+                p.collect_member_attrs(&mut mtr);
                 if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
                 if p.eat(TokenKind::Pass) { p.eat_stmt_end(); continue; }
                 let mvis = p.parse_visibility();
@@ -94,14 +96,21 @@ pub(crate) fn parse_method_decl(p: &mut Parser<'_>, vis: Visibility, is_static: 
     Ok(MethodDecl { vis, is_static, is_async, is_const, accessor, name, type_params, params, return_type, body, trivia: tr, span: sp })
 }
 
-pub(crate) fn parse_directive_or_decorated(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) -> Result<AiceItem, TranspileError> {
+pub(crate) fn parse_directive_or_decorated(p: &mut Parser<'_>, vis: Visibility, mut trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let sp = p.peek().span;
     let mut decs = Vec::new();
-    while p.eat(TokenKind::At) {
-        decs.push(p.line_rest_raw());
-        p.eat_stmt_end();
+    loop {
+        if p.eat(TokenKind::At) || (p.peek_kind() == TokenKind::Hash && p.peek_n(1).kind == TokenKind::LBracket) {
+            decs.push(p.line_rest_raw());
+            p.eat_stmt_end();
+            trivia.leading.extend(p.collect_leading_trivia().leading);
+        } else {
+            break;
+        }
     }
     let vis2 = if vis == Visibility::Default { p.parse_visibility() } else { vis };
+    let is_abs = p.peek_kind() == TokenKind::Ident && p.peek().lexeme == "abstract" && p.peek_n(1).kind == TokenKind::Class;
+    if is_abs { p.advance(); }
     match p.peek_kind() {
         TokenKind::Fn | TokenKind::Async => {
             let is_async = p.eat(TokenKind::Async);
@@ -110,10 +119,13 @@ pub(crate) fn parse_directive_or_decorated(p: &mut Parser<'_>, vis: Visibility, 
             Ok(item)
         }
         TokenKind::Class => {
-            let mut item = parse_class_decl(p, vis2, false, trivia)?;
+            let mut item = parse_class_decl(p, vis2, is_abs, trivia)?;
             if let AiceItem::Class(ref mut c) = item { c.decorators = decs; }
             Ok(item)
         }
-        _ => Ok(AiceItem::Directive { text: format!("@{}", decs.join(" @")), trivia, span: sp }),
+        _ => {
+            let text = decs.into_iter().map(|d| if d.starts_with("#[") { d } else { format!("@{d}") }).collect::<Vec<_>>().join(" ");
+            Ok(AiceItem::Directive { text, trivia, span: sp })
+        }
     }
 }

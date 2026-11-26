@@ -5,6 +5,7 @@ use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::{normalize_single_line, push_attrs_to_trivia};
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{ClassDecl, ConstDecl, FnBody, FnDecl, MethodDecl, Stmt};
 use crate::ir_types::{EnumDecl, EnumVariant, FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind, VariantPayload};
@@ -24,8 +25,8 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                         vis, source: arg, specifiers: Vec::new(), is_type_only: false, trivia: tr, span: node_span(ch),
                     }));
                 }
-                "struct_item" => m.items.push(AiceItem::Type(decompile_struct(ch, vis, src, tr))),
-                "enum_item" => m.items.push(AiceItem::Enum(decompile_enum(ch, vis, src, tr))),
+                "struct_item" => m.items.push(AiceItem::Type(decompile_struct(ch, vis, src, opts, tr))),
+                "enum_item" => m.items.push(AiceItem::Enum(decompile_enum(ch, vis, src, opts, tr))),
                 "trait_item" => m.items.push(AiceItem::Type(decompile_trait(ch, vis, src, opts, tr))),
                 "type_item" => {
                     let name = field_text(ch, "name", src).unwrap_or("Alias").to_string();
@@ -92,28 +93,42 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
     })
 }
 
-fn decompile_struct(node: Node<'_>, vis: Visibility, src: &str, tr: Trivia) -> TypeDecl {
+fn decompile_struct(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileOpts, tr: Trivia) -> TypeDecl {
     let name = field_text(node, "name", src).unwrap_or("Struct").to_string();
-    let mut fields = Vec::new();
-    if let Some(body) = node.child_by_field_name("body") {
-        for ch in named_children(body) {
-            if ch.kind() == "field_declaration" {
-                let fnm = field_text(ch, "name", src).unwrap_or("f").to_string();
-                let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Rust));
-                fields.push(FieldDecl {
-                    name: fnm, vis: rs_vis(ch, src), is_readonly: true, is_optional: false,
-                    sigil: FieldSigil::None, ty, default: None, trivia: Trivia::default(),
-                });
-            }
-        }
-    }
+    let fields = node.child_by_field_name("body")
+        .map(|b| extract_rs_fields(b, src, opts, true))
+        .unwrap_or_default();
     TypeDecl {
         vis, kind: TypeKind::Struct, name, type_params: Vec::new(), extends: Vec::new(),
         fields, methods: Vec::new(), alias_target: None, trivia: tr, span: node_span(node),
     }
 }
 
-fn decompile_enum(node: Node<'_>, vis: Visibility, src: &str, tr: Trivia) -> EnumDecl {
+fn extract_rs_fields(body: Node<'_>, src: &str, opts: &TranspileOpts, is_struct: bool) -> Vec<FieldDecl> {
+    let mut fields = Vec::new();
+    let mut pending_attrs: Vec<String> = Vec::new();
+    for ch in named_children(body) {
+        if is_comment_kind(ch.kind()) { continue; }
+        if ch.kind() == "attribute_item" {
+            pending_attrs.push(normalize_single_line(node_text(ch, src)));
+        } else if ch.kind() == "field_declaration" {
+            let mut ftr = collect_trivia(ch, src, opts);
+            push_attrs_to_trivia(&mut ftr, std::mem::take(&mut pending_attrs));
+            let fnm = field_text(ch, "name", src).unwrap_or("f").to_string();
+            let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Rust));
+            fields.push(FieldDecl {
+                name: fnm, vis: if is_struct { rs_vis(ch, src) } else { Visibility::Default },
+                is_readonly: is_struct, is_optional: false,
+                sigil: FieldSigil::None, ty, default: None, trivia: ftr,
+            });
+        } else {
+            pending_attrs.clear();
+        }
+    }
+    fields
+}
+
+fn decompile_enum(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileOpts, tr: Trivia) -> EnumDecl {
     let name = field_text(node, "name", src).unwrap_or("Enum").to_string();
     let mut variants = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
@@ -122,15 +137,7 @@ fn decompile_enum(node: Node<'_>, vis: Visibility, src: &str, tr: Trivia) -> Enu
                 let vn = field_text(ch, "name", src).unwrap_or("V").to_string();
                 let payload = match ch.child_by_field_name("body") {
                     Some(b) if b.kind() == "field_declaration_list" => {
-                        let fs = named_children(b).into_iter().filter(|f| f.kind() == "field_declaration").map(|f| {
-                            let fnm = field_text(f, "name", src).unwrap_or("f").to_string();
-                            let fty = field_text(f, "type", src).map(|t| map_type_str(t, LanguageId::Rust));
-                            FieldDecl {
-                                name: fnm, vis: Visibility::Default, is_readonly: false, is_optional: false,
-                                sigil: FieldSigil::None, ty: fty, default: None, trivia: Trivia::default(),
-                            }
-                        }).collect();
-                        VariantPayload::Struct(fs)
+                        VariantPayload::Struct(extract_rs_fields(b, src, opts, false))
                     }
                     Some(b) if b.kind() == "ordered_field_declaration_list" => {
                         let ts = named_children(b).into_iter()

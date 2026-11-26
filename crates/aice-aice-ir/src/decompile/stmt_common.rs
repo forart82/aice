@@ -13,6 +13,20 @@ pub(crate) fn decompile_block(node: Node<'_>, src: &str, lang: LanguageId, opts:
     env.blocks.pop().unwrap_or_default()
 }
 
+pub(crate) fn decompile_stmt_nodes(
+    nodes: Vec<Node<'_>>,
+    src: &str,
+    lang: LanguageId,
+    opts: &TranspileOpts,
+) -> Vec<Stmt> {
+    let mut env = DecompEnv::new(src, lang, opts);
+    let base = env.stmts.len();
+    env.tasks.push(DTask::FinishBlock(base));
+    crate::decompile::iter_stmt::push_stmt_nodes(&mut env, nodes);
+    env.run();
+    env.blocks.pop().unwrap_or_default()
+}
+
 pub(crate) fn find_body_node<'a>(node: Node<'a>) -> Option<Node<'a>> {
     node.child_by_field_name("body")
         .or_else(|| node.child_by_field_name("consequence"))

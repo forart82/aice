@@ -37,9 +37,17 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
 fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
-    ec.line(&format!("class {} {{", cd.name));
+    for dec in &cd.decorators {
+        if dec.starts_with("#[") { ec.line(dec); }
+    }
+    let abs = if cd.is_abstract { "abstract " } else { "" };
+    let ext = cd.extends.as_ref().map(|e| format!(" extends {e}")).unwrap_or_default();
+    let imp = if cd.implements.is_empty() { String::new() } else { format!(" implements {}", cd.implements.join(", ")) };
+    ec.line(&format!("{abs}class {}{ext}{imp} {{", cd.name));
     ec.push();
     for p in &cd.props {
+        ec.emit_trivia(&p.trivia, CommentStyle::Slash);
+        ec.emit_attrs(&p.trivia);
         let t = p.ty.as_ref().map(|x| format!("{} ", emit_type(x, LanguageId::Php))).unwrap_or_default();
         ec.line(&format!("{}{t}${};", php_vis(p.vis), p.name));
     }
@@ -50,6 +58,7 @@ fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 
 fn emit_php_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+    ec.emit_attrs(&m.trivia);
     let ps = emit_php_params(&m.params);
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Php))).unwrap_or_default();
     ec.line(&format!("{}function {}({ps}){rt} {{", php_vis(m.vis), m.name));
@@ -66,6 +75,9 @@ fn emit_php_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
 fn emit_php_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
+    for dec in &f.decorators {
+        if dec.starts_with("#[") { ec.line(dec); }
+    }
     let ps = emit_php_params(&f.params);
     let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Php))).unwrap_or_default();
     ec.line(&format!("function {}({ps}){rt} {{", f.name));

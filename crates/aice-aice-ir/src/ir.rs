@@ -92,6 +92,7 @@ pub enum TriviaKind {
     Docstring,
     License,
     Directive,
+    Attribute,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

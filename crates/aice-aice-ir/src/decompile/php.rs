@@ -4,6 +4,7 @@ use tree_sitter::Node;
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::{normalize_single_line, push_attrs_to_trivia};
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::ParamDecl;
@@ -44,15 +45,30 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
 
 fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
+    let decorators = extract_php_attrs(node, src);
+    let extends = child_by_kind(node, "base_clause")
+        .and_then(|bc| named_children(bc).into_iter().next())
+        .map(|n| node_text(n, src).trim().to_string())
+        .filter(|s| !s.is_empty());
+    let implements = child_by_kind(node, "class_interface_clause")
+        .map(|ic| {
+            named_children(ic).into_iter()
+                .map(|n| node_text(n, src).trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default();
+    let is_abstract = child_by_kind(node, "abstract_modifier").is_some();
     let mut props = Vec::new();
     let mut methods = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
         for ch in named_children(body) {
             if is_comment_kind(ch.kind()) { continue; }
-            let mtr = collect_trivia(ch, src, opts);
+            let mut mtr = collect_trivia(ch, src, opts);
             let mvis = php_vis(ch, src);
             match ch.kind() {
                 "property_declaration" => {
+                    push_attrs_to_trivia(&mut mtr, extract_php_attrs(ch, src));
                     let ty = ch.child_by_field_name("type").map(|t| map_type_str(node_text(t, src), LanguageId::Php));
                     for el in named_children(ch) {
                         if el.kind() == "property_element" {
@@ -65,6 +81,7 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                     }
                 }
                 "method_declaration" => {
+                    push_attrs_to_trivia(&mut mtr, extract_php_attrs(ch, src));
                     let f = decompile_php_fn(ch, src, opts, mtr);
                     let accessor = if f.name == "__construct" { AccessorKind::Constructor } else { AccessorKind::Normal };
                     methods.push(MethodDecl {
@@ -78,14 +95,15 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
         }
     }
     ClassDecl {
-        vis: Visibility::Public, is_abstract: false, decorators: Vec::new(), name,
-        type_params: Vec::new(), primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
+        vis: Visibility::Public, is_abstract, decorators, name,
+        type_params: Vec::new(), primary_ctor: Vec::new(), extends, implements,
         props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }
 }
 
 fn decompile_php_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
     let name = field_text(node, "name", src).unwrap_or("fn_anon").to_string();
+    let decorators = extract_php_attrs(node, src);
     let mut params = Vec::new();
     if let Some(pl) = node.child_by_field_name("parameters") {
         for ch in named_children(pl) {
@@ -102,9 +120,25 @@ fn decompile_php_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia)
     let return_type = node.child_by_field_name("return_type").map(|t| map_type_str(node_text(t, src), LanguageId::Php));
     let body = node.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, LanguageId::Php, opts))).unwrap_or(FnBody::SignatureOnly);
     FnDecl {
-        vis: php_vis(node, src), is_async: false, is_static: false, decorators: Vec::new(), name,
+        vis: php_vis(node, src), is_async: false, is_static: false, decorators, name,
         type_params: Vec::new(), params, return_type, body, trivia: tr, span: node_span(node),
     }
+}
+
+fn extract_php_attrs(node: Node<'_>, src: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let Some(list) = node.child_by_field_name("attributes").or_else(|| child_by_kind(node, "attribute_list")) else {
+        return out;
+    };
+    for ch in named_children(list) {
+        if ch.kind() == "attribute_group" {
+            let txt = normalize_single_line(node_text(ch, src));
+            if !txt.is_empty() {
+                out.push(txt);
+            }
+        }
+    }
+    out
 }
 
 fn php_vis(node: Node<'_>, src: &str) -> Visibility {

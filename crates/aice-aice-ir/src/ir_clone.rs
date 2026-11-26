@@ -35,7 +35,7 @@ pub(crate) enum ExprFinish {
     PostfixTry,
     Call { argc: usize, is_optional: bool, is_tagged: bool },
     Member { property: String, kind: MemberKind },
-    Index,
+    Index { is_optional: bool },
     Array(usize),
     Record(usize),
     Closure { is_async: bool, param_len: usize, has_ret: bool },

@@ -1,16 +1,18 @@
 use crate::ir::{Span, Trivia, Visibility};
-use crate::ir_code::Expr;
+use crate::ir_code::{Expr, Stmt};
 pub use crate::ir_domain_db::{
     DbColumn, DbMigrationDecl, DbQueryDecl, DbQueryKind, DbSchemaDecl, GraphQlField, PrismaField,
 };
-use crate::ir_types::ParamDecl;
+use crate::ir_types::{ParamDecl, TypeParam};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ComponentDecl {
     pub vis: Visibility,
     pub name: String,
+    pub type_params: Vec<TypeParam>,
     pub params: Vec<ParamDecl>,
     pub has_doctype: bool,
+    pub body_stmts: Vec<Stmt>,
     pub layout: Vec<LayoutNode>,
     pub trivia: Trivia,
     pub span: Span,

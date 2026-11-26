@@ -28,8 +28,8 @@ fn decompile_html(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<Aic
         }
     }
     m.items.push(AiceItem::Component(ComponentDecl {
-        vis: Visibility::Public, name: "Page".into(), params: Vec::new(),
-        has_doctype, layout, trivia: Trivia::default(), span: node_span(root),
+        vis: Visibility::Public, name: "Page".into(), type_params: Vec::new(), params: Vec::new(),
+        has_doctype, body_stmts: Vec::new(), layout, trivia: Trivia::default(), span: node_span(root),
     }));
     Ok(m)
 }

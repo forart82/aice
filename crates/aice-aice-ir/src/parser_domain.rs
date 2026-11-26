@@ -4,11 +4,21 @@ use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
 use crate::parser_decl::parse_param_list;
 use crate::parser_domain_layout::parse_layout_nodes;
+use crate::parser_stmt::{attach_stmt_trivia, parse_stmt};
+use crate::parser_types::parse_type_params;
 
 pub(crate) fn parse_component(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let sp = p.peek().span;
     p.expect(TokenKind::Component, "Expected 'component'")?;
     let name = p.expect_ident_or_kw("Expected component name")?.lexeme;
+    let is_doctype_tok = p.peek_kind() == TokenKind::LBracket
+        && p.peek_n(1).lexeme == "doctype"
+        && p.peek_n(2).kind == TokenKind::RBracket;
+    let type_params = if p.peek_kind() == TokenKind::LBracket && !is_doctype_tok {
+        parse_type_params(p)?
+    } else {
+        Vec::new()
+    };
     let params = if p.eat(TokenKind::LParen) { parse_param_list(p)? } else { Vec::new() };
     let has_doctype = if p.eat(TokenKind::LBracket) {
         let kw = p.expect_ident_or_kw("Expected flag")?.lexeme;
@@ -16,16 +26,64 @@ pub(crate) fn parse_component(p: &mut Parser<'_>, vis: Visibility, trivia: Trivi
         kw == "doctype"
     } else { false };
     let mut tr = trivia;
+    let mut body_stmts = Vec::new();
     let mut layout = Vec::new();
     if p.eat(TokenKind::Colon) {
         if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
         p.skip_newlines();
         if p.eat(TokenKind::Indent) {
-            layout = parse_layout_nodes(p)?;
-            p.eat(TokenKind::Dedent);
+            if has_component_ret_block(p) {
+                while !p.at_eof() && p.peek_kind() != TokenKind::Dedent {
+                    let st_tr = p.collect_leading_trivia();
+                    if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
+                    if p.peek_kind() == TokenKind::Ret && p.peek_n(1).kind == TokenKind::Colon {
+                        p.advance();
+                        p.advance();
+                        let _ = p.take_trailing_comment();
+                        p.skip_newlines();
+                        if p.eat(TokenKind::Indent) {
+                            layout = parse_layout_nodes(p)?;
+                            p.eat(TokenKind::Dedent);
+                        }
+                        p.eat_stmt_end();
+                        break;
+                    }
+                    let mut st = parse_stmt(p)?;
+                    attach_stmt_trivia(&mut st, st_tr, p.take_trailing_comment());
+                    body_stmts.push(st);
+                    p.eat_stmt_end();
+                }
+                p.eat(TokenKind::Dedent);
+            } else {
+                layout = parse_layout_nodes(p)?;
+                p.eat(TokenKind::Dedent);
+            }
         }
     }
-    Ok(AiceItem::Component(ComponentDecl { vis, name, params, has_doctype, layout, trivia: tr, span: sp }))
+    Ok(AiceItem::Component(ComponentDecl {
+        vis, name, type_params, params, has_doctype, body_stmts, layout, trivia: tr, span: sp,
+    }))
+}
+
+fn has_component_ret_block(p: &Parser<'_>) -> bool {
+    let mut idx = p.pos;
+    let mut depth = 0isize;
+    while idx < p.tokens.len() {
+        match p.tokens[idx].kind {
+            TokenKind::Indent => depth += 1,
+            TokenKind::Dedent => {
+                if depth == 0 { return false; }
+                depth -= 1;
+            }
+            TokenKind::Ret if depth == 0 && p.tokens.get(idx + 1).is_some_and(|t| t.kind == TokenKind::Colon) => {
+                return true;
+            }
+            TokenKind::Eof => return false,
+            _ => {}
+        }
+        idx += 1;
+    }
+    false
 }
 
 pub(crate) fn parse_style(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem, TranspileError> {

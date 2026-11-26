@@ -32,11 +32,11 @@ pub(crate) enum CTask<'a> {
     MakeRecord { entries: &'a [RecordEntry], n_vals: usize },
     MakeInlineJsx { tag: &'a str, entries: Option<&'a [RecordEntry]>, n_attr_vals: usize, children: &'a [Expr], n_child_vals: usize },
     MakeArray(usize),
-    MakeIndex,
+    MakeIndex { is_optional: bool },
     MakeMember { property: &'a str, kind: MemberKind },
     MakeAssign(AssignOp),
     MakeAwait,
-    MakeCall { callee_lit: Option<String>, class_new: Option<String>, n_args: usize },
+    MakeCall { callee_lit: Option<String>, class_new: Option<String>, n_args: usize, is_optional: bool },
     MakeRustStructCall,
     MakeRubyBlock { params: &'a [ParamDecl], body_kind: u8, n_prefix: usize },
     MakeClosure { is_async: bool, params: &'a [ParamDecl], ret: Option<&'a AiceType>, body_kind: u8 },
@@ -170,7 +170,7 @@ fn run_tasks<'a>(lang: LanguageId, ectx: &ExprEmitCtx, st: &mut EvalState, tasks
             CTask::EvalExpr(_) | CTask::MakeBinary { .. } | CTask::MakeUnary { .. }
             | CTask::MakeCond | CTask::MakePostfixTry | CTask::MakeTemplate { .. }
             | CTask::MakeRecord { .. } | CTask::MakeInlineJsx { .. } | CTask::MakeArray(_)
-            | CTask::MakeIndex | CTask::MakeMember { .. } | CTask::MakeAssign(_)
+            | CTask::MakeIndex { .. } | CTask::MakeMember { .. } | CTask::MakeAssign(_)
             | CTask::MakeAwait | CTask::MakeCall { .. } | CTask::MakeRustStructCall
             | CTask::MakeRubyBlock { .. } | CTask::MakeClosure { .. } => step_expr_task(task, lang, ectx, st, tasks),
             CTask::EvalPat(_) | CTask::MakePatCtor { .. } | CTask::MakePatOr { .. }

@@ -95,6 +95,26 @@ pub(crate) fn start_record_entry(
     Ok(())
 }
 
+pub(crate) fn looks_like_closure_after_fn(p: &Parser<'_>) -> bool {
+    if p.peek_n(1).kind != TokenKind::LParen {
+        return false;
+    }
+    let (mut idx, mut depth) = (p.pos + 2, 1usize);
+    while idx < p.tokens.len() && depth > 0 {
+        match p.tokens[idx].kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => depth -= 1,
+            TokenKind::Eof => return false,
+            _ => {}
+        }
+        idx += 1;
+    }
+    matches!(
+        p.tokens.get(idx).map(|t| t.kind),
+        Some(TokenKind::Equal | TokenKind::FatArrow | TokenKind::LBrace | TokenKind::Arrow)
+    )
+}
+
 pub(crate) fn step_closure_params(
     p: &mut Parser<'_>,
     is_async: bool,

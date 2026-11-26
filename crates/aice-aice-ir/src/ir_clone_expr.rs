@@ -42,8 +42,8 @@ impl<'a> CloneEnv<'a> {
                 self.tasks.push(CloneTask::FinishExpr(ExprFinish::Member { property: property.clone(), kind: *kind }));
                 self.tasks.push(CloneTask::Expr(object));
             }
-            Expr::Index { object, index } => {
-                self.tasks.push(CloneTask::FinishExpr(ExprFinish::Index));
+            Expr::Index { object, index, is_optional } => {
+                self.tasks.push(CloneTask::FinishExpr(ExprFinish::Index { is_optional: *is_optional }));
                 self.tasks.push(CloneTask::Expr(index));
                 self.tasks.push(CloneTask::Expr(object));
             }
@@ -109,10 +109,10 @@ impl<'a> CloneEnv<'a> {
             ExprFinish::Member { property, kind } => {
                 Expr::Member { object: Box::new(self.exprs.pop().expect("mem")), property, kind }
             }
-            ExprFinish::Index => {
+            ExprFinish::Index { is_optional } => {
                 let index = Box::new(self.exprs.pop().expect("idx"));
                 let object = Box::new(self.exprs.pop().expect("obj"));
-                Expr::Index { object, index }
+                Expr::Index { object, index, is_optional }
             }
             ExprFinish::Array(n) => Expr::Array(self.exprs.split_off(self.exprs.len() - n)),
             ExprFinish::Record(n) => Expr::Record(self.recs.split_off(self.recs.len() - n)),

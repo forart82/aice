@@ -11,8 +11,8 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
     let mut m = AiceModule::new(LanguageId::Twig, "twig");
     let layout = walk_twig_iter(&rd.root, src, opts);
     m.items.push(AiceItem::Component(ComponentDecl {
-        vis: Visibility::Public, name: "Template".into(), params: Vec::new(),
-        has_doctype: false, layout, trivia: Trivia::default(), span: Span::new(1, 1, 0, src.len()),
+        vis: Visibility::Public, name: "Template".into(), type_params: Vec::new(), params: Vec::new(),
+        has_doctype: false, body_stmts: Vec::new(), layout, trivia: Trivia::default(), span: Span::new(1, 1, 0, src.len()),
     }));
     Ok(m)
 }

@@ -111,6 +111,20 @@ pub(crate) fn is_destructure_ahead(p: &Parser<'_>) -> bool {
     matches!(p.tokens.get(idx).map(|t| t.kind), Some(TokenKind::ColonEqual | TokenKind::ColonColonEqual))
 }
 
+pub(crate) fn is_obj_destructure_ahead(p: &Parser<'_>) -> bool {
+    let (mut idx, mut depth) = (p.pos + 1, 1usize);
+    while idx < p.tokens.len() && depth > 0 {
+        match p.tokens[idx].kind {
+            TokenKind::LBrace => depth += 1,
+            TokenKind::RBrace => depth -= 1,
+            TokenKind::Newline | TokenKind::Eof => return false,
+            _ => {}
+        }
+        idx += 1;
+    }
+    matches!(p.tokens.get(idx).map(|t| t.kind), Some(TokenKind::ColonEqual | TokenKind::ColonColonEqual))
+}
+
 pub(crate) fn eat_assign_op(p: &mut Parser<'_>) -> Option<AssignOp> {
     let op = match p.peek_kind() {
         TokenKind::Equal => AssignOp::Assign, TokenKind::PlusEq => AssignOp::AddAssign,

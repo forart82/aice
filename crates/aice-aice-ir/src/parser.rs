@@ -94,6 +94,24 @@ impl<'a> Parser<'a> {
         trivia
     }
 
+    pub fn collect_member_attrs(&mut self, tr: &mut Trivia) {
+        loop {
+            if self.eat(TokenKind::At) {
+                let rest = self.line_rest_raw();
+                tr.leading.push(TriviaComment { kind: TriviaKind::Attribute, text: format!("@{rest}") });
+                self.eat_stmt_end();
+                tr.leading.extend(self.collect_leading_trivia().leading);
+            } else if self.peek_kind() == TokenKind::Hash && self.peek_n(1).kind == TokenKind::LBracket {
+                let rest = self.line_rest_raw();
+                tr.leading.push(TriviaComment { kind: TriviaKind::Attribute, text: rest });
+                self.eat_stmt_end();
+                tr.leading.extend(self.collect_leading_trivia().leading);
+            } else {
+                break;
+            }
+        }
+    }
+
     pub fn take_trailing_comment(&mut self) -> Option<String> {
         if self.peek_kind() == TokenKind::Comment { Some(self.advance().lexeme) } else { None }
     }
@@ -189,6 +207,7 @@ impl<'a> Parser<'a> {
             TokenKind::Style => parse_style(self, trivia),
             TokenKind::Tokens => parse_tokens(self, trivia),
             TokenKind::At => parse_directive_or_decorated(self, vis, trivia),
+            TokenKind::Hash if self.peek_n(1).kind == TokenKind::LBracket => parse_directive_or_decorated(self, vis, trivia),
             TokenKind::Ident => self.parse_ident_led_item(vis, trivia, sp),
             _ => Err(TranspileError::at(format!("Unexpected token {:?} '{}' at module level", self.peek_kind(), self.peek().lexeme), sp)),
         }

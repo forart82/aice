@@ -33,6 +33,7 @@ pub mod rust_lang;
 pub mod shell_md;
 pub mod stmt_common;
 pub mod ts_js;
+mod ts_jsx;
 pub mod twig;
 pub mod type_map;
 pub mod type_map_c;

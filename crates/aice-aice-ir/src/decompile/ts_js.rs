@@ -7,6 +7,10 @@ use crate::decompile::cst_util::{
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::{
+    extract_ts_class_heritage, extract_ts_decorators, format_ts_decorator_attr, is_ts_prop_optional,
+    is_ts_readonly_prefix, push_attrs_to_trivia,
+};
 use crate::decompile::tsx_jsx::{extract_ts_params, extract_ts_type_params, map_ts_type_node, try_extract_jsx_component};
 use crate::ir::{
     AiceItem, AiceModule, ImportDecl, ImportSpec, TranspileError, TranspileOpts, Trivia, Visibility,
@@ -36,7 +40,9 @@ fn decompile_top_item(
     opts: &TranspileOpts,
     m: &mut AiceModule,
 ) {
+    let mut decorators = Vec::new();
     while node.kind() == "export_statement" {
+        decorators.extend(extract_ts_decorators(node, src));
         if let Some(decl) = node.child_by_field_name("declaration") {
             if tr.is_empty() { tr = collect_trivia(decl, src, opts); }
             vis = Visibility::Public;
@@ -60,14 +66,14 @@ fn decompile_top_item(
         }
         "enum_declaration" => { m.items.push(AiceItem::Enum(decompile_enum(node, vis, src, lang, tr))); }
         "class_declaration" | "abstract_class_declaration" => {
-            m.items.push(AiceItem::Class(decompile_class(node, vis, src, lang, opts, tr)));
+            m.items.push(AiceItem::Class(decompile_class(node, vis, decorators, src, lang, opts, tr)));
         }
         "function_declaration" => {
             let name = field_text(node, "name", src).unwrap_or("fn_anon").to_string();
             let type_params = extract_ts_type_params(node, src, lang);
             let params = node.child_by_field_name("parameters").map(|p| extract_ts_params(p, src, lang)).unwrap_or_default();
             if lang == LanguageId::Tsx
-                && let Some(comp) = try_extract_jsx_component(node, &name, params.clone(), src, lang, tr.clone())
+                && let Some(comp) = try_extract_jsx_component(node, vis, &name, type_params.clone(), params.clone(), src, lang, opts, tr.clone())
             {
                 m.items.push(AiceItem::Component(comp));
                 return;
@@ -76,7 +82,7 @@ fn decompile_top_item(
             let body = node.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, lang, opts))).unwrap_or(FnBody::SignatureOnly);
             m.items.push(AiceItem::Fn(FnDecl {
                 vis, is_async: node_text(node, src).trim_start().starts_with("async "), is_static: false,
-                decorators: Vec::new(), name, type_params, params, return_type: ret, body, trivia: tr, span: node_span(node),
+                decorators, name, type_params, params, return_type: ret, body, trivia: tr, span: node_span(node),
             }));
         }
         "lexical_declaration" | "variable_declaration" => {
@@ -142,9 +148,9 @@ fn decompile_interface(node: Node<'_>, vis: Visibility, src: &str, lang: Languag
             if ch.kind() == "property_signature" {
                 let fnm = field_text(ch, "name", src).unwrap_or("p").to_string();
                 let ty = ch.child_by_field_name("type").map(|t| map_ts_type_node(t, src, lang));
-                let opt = node_text(ch, src).contains("?:");
+                let opt = is_ts_prop_optional(ch, src);
                 fields.push(FieldDecl {
-                    name: fnm, vis: Visibility::Default, is_readonly: node_text(ch, src).contains("readonly "),
+                    name: fnm, vis: Visibility::Default, is_readonly: is_ts_readonly_prefix(ch, "name", src),
                     is_optional: opt, sigil: if opt { FieldSigil::Optional } else { FieldSigil::None },
                     ty, default: None, trivia: Trivia::default(),
                 });
@@ -184,16 +190,23 @@ fn decompile_enum(node: Node<'_>, vis: Visibility, src: &str, lang: LanguageId, 
     EnumDecl { vis, name, type_params: Vec::new(), variants, trivia: tr, span: node_span(node) }
 }
 
-fn decompile_class(node: Node<'_>, vis: Visibility, src: &str, lang: LanguageId, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
+fn decompile_class(node: Node<'_>, vis: Visibility, mut decorators: Vec<String>, src: &str, lang: LanguageId, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
     let is_abstract = node.kind() == "abstract_class_declaration" || node_text(node, src).trim_start().starts_with("abstract ");
+    decorators.extend(extract_ts_decorators(node, src));
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
     let type_params = extract_ts_type_params(node, src, lang);
+    let (extends, implements) = extract_ts_class_heritage(node, src);
     let mut props = Vec::new();
     let mut methods = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
+        let mut pending_decs: Vec<String> = Vec::new();
         for ch in named_children(body) {
             if is_comment_kind(ch.kind()) { continue; }
-            let mtr = collect_trivia(ch, src, opts);
+            if ch.kind() == "decorator" {
+                pending_decs.push(format_ts_decorator_attr(ch, src));
+                continue;
+            }
+            let mut mtr = collect_trivia(ch, src, opts);
             let mvis = extract_ts_vis(ch, src);
             let hdr_end = ch.child_by_field_name("name")
                 .or_else(|| ch.child_by_field_name("parameters"))
@@ -202,18 +215,19 @@ fn decompile_class(node: Node<'_>, vis: Visibility, src: &str, lang: LanguageId,
             let hdr = &src[ch.start_byte()..hdr_end];
             match ch.kind() {
                 "public_field_definition" | "field_definition" => {
+                    push_attrs_to_trivia(&mut mtr, std::mem::take(&mut pending_decs));
                     let pname = field_text(ch, "name", src).or_else(|| field_text(ch, "property", src)).unwrap_or("field").to_string();
                     let ty = ch.child_by_field_name("type").map(|t| map_ts_type_node(t, src, lang));
                     let init = ch.child_by_field_name("value").map(|v| decompile_expr(v, src, lang));
-                    let raw = node_text(ch, src);
                     props.push(PropDecl {
                         name: pname.trim_start_matches('#').to_string(), aliases: Vec::new(),
                         vis: if pname.starts_with('#') { Visibility::Private } else { mvis },
                         is_static: hdr.contains("static "), is_readonly: hdr.contains("readonly "),
-                        is_mut: false, is_optional: raw.contains("?:"), ty, init, trivia: mtr,
+                        is_mut: false, is_optional: is_ts_prop_optional(ch, src), ty, init, trivia: mtr,
                     });
                 }
                 "method_definition" | "abstract_method_signature" => {
+                    push_attrs_to_trivia(&mut mtr, std::mem::take(&mut pending_decs));
                     let mname = field_text(ch, "name", src).unwrap_or("method").to_string();
                     let accessor = if mname == "constructor" { AccessorKind::Constructor } else { AccessorKind::Normal };
                     let mtps = extract_ts_type_params(ch, src, lang);
@@ -226,13 +240,13 @@ fn decompile_class(node: Node<'_>, vis: Visibility, src: &str, lang: LanguageId,
                         body: mbody, trivia: mtr, span: node_span(ch),
                     });
                 }
-                _ => {}
+                _ => { pending_decs.clear(); }
             }
         }
     }
     ClassDecl {
-        vis, is_abstract, decorators: Vec::new(), name, type_params,
-        primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
+        vis, is_abstract, decorators, name, type_params,
+        primary_ctor: Vec::new(), extends, implements,
         props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }
 }

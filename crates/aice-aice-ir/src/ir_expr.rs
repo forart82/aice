@@ -80,6 +80,7 @@ pub enum Expr {
     Index {
         object: Box<Expr>,
         index: Box<Expr>,
+        is_optional: bool,
     },
     Array(Vec<Expr>),
     Record(Vec<RecordEntry>),

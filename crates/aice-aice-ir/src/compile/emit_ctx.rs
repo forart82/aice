@@ -1,4 +1,4 @@
-use crate::ir::Trivia;
+use crate::ir::{Trivia, TriviaKind};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum CommentStyle {
@@ -57,6 +57,9 @@ impl EmitCtx {
             CommentStyle::Twig => ("{# ", " #}"),
         };
         for c in &tr.leading {
+            if c.kind == TriviaKind::Attribute {
+                continue;
+            }
             if matches!(style, CommentStyle::Html | CommentStyle::Twig | CommentStyle::CssBlock) {
                 let sanitized = c.text.replace("-->", "-- >").replace("#}", "# }").replace("*/", "* /");
                 self.line(&format!("{pfx}{sanitized}{sfx}"));
@@ -70,6 +73,14 @@ impl EmitCtx {
                         self.line(&format!("{pfx}{trimmed}"));
                     }
                 }
+            }
+        }
+    }
+
+    pub fn emit_attrs(&mut self, tr: &Trivia) {
+        for c in &tr.leading {
+            if c.kind == TriviaKind::Attribute {
+                self.line(&c.text);
             }
         }
     }

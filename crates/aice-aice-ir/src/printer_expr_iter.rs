@@ -100,13 +100,13 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             tasks.push(PTask::Expr(e));
             if wrap { out.push('('); }
         }
-        Expr::Call { callee, args, .. } => {
+        Expr::Call { callee, args, is_optional, .. } => {
             tasks.push(PTask::Lit(")"));
             for (i, a) in args.iter().enumerate().rev() {
                 tasks.push(PTask::Expr(a));
                 if i > 0 { tasks.push(PTask::Lit(", ")); }
             }
-            tasks.push(PTask::Lit("("));
+            tasks.push(PTask::Lit(if *is_optional { "?.(" } else { "(" }));
             tasks.push(PTask::Expr(callee));
         }
         Expr::Member { object, property, kind } => {
@@ -114,10 +114,10 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             tasks.push(PTask::Str(format!("{op}{property}")));
             tasks.push(PTask::Expr(object));
         }
-        Expr::Index { object, index } => {
+        Expr::Index { object, index, is_optional } => {
             tasks.push(PTask::Lit("]"));
             tasks.push(PTask::Expr(index));
-            tasks.push(PTask::Lit("["));
+            tasks.push(PTask::Lit(if *is_optional { "?.[" } else { "[" }));
             tasks.push(PTask::Expr(object));
         }
         Expr::Array(items) => {
@@ -174,7 +174,9 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
                     tasks.push(PTask::Ty(t));
                     tasks.push(PTask::Lit(": "));
                 }
+                if p.is_optional { tasks.push(PTask::Lit("?")); }
                 tasks.push(PTask::Str(p.name.clone()));
+                if p.is_rest { tasks.push(PTask::Lit("...")); }
                 if i > 0 { tasks.push(PTask::Lit(", ")); }
             }
             out.push_str(if *is_async { "async fn(" } else { "fn(" });

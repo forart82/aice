@@ -40,6 +40,7 @@ pub mod stmt_common;
 pub mod stmt_for;
 pub mod stmt_vars;
 pub mod trivia;
+pub mod ts_helpers;
 pub mod ts_js;
 pub mod tsx_jsx;
 pub mod twig;

@@ -1,4 +1,4 @@
-use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileOpts, Trivia};
+use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileOpts, Trivia, TriviaKind};
 use crate::ir_code::AssignOp;
 use crate::ir_types::ParamDecl;
 use crate::printer_decl::{print_class_decl, print_enum_decl, print_fn_decl, print_type_decl};
@@ -89,14 +89,19 @@ impl<'a> PrintCtx<'a> {
     }
 
     pub fn emit_trivia(&mut self, tr: &Trivia, depth: usize) {
-        if !self.opts.preserve_docs {
-            return;
-        }
-        if !self.opts.compact && tr.blank_lines_before > 0 {
+        if self.opts.preserve_docs && !self.opts.compact && tr.blank_lines_before > 0 {
             self.out.push('\n');
         }
         for c in &tr.leading {
-            self.emit_comment_lines(depth, &c.text);
+            if c.kind == TriviaKind::Attribute {
+                if c.text.starts_with("#[") || c.text.starts_with('@') {
+                    self.line(depth, &c.text);
+                } else {
+                    self.line(depth, &format!("@{}", c.text));
+                }
+            } else if self.opts.preserve_docs {
+                self.emit_comment_lines(depth, &c.text);
+            }
         }
     }
 

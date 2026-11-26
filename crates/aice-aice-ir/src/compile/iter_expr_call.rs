@@ -7,6 +7,7 @@ use crate::ir_code::{Expr, FnBody, LiteralVal, RecordEntry};
 pub(crate) fn push_eval_call<'a>(
     callee: &'a Expr,
     args: &'a [Expr],
+    is_optional: bool,
     lang: LanguageId,
     ectx: &ExprEmitCtx,
     tasks: &mut Vec<CTask<'a>>,
@@ -58,13 +59,13 @@ pub(crate) fn push_eval_call<'a>(
     if let Expr::Ident(nm) = callee && ectx.class_names.contains(nm)
         && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::CSharp | LanguageId::Java | LanguageId::Php)
     {
-        tasks.push(CTask::MakeCall { callee_lit: None, class_new: Some(nm.clone()), n_args: args.len() });
+        tasks.push(CTask::MakeCall { callee_lit: None, class_new: Some(nm.clone()), n_args: args.len(), is_optional: false });
         for a in args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
         return;
     }
     let callee_lit = if lang == LanguageId::Php && let Expr::Ident(fn_name) = callee { Some(fn_name.clone()) } else { None };
     let need_eval = callee_lit.is_none();
-    tasks.push(CTask::MakeCall { callee_lit, class_new: None, n_args: args.len() });
+    tasks.push(CTask::MakeCall { callee_lit, class_new: None, n_args: args.len(), is_optional });
     for a in args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
     if need_eval { tasks.push(CTask::EvalExpr(callee)); }
 }

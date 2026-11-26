@@ -3,8 +3,10 @@ use tree_sitter::Node;
 
 use crate::decompile::cst_util::{field_text, map_type_str, named_children, node_span, node_text};
 use crate::decompile::expr_common::decompile_expr;
-use crate::decompile::iter_env::{DTask, DecompEnv};
-use crate::ir::{TranspileOpts, Trivia};
+use crate::decompile::iter_env::{DTask, DecompEnv, flatten_block_children};
+use crate::decompile::stmt_common::decompile_stmt_nodes;
+use crate::decompile::ts_helpers::{extract_ts_param_vis, is_ts_readonly_prefix};
+use crate::ir::{TranspileOpts, Trivia, Visibility};
 use crate::ir_domain::ComponentDecl;
 use crate::ir_types::{AiceType, ParamDecl, TypeParam};
 
@@ -18,14 +20,40 @@ pub(crate) fn extract_ts_params_with_nodes<'a>(
     for (idx, ch) in named_children(param_list).into_iter().enumerate() {
         if !matches!(
             ch.kind(),
-            "required_parameter" | "optional_parameter" | "identifier" | "object_pattern" | "array_pattern" | "rest_pattern"
+            "required_parameter" | "optional_parameter" | "assignment_pattern"
+                | "identifier" | "object_pattern" | "array_pattern" | "rest_pattern"
         ) {
             continue;
         }
+        if ch.kind() == "assignment_pattern" {
+            let left = ch.child_by_field_name("left").or_else(|| named_children(ch).into_iter().next());
+            let right = ch.child_by_field_name("right").or_else(|| named_children(ch).into_iter().nth(1));
+            let is_destructured = left.is_some_and(|l| matches!(l.kind(), "object_pattern" | "array_pattern"));
+            let is_rest = left.is_some_and(|l| l.kind() == "rest_pattern");
+            let name = if is_destructured {
+                if idx == 0 && lang == LanguageId::Tsx { "props".to_string() } else { format!("arg{idx}") }
+            } else {
+                let n = left.map(|l| node_text(l, src)).unwrap_or("p")
+                    .trim().trim_start_matches("...").trim().to_string();
+                if n.is_empty() || n.starts_with('{') || n.starts_with('[') { format!("arg{idx}") } else { n }
+            };
+            def_nodes.push(right);
+            out.push(ParamDecl {
+                name, vis: Visibility::Default, is_readonly: false, is_mut: false,
+                is_optional: false, is_rest, ty: None, default: None, trivia: Trivia::default(),
+            });
+            continue;
+        }
         let raw_txt = node_text(ch, src);
-        let is_optional = ch.kind() == "optional_parameter"
-            || raw_txt.split(':').next().unwrap_or("").contains('?');
         let pat_node = ch.child_by_field_name("pattern").or_else(|| ch.child_by_field_name("name"));
+        let is_optional = ch.kind() == "optional_parameter"
+            || pat_node.map(|p| {
+                let end = ch.child_by_field_name("type")
+                    .or_else(|| ch.child_by_field_name("value"))
+                    .map(|n| n.start_byte())
+                    .unwrap_or(ch.end_byte());
+                src.get(p.end_byte()..end).is_some_and(|s| s.contains('?'))
+            }).unwrap_or_else(|| raw_txt.split([':', '=']).next().unwrap_or("").contains('?'));
         let is_destructured = pat_node.is_some_and(|p| matches!(p.kind(), "object_pattern" | "array_pattern"))
             || matches!(ch.kind(), "object_pattern" | "array_pattern");
         let name = if is_destructured {
@@ -37,11 +65,14 @@ pub(crate) fn extract_ts_params_with_nodes<'a>(
         };
         let name = if name.is_empty() || name.starts_with('{') || name.starts_with('[') { format!("arg{idx}") } else { name };
         let ty = ch.child_by_field_name("type").map(|t| map_ts_type_node(t, src, lang));
+        let vis = extract_ts_param_vis(ch, src);
+        let is_readonly = is_ts_readonly_prefix(ch, "pattern", src);
+        let is_rest = ch.kind() == "rest_pattern"
+            || pat_node.is_some_and(|p| p.kind() == "rest_pattern")
+            || raw_txt.trim_start().starts_with("...");
         def_nodes.push(ch.child_by_field_name("value"));
         out.push(ParamDecl {
-            name, vis: Default::default(), is_readonly: raw_txt.trim_start().starts_with("readonly "),
-            is_mut: false, is_optional, is_rest: raw_txt.trim_start().starts_with("..."),
-            ty, default: None, trivia: Trivia::default(),
+            name, vis, is_readonly, is_mut: false, is_optional, is_rest, ty, default: None, trivia: Trivia::default(),
         });
     }
     (out, def_nodes)
@@ -105,46 +136,55 @@ pub(crate) fn map_ts_type_node(n: Node<'_>, src: &str, lang: LanguageId) -> Aice
     map_type_str(node_text(n, src).trim().trim_start_matches(':').trim(), lang)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn try_extract_jsx_component(
     fn_node: Node<'_>,
+    vis: Visibility,
     name: &str,
+    type_params: Vec<TypeParam>,
     params: Vec<ParamDecl>,
     src: &str,
     lang: LanguageId,
+    opts: &TranspileOpts,
     trivia: Trivia,
 ) -> Option<ComponentDecl> {
     let body = fn_node.child_by_field_name("body")?;
-    let jsx_root = find_returned_jsx_iter(body)?;
-    let opts = TranspileOpts::default();
-    let mut env = DecompEnv::new(src, lang, &opts);
+    let (body_stmts, jsx_root) = if body.kind() == "statement_block" {
+        let kids = flatten_block_children(body);
+        let (ret_idx, jsx_node) = kids.iter().enumerate().rev().find_map(|(i, n)| {
+            if n.kind() == "return_statement" {
+                unwrap_returned_jsx(*n).map(|j| (i, j))
+            } else {
+                None
+            }
+        })?;
+        let pre: Vec<Node<'_>> = kids.into_iter().enumerate()
+            .filter(|(i, _)| *i != ret_idx)
+            .map(|(_, n)| n)
+            .collect();
+        let stmts = if pre.is_empty() { Vec::new() } else { decompile_stmt_nodes(pre, src, lang, opts) };
+        (stmts, jsx_node)
+    } else {
+        (Vec::new(), unwrap_returned_jsx(body)?)
+    };
+    let mut env = DecompEnv::new(src, lang, opts);
     env.tasks.push(DTask::JsxNode(jsx_root));
     env.run();
     let ln = env.layouts.pop()?;
     Some(ComponentDecl {
-        vis: crate::ir::Visibility::Public,
-        name: name.to_string(),
-        params,
-        has_doctype: false,
-        layout: vec![ln],
-        trivia,
-        span: node_span(fn_node),
+        vis, name: name.to_string(), type_params, params, has_doctype: false,
+        body_stmts, layout: vec![ln], trivia, span: node_span(fn_node),
     })
 }
 
-fn find_returned_jsx_iter(root: Node<'_>) -> Option<Node<'_>> {
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
-        if matches!(node.kind(), "jsx_element" | "jsx_self_closing_element" | "jsx_fragment") {
-            return Some(node);
-        }
-        for ch in named_children(node).into_iter().rev() {
-            if matches!(ch.kind(), "jsx_element" | "jsx_self_closing_element" | "jsx_fragment") {
-                return Some(ch);
-            }
-            if matches!(ch.kind(), "return_statement" | "parenthesized_expression") {
-                stack.push(ch);
-            }
-        }
+fn unwrap_returned_jsx(node: Node<'_>) -> Option<Node<'_>> {
+    let mut cur = if node.kind() == "return_statement" {
+        named_children(node).into_iter().next()?
+    } else {
+        node
+    };
+    while cur.kind() == "parenthesized_expression" {
+        cur = named_children(cur).into_iter().next()?;
     }
-    None
+    matches!(cur.kind(), "jsx_element" | "jsx_self_closing_element" | "jsx_fragment").then_some(cur)
 }

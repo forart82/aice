@@ -46,11 +46,12 @@ pub(crate) fn format_template(quasis: &[String], exs: &[String], lang: LanguageI
 
 pub(crate) fn format_closure_param(p: &ParamDecl, def: Option<&str>, lang: LanguageId) -> String {
     let d = def.map(|x| format!(" = {x}")).unwrap_or_default();
+    let rest = if p.is_rest { "..." } else { "" };
     match lang {
         LanguageId::TypeScript | LanguageId::Tsx => {
             let opt = if p.is_optional && def.is_none() { "?" } else { "" };
             let ty = p.ty.as_ref().map(|t| format!(": {}", emit_type(t, lang))).unwrap_or_default();
-            format!("{}{opt}{ty}{d}", p.name)
+            format!("{rest}{}{opt}{ty}{d}", p.name)
         }
         LanguageId::Rust | LanguageId::Kotlin => {
             let ty = p.ty.as_ref().map(|t| format!(": {}", emit_type(t, lang))).unwrap_or_default();
@@ -73,7 +74,7 @@ pub(crate) fn format_closure_param(p: &ParamDecl, def: Option<&str>, lang: Langu
             let ty = p.ty.as_ref().map(|t| format!("{} ", emit_type(t, lang))).unwrap_or_default();
             format!("{ty}{}{d}", p.name)
         }
-        _ => format!("{}{d}", p.name),
+        _ => format!("{rest}{}{d}", p.name),
     }
 }
 

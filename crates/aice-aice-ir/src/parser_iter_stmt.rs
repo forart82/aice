@@ -6,7 +6,7 @@ use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_cf::step_cf_cont;
 use crate::parser_iter_expr::pop_expr;
 use crate::parser_iter_match::{start_match, step_match_cont};
-use crate::parser_stmt::{attach_stmt_trivia, eat_assign_op, is_destructure_ahead, is_walrus_ahead};
+use crate::parser_stmt::{attach_stmt_trivia, eat_assign_op, is_destructure_ahead, is_obj_destructure_ahead, is_walrus_ahead};
 use crate::parser_types::parse_type_expr;
 
 fn pop_stmt(vals: &mut Vec<ParseVal>) -> Stmt {
@@ -211,6 +211,20 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             p.expect(TokenKind::RBracket, "Expected ']'")?;
             let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
             stack.push(ParseCont::StmtDestructure { names, is_mut });
+            stack.push(ParseCont::Expr(1));
+        }
+        TokenKind::LBrace if is_obj_destructure_ahead(p) => {
+            let start = p.advance().span.start_byte;
+            let mut depth = 1usize;
+            let mut end = start + 1;
+            while !p.at_eof() && depth > 0 {
+                let tok = p.advance();
+                if tok.kind == TokenKind::LBrace { depth += 1; }
+                else if tok.kind == TokenKind::RBrace { depth -= 1; end = tok.span.end_byte; }
+            }
+            let name = p.src.get(start..end).unwrap_or("{}").trim().to_string();
+            let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
+            stack.push(ParseCont::StmtLet { name, is_mut, ty: None });
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::Ident if is_walrus_ahead(p) => {

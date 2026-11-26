@@ -157,7 +157,8 @@ fn iter12_cpp_try_finally_c_restrict_layout_cr_and_cpp_default_param() {
 
     let mut lm = AiceModule::new(LanguageId::Aice, "lc");
     lm.items.push(AiceItem::Component(ComponentDecl {
-        vis: Visibility::Public, name: "Page".into(), params: Vec::new(), has_doctype: false,
+        vis: Visibility::Public, name: "Page".into(), type_params: Vec::new(), params: Vec::new(),
+        has_doctype: false, body_stmts: Vec::new(),
         layout: vec![LayoutNode::Comment("h_c1\r\n\nh_c2\rline3".into())],
         trivia: Trivia::default(), span: Span::empty(),
     }));

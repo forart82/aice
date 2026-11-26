@@ -1,6 +1,7 @@
+use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{named_children, node_text};
+use crate::decompile::cst_util::{field_text, named_children, node_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_match::{push_match_task, push_select_task};
 use crate::decompile::iter_stmt_cf::{push_if_task, push_ruby_begin, push_try_task};
@@ -53,6 +54,10 @@ pub(crate) fn push_block_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     } else {
         crate::decompile::iter_env::flatten_block_children(node)
     };
+    push_stmt_nodes(env, kids);
+}
+
+pub(crate) fn push_stmt_nodes<'a>(env: &mut DecompEnv<'a>, kids: Vec<Node<'a>>) {
     for ch in kids.into_iter().rev() {
         let bn = if ch.kind() == "for_statement" { find_body_node(ch) } else { None };
         if ch.kind() == "for_statement"
@@ -265,6 +270,11 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
                 env.tasks.push(DTask::Expr(node));
             }
+        }
+        "function_declaration" if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) => {
+            let name = field_text(node, "name", env.src).unwrap_or("fn_local").to_string();
+            env.tasks.push(DTask::FinishStmt(StmtFin::VarDecl { name, is_mut: false, ty: None, has_init: true }));
+            env.tasks.push(DTask::Expr(node));
         }
         _ => {
             env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
