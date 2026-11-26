@@ -1,6 +1,7 @@
 pub mod aice_project;
 pub(crate) mod aice_project_domain;
 pub(crate) mod aice_project_slice;
+pub(crate) mod aice_project_sql;
 pub mod aice_project_util;
 pub mod budget;
 pub mod budget_fill;
@@ -18,6 +19,7 @@ pub mod regex_compile;
 pub mod regex_mini;
 pub mod regex_parse;
 pub mod render_json;
+pub(crate) mod render_large;
 pub mod render_selector;
 pub mod render_single;
 pub mod renderer;
@@ -26,6 +28,7 @@ pub mod search_aice;
 pub mod search_json;
 pub mod search_rank;
 pub mod selector;
+pub mod topo_cache;
 pub mod topo_order;
 pub mod transpile;
 pub mod transpile_helpers;
@@ -113,7 +116,7 @@ fn target_matches_authorized(
 /// Wave 1+ contract: takes `&Governed` (never `&AdminGoverned`).
 /// Resolves all read targets strictly from `governed.authorized_paths()`.
 pub fn execute_batch_read(governed: &Governed, op: &ReadOp) -> Result<BatchReadPack, String> {
-    let expected = op.target_paths();
+    let expected = op.target_paths_in_dir(governed.cwd());
     let has_raw = !op.targets.is_empty() || !op.target_paths.is_empty();
     verify_authorized_targets(governed, OperationKind::Read, &expected, has_raw)?;
 
@@ -127,7 +130,7 @@ pub fn execute_batch_read(governed: &Governed, op: &ReadOp) -> Result<BatchReadP
     let specs: Vec<_> = op
         .targets
         .iter()
-        .map(|t| selector::parse_target_spec(t))
+        .map(|t| selector::parse_target_spec_in_dir(t, governed.cwd()))
         .collect();
     let label = if let Some(first) = governed.authorized_paths().first() {
         first.requested.display().to_string()

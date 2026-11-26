@@ -5,7 +5,9 @@ use aice_find_engine::{
     resolve_symbol_via_lookup, resolve_target,
 };
 use aice_governance::path_guard::{is_path_contained, resolve_contained_path};
-use aice_governance::{AuthorizedPath, BinaryProbeResult, Governed, probe_file, strip_selector};
+use aice_governance::{
+    AuthorizedPath, BinaryProbeResult, Governed, probe_file, split_target_selector_in_dir,
+};
 use aice_lang_registry::{AdapterLookup, LanguageId};
 
 use crate::discovery::walk_project_root;
@@ -102,7 +104,10 @@ pub fn resolve_targets_with_governance(
                     && std::fs::read_link(&target_abs).is_err()
                     && let Ok(meta) = std::fs::metadata(&target_abs)
                 {
-                    let is_bin = !matches!(probe_file(&target_abs), BinaryProbeResult::Text);
+                    let is_bin = matches!(
+                        probe_file(&target_abs),
+                        BinaryProbeResult::BinaryExtension | BinaryProbeResult::NulByteOrInvalidUtf8
+                    );
                     resolved.push(ResolvedTarget {
                         spec: spec.clone(),
                         canonical: target_abs,
@@ -140,7 +145,7 @@ fn find_authorized_path<'a>(
     authorized: &'a [AuthorizedPath],
     cwd: &Path,
 ) -> Option<&'a AuthorizedPath> {
-    let raw = Path::new(strip_selector(&spec.file_path));
+    let raw = Path::new(split_target_selector_in_dir(&spec.file_path, cwd).0);
     let resolved = if raw.is_absolute() {
         raw.to_path_buf()
     } else {

@@ -63,6 +63,9 @@ impl GitIgnoreSet {
         }
         subdirs.sort_by(|a, b| a.1.cmp(&b.1));
         for (sub_path, name) in subdirs {
+            if self.is_ignored(&sub_path, true) {
+                continue;
+            }
             let child_rel = if rel_dir.is_empty() {
                 name
             } else {
@@ -119,10 +122,29 @@ impl GitIgnoreSet {
             return false;
         }
         let rel = to_rel_posix(&self.root, path);
+        let parts: Vec<&str> = rel.split('/').filter(|s| !s.is_empty()).collect();
+        if parts.is_empty() {
+            return false;
+        }
+        // Git semantics: once any parent directory is ignored, negation cannot re-include descendants.
+        let mut prefix = String::new();
+        for seg in &parts[..parts.len() - 1] {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(seg);
+            if self.eval_single_path(&prefix, true) {
+                return true;
+            }
+        }
+        self.eval_single_path(&parts.join("/"), is_dir)
+    }
+
+    fn eval_single_path(&self, rel: &str, is_dir: bool) -> bool {
         let mut ignored = false;
         for rule in &self.rules {
-            if let Some(sub) = rel_under_base(&rel, &rule.base_rel)
-                && rule_matches(rule, sub, is_dir)
+            if let Some(sub) = rel_under_base(rel, &rule.base_rel)
+                && rule_matches_single(rule, sub, is_dir)
             {
                 ignored = !rule.negated;
             }
@@ -138,37 +160,15 @@ fn rel_under_base<'a>(rel: &'a str, base: &str) -> Option<&'a str> {
     rel.strip_prefix(base)?.strip_prefix('/')
 }
 
-fn rule_matches(rule: &GitIgnoreRule, sub_rel: &str, is_dir: bool) -> bool {
-    let parts: Vec<&str> = sub_rel.split('/').filter(|s| !s.is_empty()).collect();
-    if parts.is_empty() {
-        return false;
-    }
-    if rule.dir_only {
-        let dir_count = if is_dir { parts.len() } else { parts.len().saturating_sub(1) };
-        if !rule.anchored && !rule.has_slash {
-            return parts[..dir_count].iter().any(|seg| glob_matches(&rule.pattern, seg));
-        }
-        for i in 1..=dir_count {
-            let prefix = parts[..i].join("/");
-            if glob_matches(&rule.pattern, &prefix) {
-                return true;
-            }
-        }
+fn rule_matches_single(rule: &GitIgnoreRule, sub_rel: &str, is_dir: bool) -> bool {
+    if sub_rel.is_empty() || (rule.dir_only && !is_dir) {
         return false;
     }
     if !rule.anchored && !rule.has_slash {
-        return parts.iter().any(|seg| glob_matches(&rule.pattern, seg));
+        let base_name = sub_rel.rsplit('/').next().unwrap_or(sub_rel);
+        return glob_matches(&rule.pattern, base_name);
     }
-    if glob_matches(&rule.pattern, sub_rel) {
-        return true;
-    }
-    for i in 1..parts.len() {
-        let prefix = parts[..i].join("/");
-        if glob_matches(&rule.pattern, &prefix) {
-            return true;
-        }
-    }
-    false
+    glob_matches(&rule.pattern, sub_rel)
 }
 
 pub fn to_rel_posix(root: &Path, path: &Path) -> String {

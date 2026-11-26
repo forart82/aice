@@ -31,7 +31,7 @@ pub fn render_search_hit_aice(
     let lines: Vec<&str> = src.lines().collect();
     let mut out = format!("{}:\n", hit.rel_path);
 
-    if hit.lang == LanguageId::PlainText {
+    if matches!(hit.lang, LanguageId::PlainText | LanguageId::Markdown) {
         for (wi, &(ws, we)) in hit.windows.iter().enumerate() {
             if wi > 0 {
                 out.push_str("  ..\n");

@@ -30,7 +30,7 @@ pub struct SearchParams<'a> {
 }
 
 pub fn execute_search(governed: &Governed, op: &SearchOp) -> Result<BatchReadPack, String> {
-    let expected = op.target_paths();
+    let expected = op.target_paths_in_dir(governed.cwd());
     let has_raw = !op.targets.is_empty() || !op.target_paths.is_empty();
     verify_authorized_targets(governed, OperationKind::Search, &expected, has_raw)?;
     let params = SearchParams {

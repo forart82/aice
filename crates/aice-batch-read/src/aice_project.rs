@@ -1,16 +1,18 @@
-use aice_aice_ir::AiceTranspiler;
-use aice_aice_ir::ir::{AiceItem, AiceModule, TranspileOpts};
+use aice_aice_ir::{AiceTranspiler, TranspileOutcome};
+use aice_aice_ir::ir::{AiceItem, AiceModule, Span, TranspileOpts, Trivia};
 use aice_aice_ir::ir_code::ClassDecl;
 use aice_aice_ir::ir_domain_db::{DbQueryDecl, DbSchemaDecl};
 use aice_ast_engine::EngineRegistry;
-use aice_lang_registry::{SymbolKind, SymbolNode};
+use aice_lang_registry::{AdapterLookup, LanguageId, SymbolKind, SymbolNode};
 
 use crate::aice_project_domain::{project_db_migration, project_doc_section, project_shell_item};
 use crate::aice_project_slice::{
     MidSliceResult, project_fn_head, slice_fn_mid, slice_method_mid, trim_method_tail,
 };
+use crate::aice_project_sql::strip_sql_ident_quotes;
 use crate::aice_project_util::{
-    contains_ident, find_sym_span, find_text_span, item_line_range, slice_lines_range, span_lines,
+    contains_ident, find_sym_span, find_text_span, item_line_range, parse_balanced_module,
+    slice_lines_range, span_lines,
 };
 
 pub struct ProjectWindowArgs<'a> {
@@ -35,6 +37,16 @@ pub(crate) fn project_module_window_opts(
     slice_mid_body: bool,
 ) -> Option<AiceModule> {
     let win_src = slice_lines_range(args.full_src, args.starts, args.start_line, args.end_line);
+    if args.module.source_lang == LanguageId::Markdown
+        && !win_src.trim().is_empty()
+        && let Some(adapter) = args.registry.adapter(LanguageId::Markdown)
+        && let Ok(tree) = adapter.parse_cst(win_src)
+        && let Ok(TranspileOutcome::Transpiled(sub)) =
+            args.transpiler.to_aice(&tree, win_src, args.opts)
+        && !sub.items.is_empty()
+    {
+        return Some(sub);
+    }
     let short_hint = args.sym_hint.map(|s| s.rsplit(['.', ':']).next().unwrap_or(s));
     let mut items = Vec::new();
     let mut unrepresentable_mid = false;
@@ -109,6 +121,34 @@ pub(crate) fn project_module_window_opts(
             AiceItem::Doc(doc) => {
                 if let Some(d) = project_doc_section(doc, args) {
                     items.push(AiceItem::Doc(d));
+                }
+            }
+            AiceItem::Directive { trivia, .. } => {
+                let clip_s = is.max(args.start_line);
+                let clip_e = ie.min(args.end_line);
+                let clipped = slice_lines_range(args.full_src, args.starts, clip_s, clip_e);
+                if !clipped.trim().is_empty() {
+                    if is < args.start_line
+                        && let Some(sub) = parse_balanced_module(
+                            args.module.source_lang,
+                            clipped,
+                            args.registry,
+                            args.transpiler,
+                            args.opts,
+                        )
+                        && !sub.items.iter().all(|it| matches!(it, AiceItem::Directive { .. }))
+                    {
+                        items.extend(sub.items);
+                    } else {
+                        let tr = if is >= args.start_line { trivia.clone() } else { Trivia::default() };
+                        let sb = args.starts.get(clip_s.saturating_sub(1)).copied().unwrap_or(0);
+                        let eb = args.starts.get(clip_e).copied().unwrap_or(args.full_src.len());
+                        items.push(AiceItem::Directive {
+                            text: clipped.trim().to_string(),
+                            trivia: tr,
+                            span: Span::new(clip_s, 0, sb, eb),
+                        });
+                    }
                 }
             }
             _ => {
@@ -190,7 +230,14 @@ fn project_db_schema(ds: &DbSchemaDecl, win_src: &str) -> DbSchemaDecl {
             DbSchemaDecl::Table {
                 name: name.clone(),
                 if_not_exists: *if_not_exists,
-                columns: columns.iter().filter(|c| contains_ident(win_src, &c.name, false)).cloned().collect(),
+                columns: columns
+                    .iter()
+                    .filter(|c| {
+                        contains_ident(win_src, &c.name, false)
+                            || contains_ident(win_src, &strip_sql_ident_quotes(&c.name), false)
+                    })
+                    .cloned()
+                    .collect(),
                 constraints: constraints.iter().filter(|c| win_src.contains(c.as_str())).cloned().collect(),
                 options: options.iter().filter(|o| win_src.contains(o.as_str())).cloned().collect(),
                 trivia: trivia.clone(),

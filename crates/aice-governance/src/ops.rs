@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationKind {
@@ -13,16 +13,19 @@ mod sealed {
     pub trait Sealed {}
 }
 
-pub use crate::target_spec::{split_target_selector, strip_selector};
+pub use crate::target_spec::{split_target_selector, split_target_selector_in_dir, strip_selector};
 use crate::heredoc_targets::{
     extract_heredoc_targets, extract_json_targets, extract_raw_heredoc_targets,
     extract_raw_json_targets, starts_with_heredoc_header_for,
 };
-use crate::target_spec::{push_path_buf, push_raw_target, push_unique_path};
+use crate::target_spec::{push_path_buf, push_raw_target, push_raw_target_in_dir, push_unique_path};
 
 pub trait OperationTargets {
     fn kind(&self) -> OperationKind;
     fn target_paths(&self) -> Vec<PathBuf>;
+    fn target_paths_in_dir(&self, _cwd: &Path) -> Vec<PathBuf> {
+        self.target_paths()
+    }
     fn raw_targets(&self) -> &[String] {
         &[]
     }
@@ -60,22 +63,12 @@ pub struct ReadOp {
 }
 
 impl OperationTargets for ReadOp {
-    fn kind(&self) -> OperationKind {
-        OperationKind::Read
+    fn kind(&self) -> OperationKind { OperationKind::Read }
+    fn target_paths(&self) -> Vec<PathBuf> { collect_targets(&self.targets, &self.target_paths, None) }
+    fn target_paths_in_dir(&self, cwd: &Path) -> Vec<PathBuf> {
+        collect_targets(&self.targets, &self.target_paths, Some(cwd))
     }
-    fn target_paths(&self) -> Vec<PathBuf> {
-        let mut out = Vec::with_capacity(self.targets.len() + self.target_paths.len());
-        for t in &self.targets {
-            push_raw_target(&mut out, t);
-        }
-        for p in &self.target_paths {
-            push_path_buf(&mut out, p);
-        }
-        out
-    }
-    fn raw_targets(&self) -> &[String] {
-        &self.targets
-    }
+    fn raw_targets(&self) -> &[String] { &self.targets }
 }
 
 impl sealed::Sealed for ReadOp {}
@@ -97,22 +90,22 @@ pub struct SearchOp {
 }
 
 impl OperationTargets for SearchOp {
-    fn kind(&self) -> OperationKind {
-        OperationKind::Search
+    fn kind(&self) -> OperationKind { OperationKind::Search }
+    fn target_paths(&self) -> Vec<PathBuf> { collect_targets(&self.targets, &self.target_paths, None) }
+    fn target_paths_in_dir(&self, cwd: &Path) -> Vec<PathBuf> {
+        collect_targets(&self.targets, &self.target_paths, Some(cwd))
     }
-    fn target_paths(&self) -> Vec<PathBuf> {
-        let mut out = Vec::with_capacity(self.targets.len() + self.target_paths.len());
-        for t in &self.targets {
-            push_raw_target(&mut out, t);
-        }
-        for p in &self.target_paths {
-            push_path_buf(&mut out, p);
-        }
-        out
+    fn raw_targets(&self) -> &[String] { &self.targets }
+}
+
+fn collect_targets(raw: &[String], paths: &[PathBuf], cwd: Option<&Path>) -> Vec<PathBuf> {
+    let mut out = Vec::with_capacity(raw.len() + paths.len());
+    for t in raw {
+        if let Some(dir) = cwd { push_raw_target_in_dir(&mut out, t, dir); }
+        else { push_raw_target(&mut out, t); }
     }
-    fn raw_targets(&self) -> &[String] {
-        &self.targets
-    }
+    for p in paths { push_path_buf(&mut out, p); }
+    out
 }
 
 impl sealed::Sealed for SearchOp {}

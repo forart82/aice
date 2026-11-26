@@ -12,7 +12,7 @@ use crate::regex_compile::compile_slash_regex;
 use crate::search_rank::build_windows;
 use crate::selector::TargetSelector;
 use crate::transpile::{
-    SliceTranspileReq, render_imports_aice, render_outline_aice, sibling_hints,
+    SliceTranspileReq, render_imports_aice, render_outline_aice_with_src, sibling_hints,
     transpile_full_aice, transpile_intra_block_aice, transpile_slice_aice,
 };
 
@@ -53,7 +53,13 @@ pub fn render_selector_part(
                     ctx.op.depth.unwrap_or(0),
                     ctx.op.include_types,
                 );
-                emitted.push_str(&render_outline_aice(&ov, &ctx.target.rel_path, false));
+                emitted.push_str(&render_outline_aice_with_src(
+                    &ov,
+                    ctx.lang,
+                    ctx.src,
+                    &ctx.target.rel_path,
+                    false,
+                ));
             } else {
                 emitted.push_str(ctx.src);
             }

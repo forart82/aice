@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use aice_lang_registry::{IntraBlockSelector, SymbolSelector};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -20,6 +22,15 @@ pub struct ParsedTargetSpec {
 
 pub fn parse_target_spec(raw: &str) -> ParsedTargetSpec {
     let (file, sel_opt) = aice_governance::split_target_selector(raw);
+    build_target_spec(raw, file, sel_opt)
+}
+
+pub fn parse_target_spec_in_dir(raw: &str, cwd: &Path) -> ParsedTargetSpec {
+    let (file, sel_opt) = aice_governance::split_target_selector_in_dir(raw, cwd);
+    build_target_spec(raw, file, sel_opt)
+}
+
+fn build_target_spec(raw: &str, file: &str, sel_opt: Option<&str>) -> ParsedTargetSpec {
     match sel_opt {
         Some(sel_part) => {
             let selectors = split_comma_selectors(sel_part)

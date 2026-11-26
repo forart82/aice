@@ -17,6 +17,38 @@ pub fn split_target_selector(raw: &str) -> (&str, Option<&str>) {
     (raw, None)
 }
 
+pub fn split_target_selector_in_dir<'a>(raw: &'a str, cwd: &Path) -> (&'a str, Option<&'a str>) {
+    if raw.is_empty() || raw.contains('\0') {
+        return (raw, None);
+    }
+    let exact = resolve_candidate(raw, cwd);
+    if exact.exists() {
+        return (raw, None);
+    }
+    let offset = if is_drive_prefix(raw) { 2 } else { 0 };
+    let tail = &raw[offset..];
+    for (pos, ch) in tail.char_indices().rev() {
+        if !matches!(ch, ':' | '#') {
+            continue;
+        }
+        let split_at = offset + pos;
+        if split_at == 0 {
+            continue;
+        }
+        let file_part = &raw[..split_at];
+        let sel_part = &raw[split_at + 1..];
+        if is_valid_selector_tail(sel_part) && resolve_candidate(file_part, cwd).exists() {
+            return (file_part, Some(sel_part));
+        }
+    }
+    split_target_selector(raw)
+}
+
+fn resolve_candidate(raw: &str, cwd: &Path) -> PathBuf {
+    let p = Path::new(raw);
+    if p.is_absolute() { p.to_path_buf() } else { cwd.join(p) }
+}
+
 fn is_drive_prefix(raw: &str) -> bool {
     let bytes = raw.as_bytes();
     if bytes.len() < 2 || !bytes[0].is_ascii_alphabetic() || bytes[1] != b':' {
@@ -117,7 +149,42 @@ fn is_valid_single_selector(sel: &str) -> bool {
     if sel.starts_with('/') {
         return is_valid_regex_selector(sel);
     }
-    !sel.contains('\\') && !sel.contains('/')
+    if sel.contains('/') {
+        return false;
+    }
+    if sel.contains('\\') {
+        return is_valid_php_namespace_selector(sel);
+    }
+    true
+}
+
+fn is_valid_php_namespace_selector(sel: &str) -> bool {
+    if sel.starts_with('\\') || sel.ends_with('\\') || sel.contains("\\\\") || sel.contains(":\\") {
+        return false;
+    }
+    sel.split('\\').all(|seg| {
+        let mut chars = seg.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        if !(first.is_ascii_alphabetic() || first == '_') {
+            return false;
+        }
+        let mut prev_colon = false;
+        for ch in chars {
+            if ch == ':' {
+                prev_colon = !prev_colon;
+                continue;
+            }
+            if prev_colon {
+                return false;
+            }
+            if !(ch.is_ascii_alphanumeric() || matches!(ch, '_' | '.' | '@' | '$')) {
+                return false;
+            }
+        }
+        !prev_colon
+    })
 }
 
 pub fn is_valid_selector_tail(sel: &str) -> bool {
@@ -197,6 +264,10 @@ pub(crate) fn push_unique_path(out: &mut Vec<PathBuf>, path: PathBuf) {
 
 pub(crate) fn push_raw_target(out: &mut Vec<PathBuf>, raw: &str) {
     push_unique_path(out, PathBuf::from(strip_selector(raw)));
+}
+
+pub(crate) fn push_raw_target_in_dir(out: &mut Vec<PathBuf>, raw: &str, cwd: &Path) {
+    push_unique_path(out, PathBuf::from(split_target_selector_in_dir(raw, cwd).0));
 }
 
 pub(crate) fn push_path_buf(out: &mut Vec<PathBuf>, path: &Path) {

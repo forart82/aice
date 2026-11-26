@@ -173,7 +173,18 @@ pub(crate) fn inspect_file(
     let mut file = std::fs::File::open(&path).ok()?;
     let file_len = file.metadata().ok()?.len();
     if file_len > DEFAULT_MAX_TEXT_FILE_BYTES {
-        return opts.include_binary.then(|| binary_entry(path, file_len, depth));
+        if !opts.include_binary {
+            return None;
+        }
+        if scratch.len() < DEFAULT_BINARY_PROBE_BYTES {
+            scratch.resize(DEFAULT_BINARY_PROBE_BYTES, 0);
+        }
+        let n = read_into_slice(&mut file, &mut scratch[..DEFAULT_BINARY_PROBE_BYTES]).unwrap_or(0);
+        if !matches!(probe_bytes_with_partial(&scratch[..n], file_len > n as u64), BinaryProbeResult::Text) {
+            return Some(binary_entry(path, file_len, depth));
+        }
+        let language = known_lang.unwrap_or_else(|| detect_language(&path, lossy_utf8_prefix(&scratch[..n])));
+        return Some(WalkedFile { path, language, is_binary: false, line_count: 0, byte_size: file_len, depth });
     }
     if file_len == 0 {
         let language = known_lang.unwrap_or_else(|| detect_language(&path, ""));
@@ -200,12 +211,7 @@ pub(crate) fn inspect_file(
         return opts.include_binary.then(|| binary_entry(path, file_len, depth));
     }
     let language = known_lang.unwrap_or_else(|| {
-        let head = &scratch[..probe_len];
-        let head_str = match std::str::from_utf8(head) {
-            Ok(s) => s,
-            Err(e) => std::str::from_utf8(&head[..e.valid_up_to()]).unwrap_or(""),
-        };
-        detect_language(&path, head_str)
+        detect_language(&path, lossy_utf8_prefix(&scratch[..probe_len]))
     });
     let (line_count, byte_size) = if !opts.measure_lines {
         if opts.probe_binary && file_len > n as u64 {
@@ -258,6 +264,13 @@ pub(crate) fn inspect_file(
         (lines, total_bytes as u64)
     };
     Some(WalkedFile { path, language, is_binary: false, line_count, byte_size, depth })
+}
+
+fn lossy_utf8_prefix(head: &[u8]) -> &str {
+    match std::str::from_utf8(head) {
+        Ok(s) => s,
+        Err(e) => std::str::from_utf8(&head[..e.valid_up_to()]).unwrap_or(""),
+    }
 }
 
 fn binary_entry(path: PathBuf, byte_size: u64, depth: usize) -> WalkedFile {

@@ -14,7 +14,9 @@ use crate::aice_project_util::{
     balance_closers_for_lang, compute_line_starts, wrap_method_for_lang,
 };
 pub use crate::intra_transpile::transpile_intra_block_aice;
-use crate::transpile_helpers::{dedent_block, normalize_fragment_comments, try_clean_aice};
+use crate::transpile_helpers::{
+    dedent_block, extract_ts_reexport_outline, normalize_fragment_comments, try_clean_aice,
+};
 
 pub fn parse_for_read(
     registry: &EngineRegistry,
@@ -69,6 +71,25 @@ pub struct SliceTranspileReq<'a> {
 pub fn transpile_slice_aice(req: &SliceTranspileReq<'_>) -> String {
     if req.lang == LanguageId::PlainText {
         return req.slice.content.clone();
+    }
+    if req.lang == LanguageId::Markdown {
+        if let Some(adapter) = req.registry.adapter(LanguageId::Markdown)
+            && let Ok(slice_tree) = adapter.parse_cst(&req.slice.content)
+            && let Ok(TranspileOutcome::Transpiled(sub)) =
+                req.transpiler.to_aice(&slice_tree, &req.slice.content, req.opts)
+        {
+            let printed = print_aice_with_opts(&sub, req.opts);
+            let body = printed.strip_prefix("module markdown").unwrap_or(&printed);
+            if !body.trim().is_empty() {
+                return printed;
+            }
+        }
+        return format!(
+            "// aice L{}-L{}\n{}",
+            req.slice.start_line,
+            req.slice.end_line,
+            normalize_fragment_comments(&req.slice.content)
+        );
     }
     if let Some(t) = req.tree
         && let Ok(TranspileOutcome::Transpiled(module)) =
@@ -125,6 +146,16 @@ pub fn transpile_slice_aice(req: &SliceTranspileReq<'_>) -> String {
 }
 
 pub fn render_outline_aice(outline: &OutlineView, rel_path: &str, is_auto: bool) -> String {
+    render_outline_aice_with_src(outline, LanguageId::PlainText, "", rel_path, is_auto)
+}
+
+pub fn render_outline_aice_with_src(
+    outline: &OutlineView,
+    lang: LanguageId,
+    src: &str,
+    rel_path: &str,
+    is_auto: bool,
+) -> String {
     let mut out = String::new();
     if is_auto {
         out.push_str(&format!(
@@ -133,6 +164,14 @@ pub fn render_outline_aice(outline: &OutlineView, rel_path: &str, is_auto: bool)
         ));
     }
     if outline.entries.is_empty() {
+        let reexports = extract_ts_reexport_outline(lang, src);
+        if !reexports.is_empty() {
+            for line in reexports {
+                out.push_str(&line);
+                out.push('\n');
+            }
+            return out;
+        }
         out.push_str(&format!("// (no AST symbols in {rel_path})\n"));
         return out;
     }

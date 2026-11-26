@@ -15,6 +15,7 @@ pub mod rules_markdown;
 pub mod rules_sync;
 pub mod target_spec;
 pub mod typestate;
+mod typestate_targets;
 
 pub use agents::{
     AgentActionResult, AgentSetupOptions, AgentStatusEntry, SupportedAgentId,
@@ -34,7 +35,7 @@ pub use config_discovery::{
 pub use json::{JsonError, JsonValue, escape_json_str, parse_json};
 pub use ops::{
     AdminAction, AdminOp, FindOp, NonAdminOp, OperationKind, OperationTargets, ReadOp, SearchOp,
-    WriteOp, split_target_selector, strip_selector,
+    WriteOp, split_target_selector, split_target_selector_in_dir, strip_selector,
 };
 pub use path_guard::{AuthorizedPath, OutputSurface};
 pub use rules_sync::{

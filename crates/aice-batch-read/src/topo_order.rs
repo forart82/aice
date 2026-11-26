@@ -1,21 +1,20 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use aice_ast_engine::EngineRegistry;
 use aice_ast_engine::dep_graph::{
     CallerHit, FileDepInput, expand_dependency_closure, find_workspace_callers,
     order_files_topologically,
 };
-use aice_governance::binary_probe::DEFAULT_MAX_TEXT_FILE_BYTES;
+use aice_find_engine::{FindWalkOpts, walk_governed_with_opts};
 use aice_governance::path_guard::is_path_contained;
-use aice_governance::{Governed, ReadOp};
-use aice_lang_registry::{AdapterLookup, LanguageId, detect_language};
+use aice_governance::{FindOp, Governed, PipelineRequest, ReadOp, authorize};
 
 use crate::coalesce::coalesce_targets_with_opts;
-use crate::discovery::walk_project_root;
-use crate::gitignore::to_rel_posix;
+use crate::gitignore::{filter_walk_output, to_rel_posix};
 use crate::matcher::ResolvedTarget;
 use crate::selector::{ParsedTargetSpec, TargetSelector};
+use crate::topo_cache::get_or_parse_dep_input;
 
 #[derive(Debug, Default)]
 pub struct TopoPack {
@@ -185,49 +184,45 @@ fn build_inputs_for_targets(
 }
 
 fn collect_workspace_text_paths(governed: &Governed) -> Vec<(String, PathBuf)> {
-    let Some(walk) = walk_project_root(governed, false) else {
+    let find_op = FindOp {
+        pattern: None,
+        targets: Vec::new(),
+        target_paths: Vec::new(),
+        depth: None,
+        search: None,
+        full: false,
+        max_tokens: None,
+        json: false,
+    };
+    let req = PipelineRequest::new(find_op, governed.project_root().to_path_buf(), governed.surface());
+    let Ok(find_gov) = authorize(req) else {
         return Vec::new();
     };
+    let opts = FindWalkOpts {
+        walk_project_root_if_untargeted: true,
+        include_binary: false,
+        probe_binary: false,
+        measure_lines: false,
+        ..FindWalkOpts::default()
+    };
+    let Ok(mut walk) = walk_governed_with_opts(find_gov.state(), &opts) else {
+        return Vec::new();
+    };
+    filter_walk_output(governed, &mut walk, &[]);
     let root = governed.project_root();
     walk.files
         .into_iter()
-        .filter(|f| !f.is_binary && f.byte_size <= DEFAULT_MAX_TEXT_FILE_BYTES)
+        .filter(|f| !f.is_binary)
         .map(|f| (to_rel_posix(root, &f.path), f.path))
         .collect()
 }
 
 fn build_dep_input(
     rel: &str,
-    abs: &PathBuf,
+    abs: &Path,
     registry: &EngineRegistry,
 ) -> Option<FileDepInput> {
-    let meta = std::fs::metadata(abs).ok()?;
-    if !meta.is_file() || meta.len() > DEFAULT_MAX_TEXT_FILE_BYTES {
-        return None;
-    }
-    let src = std::fs::read_to_string(abs).ok()?;
-    if src.as_bytes().contains(&0) {
-        return None;
-    }
-    let lang = detect_language(abs, &src);
-    if lang == LanguageId::PlainText {
-        return Some(FileDepInput {
-            path: rel.to_string(),
-            lang,
-            symbols: Vec::new(),
-            edges: Vec::new(),
-        });
-    }
-    let adapter = registry.adapter(lang)?;
-    let tree = adapter.parse_cst(&src).ok()?;
-    let symbols = adapter.extract_symbols(&tree, &src);
-    let edges = adapter.extract_dependencies(&tree, &src);
-    Some(FileDepInput {
-        path: rel.to_string(),
-        lang,
-        symbols,
-        edges,
-    })
+    get_or_parse_dep_input(rel, abs, registry)
 }
 
 fn reorder_map(

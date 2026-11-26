@@ -3,13 +3,15 @@ use aice_aice_ir::ir::TranspileOpts;
 use aice_ast_engine::EngineRegistry;
 use aice_governance::ReadOp;
 use aice_governance::binary_probe::DEFAULT_MAX_TEXT_FILE_BYTES;
-use aice_lang_registry::{AdapterLookup, LanguageId, SymbolNode};
+use aice_lang_registry::{AdapterLookup, LanguageId, SymbolNode, detect_language};
 
 use crate::budget::count_lines_exact;
 use crate::matcher::ResolvedTarget;
+use crate::render_large::render_oversized_target;
 use crate::render_selector::{SelectorCtx, render_selector_part};
 use crate::selector::TargetSelector;
-use crate::transpile::{parse_for_read, render_outline_aice, transpile_full_aice};
+use crate::transpile::{parse_for_read, render_outline_aice_with_src, transpile_full_aice};
+use crate::transpile_helpers::extract_ts_reexport_outline;
 
 pub struct SingleRenderResult {
     pub header: String,
@@ -47,15 +49,7 @@ pub fn render_resolved_target(
         Err(e) => return err_result(format!("Failed to stat {}: {e}", target.rel_path), None),
     };
     if meta.len() > DEFAULT_MAX_TEXT_FILE_BYTES {
-        return err_result(
-            format!(
-                "File {} exceeds maximum text size ({} > {} bytes)",
-                target.rel_path,
-                meta.len(),
-                DEFAULT_MAX_TEXT_FILE_BYTES
-            ),
-            None,
-        );
+        return render_oversized_target(target, meta.len(), registry, transpiler, op);
     }
     let src = match std::fs::read_to_string(&target.canonical) {
         Ok(s) if !s.as_bytes().contains(&0) => s,
@@ -85,7 +79,19 @@ pub fn render_resolved_target(
         };
     }
 
-    let (lang, tree) = parse_for_read(registry, &target.canonical, &src);
+    let fast_md_lines = !op.outline
+        && !op.outline_target
+        && !op.json
+        && !target.spec.selectors.is_empty()
+        && target.spec.selectors.iter().all(|s| {
+            matches!(s, TargetSelector::LineRange { .. } | TargetSelector::InvertedLineRange { .. })
+        })
+        && detect_language(&target.canonical, &src) == LanguageId::Markdown;
+    let (lang, tree) = if fast_md_lines {
+        (LanguageId::Markdown, None)
+    } else {
+        parse_for_read(registry, &target.canonical, &src)
+    };
     let opts = TranspileOpts {
         compact: op.compact,
         include_types: op.include_types,
@@ -99,10 +105,13 @@ pub fn render_resolved_target(
     let outline_view = registry
         .slicer(lang)
         .and_then(|s| tree.as_ref().map(|t| s.outline(t, &src, op.depth.unwrap_or(0), op.include_types)));
+    let has_outline_content = outline_view.as_ref().is_some_and(|ov| {
+        !ov.entries.is_empty() || !extract_ts_reexport_outline(lang, &src).is_empty()
+    });
     let outline_text = outline_view
         .as_ref()
-        .filter(|ov| !ov.entries.is_empty())
-        .map(|ov| render_outline_aice(ov, &target.rel_path, false))
+        .filter(|_| has_outline_content)
+        .map(|ov| render_outline_aice_with_src(ov, lang, &src, &target.rel_path, false))
         .unwrap_or_default();
 
     let mut header = format!("// file: {}\n", target.rel_path);
@@ -115,9 +124,15 @@ pub fn render_resolved_target(
         && matches!(target.spec.selectors[0], TargetSelector::Full);
     let force_outline = op.outline || (op.outline_target && !target.is_expanded);
     let auto_outline = is_full_only && !op.full && total_lines > 120 && lang != LanguageId::PlainText;
-    if force_outline || (auto_outline && outline_view.as_ref().is_some_and(|ov| !ov.entries.is_empty())) {
+    if force_outline || (auto_outline && has_outline_content) {
         if let Some(ov) = outline_view.as_ref() {
-            emitted.push_str(&render_outline_aice(ov, &target.rel_path, !force_outline));
+            emitted.push_str(&render_outline_aice_with_src(
+                ov,
+                lang,
+                &src,
+                &target.rel_path,
+                !force_outline,
+            ));
         } else {
             emitted.push_str(&transpile_full_aice(transpiler, tree.as_ref(), lang, &src, &opts));
         }
@@ -175,7 +190,7 @@ pub fn render_resolved_target(
     }
 }
 
-fn binary_skip_result(rel_path: &str, bytes: u64) -> SingleRenderResult {
+pub(crate) fn binary_skip_result(rel_path: &str, bytes: u64) -> SingleRenderResult {
     SingleRenderResult {
         header: String::new(),
         raw_baseline: String::new(),
@@ -188,7 +203,7 @@ fn binary_skip_result(rel_path: &str, bytes: u64) -> SingleRenderResult {
     }
 }
 
-fn err_result(msg: String, wasted: Option<String>) -> SingleRenderResult {
+pub(crate) fn err_result(msg: String, wasted: Option<String>) -> SingleRenderResult {
     SingleRenderResult {
         header: String::new(),
         raw_baseline: String::new(),

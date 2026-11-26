@@ -105,3 +105,89 @@ pub(crate) fn is_imperative_lang(lang: LanguageId) -> bool {
             | LanguageId::Php | LanguageId::Ruby
     )
 }
+
+pub(crate) fn extract_ts_reexport_outline(lang: LanguageId, src: &str) -> Vec<String> {
+    if !matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) {
+        return Vec::new();
+    }
+    let lines: Vec<&str> = src.lines().collect();
+    let mut out = Vec::new();
+    let (mut i, mut in_blk) = (0usize, false);
+    while i < lines.len() {
+        let trimmed = lines[i].trim();
+        if in_blk {
+            if trimmed.contains("*/") {
+                in_blk = false;
+            }
+            i += 1;
+            continue;
+        }
+        if trimmed.is_empty() || trimmed.starts_with("//") {
+            i += 1;
+            continue;
+        }
+        if trimmed.starts_with("/*") {
+            if !trimmed.contains("*/") {
+                in_blk = true;
+            }
+            i += 1;
+            continue;
+        }
+        if !trimmed.starts_with("export ") && !trimmed.starts_with("export{") && !trimmed.starts_with("export*") {
+            i += 1;
+            continue;
+        }
+        let start = i + 1;
+        let mut buf = String::new();
+        let mut end = start;
+        let mut has_from = false;
+        while i < lines.len() {
+            let cur = lines[i].trim();
+            if !cur.is_empty() && !cur.starts_with("//") {
+                if !buf.is_empty() {
+                    buf.push(' ');
+                }
+                buf.push_str(cur);
+            }
+            end = i + 1;
+            if contains_from_clause(&buf) {
+                has_from = true;
+            }
+            let done = cur.ends_with(';') || (has_from && (cur.ends_with('\'') || cur.ends_with('"')));
+            i += 1;
+            if done {
+                break;
+            }
+            if !has_from && !buf.contains('{') && !buf.contains('*') {
+                break;
+            }
+        }
+        if has_from {
+            let compact = collapse_ws(buf.trim_end_matches(';').trim());
+            let loc = if start == end { format!("L{start}") } else { format!("L{start}-L{end}") };
+            out.push(format!("{compact} # [{loc}]"));
+        }
+    }
+    out
+}
+
+fn contains_from_clause(s: &str) -> bool {
+    s.contains(" from '") || s.contains(" from \"") || s.contains("}from '") || s.contains("}from \"")
+}
+
+fn collapse_ws(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut prev_ws = false;
+    for ch in s.chars() {
+        if ch.is_whitespace() {
+            if !prev_ws {
+                out.push(' ');
+                prev_ws = true;
+            }
+        } else {
+            out.push(ch);
+            prev_ws = false;
+        }
+    }
+    out
+}

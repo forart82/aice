@@ -15,6 +15,23 @@ pub const DEFAULT_IGNORED_DIRS: &[&str] = &[
     ".aice-cache", ".aice-build", "__pycache__", ".agents", ".next", ".turbo",
 ];
 
+pub const STANDARD_CONFIG_DOTDIRS: &[&str] = &[
+    ".github", ".gitlab", ".circleci", ".buildkite", ".devcontainer",
+];
+
+pub const STANDARD_CONFIG_DOTFILES: &[&str] = &[
+    ".gitlab-ci.yml", ".env.example", ".env.sample", ".env.template", ".editorconfig",
+    ".dockerignore",
+];
+
+pub fn is_standard_config_dotdir(name: &str) -> bool {
+    STANDARD_CONFIG_DOTDIRS.contains(&name)
+}
+
+pub fn is_standard_config_dotfile(name: &str) -> bool {
+    STANDARD_CONFIG_DOTFILES.contains(&name)
+}
+
 pub const LOCKFILE_SKIP_NAMES: &[&str] = &[
     "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
     "Cargo.lock", "composer.lock", "Gemfile.lock", "poetry.lock", "uv.lock",
@@ -144,7 +161,9 @@ impl IgnorePolicy {
         if dir_name == ".git" {
             return EntryCheck::Skip;
         }
-        let is_hidden = !self.include_hidden && dir_name.starts_with('.');
+        let is_hidden = !self.include_hidden
+            && dir_name.starts_with('.')
+            && !is_standard_config_dotdir(dir_name);
         let is_ignored = should_ignore_name(dir_name)
             && !(root_in_nm && matches!(dir_name, "dist" | "build" | "out"));
         if is_hidden || is_ignored {
@@ -168,7 +187,9 @@ impl IgnorePolicy {
             return EntryCheck::Skip;
         }
         let is_aice_meta = file_name == "aice.config.json" || file_name.ends_with(".trivia.json");
-        let is_hidden = !self.include_hidden && file_name.starts_with('.');
+        let is_hidden = !self.include_hidden
+            && file_name.starts_with('.')
+            && !is_standard_config_dotfile(file_name);
         let is_lock = self.skip_lockfiles
             && is_lockfile_name(file_name)
             && !self.explicit_lockfiles.contains(file_name);
@@ -214,7 +235,10 @@ impl IgnorePolicy {
             || (DEFAULT_IGNORED_DIRS.contains(&dir_name)
                 && !explicitly_allowed
                 && !(root_in_node_modules && matches!(dir_name, "dist" | "build" | "out")))
-            || (dir_name.starts_with('.') && !self.include_hidden && !explicitly_allowed)
+            || (dir_name.starts_with('.')
+                && !self.include_hidden
+                && !is_standard_config_dotdir(dir_name)
+                && !explicitly_allowed)
         {
             return true;
         }
@@ -235,7 +259,9 @@ impl IgnorePolicy {
         }
         let special = file_name == "aice.config.json"
             || file_name.ends_with(".trivia.json")
-            || (file_name.starts_with('.') && !self.include_hidden)
+            || (file_name.starts_with('.')
+                && !self.include_hidden
+                && !is_standard_config_dotfile(file_name))
             || (self.skip_lockfiles
                 && is_lockfile_name(file_name)
                 && !self.explicit_lockfiles.contains(file_name));

@@ -1,5 +1,4 @@
 use aice_aice_ir::ir::{AiceItem, AiceModule, Span, TranspileOpts};
-use aice_aice_ir::ir_domain_db::{DbQueryDecl, DbSchemaDecl};
 use aice_aice_ir::{AiceTranspiler, TranspileOutcome};
 use aice_ast_engine::EngineRegistry;
 use aice_lang_registry::{AdapterLookup, LanguageId, SymbolNode};
@@ -7,6 +6,7 @@ use aice_lang_registry::{AdapterLookup, LanguageId, SymbolNode};
 use crate::aice_project_domain::{
     db_migration_line_range, doc_section_line_range, shell_line_range,
 };
+use crate::aice_project_sql::{db_query_range, db_schema_range, find_sql_sym_span};
 
 pub fn compute_line_starts(src: &str) -> Vec<usize> {
     let mut starts = vec![0usize];
@@ -170,6 +170,13 @@ pub(crate) fn find_sym_span(name: &str, syms: &[SymbolNode]) -> Option<(usize, u
                 || s.qualified_name.ends_with(&format!("::{name}"))
         })
         .map(|s| (s.start_line, s.end_line))
+        .or_else(|| {
+            if name.contains(['`', '"', '[']) {
+                find_sql_sym_span(name, syms, None)
+            } else {
+                None
+            }
+        })
 }
 
 pub(crate) fn find_text_span(src: &str, needle: &str) -> Option<(usize, usize)> {
@@ -218,35 +225,6 @@ pub fn item_line_range(
         AiceItem::DbMigration(dm) => db_migration_line_range(dm, starts, syms, src),
         AiceItem::Doc(doc) => doc_section_line_range(doc, syms, src),
     }
-}
-
-fn db_query_range(dq: &DbQueryDecl, syms: &[SymbolNode], src: &str) -> Option<(usize, usize)> {
-    let mut rng = dq.name.as_deref().and_then(|n| find_sym_span(n, syms));
-    let mut merge = |s: usize, e: usize| {
-        rng = Some(match rng { Some((a, b)) => (a.min(s), b.max(e)), None => (s, e) });
-    };
-    for (cname, body) in &dq.ctes {
-        if let Some((s, e)) = find_sym_span(cname, syms).or_else(|| find_text_span(src, body)) { merge(s, e); }
-    }
-    for (_, v) in &dq.clauses {
-        if let Some((s, e)) = find_text_span(src, v) { merge(s, e); }
-    }
-    rng
-}
-
-fn db_schema_range(ds: &DbSchemaDecl, syms: &[SymbolNode], src: &str) -> Option<(usize, usize)> {
-    let nm = match ds {
-        DbSchemaDecl::Table { name, .. }
-        | DbSchemaDecl::View { name, .. }
-        | DbSchemaDecl::Index { name, .. }
-        | DbSchemaDecl::Procedure { name, .. }
-        | DbSchemaDecl::Trigger { name, .. }
-        | DbSchemaDecl::TypeDef { name, .. }
-        | DbSchemaDecl::PrismaBlock { name, .. }
-        | DbSchemaDecl::GraphQlType { name, .. } => name.as_str(),
-        DbSchemaDecl::RawDdl { text, .. } => return find_text_span(src, text),
-    };
-    find_sym_span(nm, syms).or_else(|| find_text_span(src, nm))
 }
 
 pub fn contains_ident(hay: &str, name: &str, allow_member_dot: bool) -> bool {

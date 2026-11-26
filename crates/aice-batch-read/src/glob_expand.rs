@@ -103,7 +103,10 @@ pub(crate) fn expand_glob_target(
         if !std::fs::metadata(&path).is_ok_and(|m| m.is_file()) {
             continue;
         }
-        let is_binary = !matches!(probe_file(&path), BinaryProbeResult::Text);
+        let is_binary = matches!(
+            probe_file(&path),
+            BinaryProbeResult::BinaryExtension | BinaryProbeResult::NulByteOrInvalidUtf8
+        );
         matches.push(ResolvedTarget {
             spec: ParsedTargetSpec {
                 file_path: rel.clone(),

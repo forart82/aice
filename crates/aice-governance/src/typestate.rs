@@ -3,15 +3,12 @@ use std::path::{Path, PathBuf};
 
 use crate::binary_probe::{BinaryProbeResult, probe_file};
 use crate::config::{AiceConfig, find_project_root, load_config_checked};
-use crate::ops::{AdminOp, NonAdminOp, OperationKind, OperationTargets};
+use crate::heredoc_targets::{has_non_drive_colon_slash, has_traversal_after_selector_delim};
+use crate::ops::{AdminOp, NonAdminOp, OperationKind};
 use crate::path_guard::{
     AuthorizedPath, OutputSurface, is_path_contained, path_contains_nul, resolve_contained_path,
 };
-use crate::heredoc_targets::{
-    has_binary_write_payload, has_non_drive_colon_slash, has_non_drive_colon_slash_str,
-    has_traversal_after_selector_delim,
-};
-use crate::target_spec::{has_regex_selector_part, split_target_selector};
+use crate::typestate_targets::{probe_write_inline_payloads, resolve_from_cwd, validate_raw_target};
 
 #[derive(Debug, Clone, Copy)]
 pub struct Raw;
@@ -121,6 +118,7 @@ pub enum GovernanceError {
     Disabled,
     PathOutsideAllowedRoots(PathBuf),
     BinaryWriteForbidden(PathBuf),
+    InvalidSelector(String),
     Io(String),
 }
 
@@ -137,6 +135,7 @@ impl fmt::Display for GovernanceError {
             Self::BinaryWriteForbidden(p) => {
                 write!(f, "Refusing to write binary file: {}", p.display())
             }
+            Self::InvalidSelector(msg) => write!(f, "{msg}"),
             Self::Io(msg) => write!(f, "Governance I/O error: {msg}"),
         }
     }
@@ -161,7 +160,7 @@ pub fn authorize<Op: NonAdminOp>(
     for raw in req.op.raw_target_strings() {
         validate_raw_target(&raw, &req.cwd, &project_root, allowed_roots, op_kind)?;
     }
-    let targets = req.op.target_paths();
+    let targets = req.op.target_paths_in_dir(&req.cwd);
     let mut authorized_paths = Vec::with_capacity(targets.len());
     for target in &targets {
         if target.as_os_str().is_empty() {
@@ -180,8 +179,11 @@ pub fn authorize<Op: NonAdminOp>(
             return Err(GovernanceError::PathOutsideAllowedRoots(abs));
         }
         let probe = probe_file(&abs);
-        let is_binary = !matches!(probe, BinaryProbeResult::Text);
-        if is_binary && op_kind == OperationKind::Write {
+        let is_binary = matches!(
+            probe,
+            BinaryProbeResult::BinaryExtension | BinaryProbeResult::NulByteOrInvalidUtf8
+        );
+        if !matches!(probe, BinaryProbeResult::Text) && op_kind == OperationKind::Write {
             return Err(GovernanceError::BinaryWriteForbidden(abs));
         }
         let canonical = resolve_contained_path(&abs, &project_root).unwrap_or_else(|| abs.clone());
@@ -210,16 +212,6 @@ pub fn authorize<Op: NonAdminOp>(
     })
 }
 
-fn probe_write_inline_payloads(
-    op: &dyn OperationTargets,
-    authorized_paths: &[AuthorizedPath],
-) -> Result<(), GovernanceError> {
-    if has_binary_write_payload(&op.inline_payloads(), &op.json_manifest_payloads()) {
-        let fallback = authorized_paths.first().map(|p| p.canonical.clone()).unwrap_or_default();
-        return Err(GovernanceError::BinaryWriteForbidden(fallback));
-    }
-    Ok(())
-}
 pub fn authorize_admin(
     req: PipelineRequest<Raw, AdminOp>,
 ) -> Result<PipelineRequest<AdminGoverned, AdminOp>, GovernanceError> {
@@ -250,43 +242,4 @@ pub fn resolve_aice_home() -> PathBuf {
         return PathBuf::from(home).join(".aice");
     }
     PathBuf::from(".aice")
-}
-
-fn resolve_from_cwd(p: &Path, cwd: &Path) -> PathBuf {
-    if p.is_absolute() { p.to_path_buf() } else { cwd.join(p) }
-}
-
-fn validate_raw_target(
-    raw: &str, cwd: &Path, root: &Path, allowed: &[PathBuf], op_kind: OperationKind,
-) -> Result<(), GovernanceError> {
-    if raw.is_empty() {
-        return Err(GovernanceError::PathOutsideAllowedRoots(PathBuf::new()));
-    }
-    let abs_raw = resolve_from_cwd(Path::new(raw), cwd);
-    if raw.contains('\0') || has_traversal_after_selector_delim(raw) {
-        return Err(GovernanceError::PathOutsideAllowedRoots(abs_raw));
-    }
-    let split = split_target_selector(raw);
-    let is_regex = matches!(split, (_, Some(sel)) if has_regex_selector_part(sel));
-    if has_non_drive_colon_slash_str(raw) {
-        if op_kind != OperationKind::Find && is_regex {
-            let abs_file = resolve_from_cwd(Path::new(split.0), cwd);
-            let raw_ok = abs_raw.exists() && is_path_contained(&abs_raw, root, allowed);
-            let file_ok = abs_file.exists() && is_path_contained(&abs_file, root, allowed);
-            if !raw_ok && !file_ok {
-                return Err(GovernanceError::PathOutsideAllowedRoots(abs_raw));
-            }
-        } else if !abs_raw.exists() || !is_path_contained(&abs_raw, root, allowed) {
-            return Err(GovernanceError::PathOutsideAllowedRoots(abs_raw));
-        }
-    } else if is_regex {
-        let abs_file = resolve_from_cwd(Path::new(split.0), cwd);
-        if op_kind == OperationKind::Find
-            || !abs_file.exists()
-            || !is_path_contained(&abs_file, root, allowed)
-        {
-            return Err(GovernanceError::PathOutsideAllowedRoots(abs_raw));
-        }
-    }
-    Ok(())
 }
