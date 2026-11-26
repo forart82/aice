@@ -102,3 +102,27 @@ pub(crate) fn assign_native(op: AssignOp, lang: LanguageId) -> &'static str {
         AssignOp::ConcatAssign => if lang == LanguageId::Php { ".=" } else { "+=" },
     }
 }
+
+pub(crate) fn format_in_op(op: BinaryOp, l: &str, r: &str, lang: LanguageId) -> String {
+    let neg = op == BinaryOp::NotIn;
+    match (lang, neg) {
+        (LanguageId::Python, false) => format!("{l} in {r}"),
+        (LanguageId::Python, true) => format!("{l} not in {r}"),
+        (LanguageId::Kotlin, false) => format!("{l} in {r}"),
+        (LanguageId::Kotlin, true) => format!("{l} !in {r}"),
+        (LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript, false) => format!("{l} in {r}"),
+        (LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript, true) => format!("!({l} in {r})"),
+        (LanguageId::Ruby, false) => format!("{r}.include?({l})"),
+        (LanguageId::Ruby, true) => format!("!{r}.include?({l})"),
+        (LanguageId::Php, false) => format!("in_array({l}, {r})"),
+        (LanguageId::Php, true) => format!("!in_array({l}, {r})"),
+        (LanguageId::Rust, false) => format!("{r}.contains(&{l})"),
+        (LanguageId::Rust, true) => format!("!{r}.contains(&{l})"),
+        (LanguageId::CSharp, false) => format!("{r}.Contains({l})"),
+        (LanguageId::CSharp, true) => format!("!{r}.Contains({l})"),
+        (LanguageId::Java | LanguageId::Dart, false) => format!("{r}.contains({l})"),
+        (LanguageId::Java | LanguageId::Dart, true) => format!("!{r}.contains({l})"),
+        (_, false) => format!("contains({r}, {l})"),
+        (_, true) => format!("!contains({r}, {l})"),
+    }
+}

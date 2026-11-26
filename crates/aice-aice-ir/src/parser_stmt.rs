@@ -97,6 +97,21 @@ pub(crate) fn is_walrus_ahead(p: &Parser<'_>) -> bool {
     false
 }
 
+fn is_walrus_or_typed_at(p: &Parser<'_>, idx: usize) -> bool {
+    let Some(t) = p.tokens.get(idx) else { return false; };
+    if matches!(t.kind, TokenKind::ColonEqual | TokenKind::ColonColonEqual) { return true; }
+    if t.kind == TokenKind::Colon {
+        let mut i = idx + 1;
+        while i < p.tokens.len() {
+            let k = p.tokens[i].kind;
+            if matches!(k, TokenKind::ColonEqual | TokenKind::ColonColonEqual) { return true; }
+            if matches!(k, TokenKind::Newline | TokenKind::Eof | TokenKind::Equal | TokenKind::Semicolon) { return false; }
+            i += 1;
+        }
+    }
+    false
+}
+
 pub(crate) fn is_destructure_ahead(p: &Parser<'_>) -> bool {
     let (mut idx, mut depth) = (p.pos + 1, 1usize);
     while idx < p.tokens.len() && depth > 0 {
@@ -108,7 +123,7 @@ pub(crate) fn is_destructure_ahead(p: &Parser<'_>) -> bool {
         }
         idx += 1;
     }
-    matches!(p.tokens.get(idx).map(|t| t.kind), Some(TokenKind::ColonEqual | TokenKind::ColonColonEqual))
+    is_walrus_or_typed_at(p, idx)
 }
 
 pub(crate) fn is_obj_destructure_ahead(p: &Parser<'_>) -> bool {
@@ -122,7 +137,46 @@ pub(crate) fn is_obj_destructure_ahead(p: &Parser<'_>) -> bool {
         }
         idx += 1;
     }
-    matches!(p.tokens.get(idx).map(|t| t.kind), Some(TokenKind::ColonEqual | TokenKind::ColonColonEqual))
+    is_walrus_or_typed_at(p, idx)
+}
+
+pub(crate) fn parse_array_destructure_elems(p: &mut Parser<'_>) -> Result<Vec<String>, TranspileError> {
+    p.expect(TokenKind::LBracket, "Expected '['")?;
+    let mut names = Vec::new();
+    while p.peek_kind() != TokenKind::RBracket && !p.at_eof() {
+        if p.eat(TokenKind::Comma) {
+            names.push(String::new());
+            continue;
+        }
+        let start = p.peek().span.start_byte;
+        let mut end = p.peek().span.end_byte;
+        let mut depth = 0usize;
+        while !p.at_eof() {
+            match p.peek_kind() {
+                TokenKind::Comma | TokenKind::RBracket if depth == 0 => break,
+                TokenKind::LBracket | TokenKind::LBrace | TokenKind::LParen => {
+                    depth += 1;
+                    end = p.advance().span.end_byte;
+                }
+                TokenKind::RBracket | TokenKind::RBrace | TokenKind::RParen => {
+                    depth = depth.saturating_sub(1);
+                    end = p.advance().span.end_byte;
+                }
+                _ => {
+                    end = p.advance().span.end_byte;
+                }
+            }
+        }
+        let elem = p.src.get(start..end).unwrap_or("").trim().to_string();
+        if !elem.is_empty() {
+            names.push(elem);
+        }
+        if !p.eat(TokenKind::Comma) {
+            break;
+        }
+    }
+    p.expect(TokenKind::RBracket, "Expected ']'")?;
+    Ok(names)
 }
 
 pub(crate) fn is_paren_destructure_ahead(p: &Parser<'_>) -> bool {

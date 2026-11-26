@@ -13,6 +13,22 @@ pub(crate) fn push_eval_call<'a>(
     tasks: &mut Vec<CTask<'a>>,
 ) {
     let (is_optional, is_tagged, is_new) = flags;
+    if is_new && is_tagged {
+        let init_elems = match args.first() {
+            Some(Expr::Array(xs)) => Some(xs.as_slice()),
+            _ => None,
+        };
+        let tag = if init_elems.is_some() { "\0new_arr_init" } else { "\0new_arr" };
+        let n_args = init_elems.map_or(0, <[Expr]>::len);
+        tasks.push(CTask::MakeCall {
+            callee_lit: Some(tag.into()), class_new: None, n_args, is_optional: false, is_new: true,
+        });
+        if let Some(xs) = init_elems {
+            for x in xs.iter().rev() { tasks.push(CTask::EvalExpr(x)); }
+        }
+        tasks.push(CTask::EvalExpr(callee));
+        return;
+    }
     if is_tagged && args.len() == 1 {
         tasks.push(CTask::MakeCall {
             callee_lit: Some("\0tagged".into()), class_new: None, n_args: 1, is_optional: false, is_new: false,
@@ -97,6 +113,9 @@ pub(crate) fn push_eval_index<'a>(
     } else {
         tasks.push(CTask::EvalExpr(index));
     }
+    if matches!(object, Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. }) {
+        tasks.push(CTask::WrapParen);
+    }
     tasks.push(CTask::EvalExpr(object));
 }
 
@@ -109,6 +128,19 @@ pub(crate) fn finish_make_call(
     lang: LanguageId,
     st: &mut EvalState,
 ) {
+    if matches!(callee_lit.as_deref(), Some("\0new_arr" | "\0new_arr_init")) {
+        let start = st.vals.len() - n_args;
+        let ps: Vec<String> = st.vals.drain(start..).collect();
+        let cs = st.vals.pop().unwrap();
+        let pfx = if cs.starts_with('[') { "new" } else { "new " };
+        if callee_lit.as_deref() == Some("\0new_arr_init") {
+            let body = if ps.is_empty() { "{}".into() } else { format!("{{ {} }}", ps.join(", ")) };
+            st.vals.push(format!("{pfx}{cs} {body}"));
+        } else {
+            st.vals.push(format!("{pfx}{cs}"));
+        }
+        return;
+    }
     if callee_lit.as_deref() == Some("\0tagged") && n_args == 1 {
         let tpl = st.vals.pop().unwrap();
         let cs = st.vals.pop().unwrap();

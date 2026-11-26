@@ -28,6 +28,9 @@ pub(crate) fn unary_op_native(op: UnaryOp, lang: LanguageId) -> &'static str {
         (UnaryOp::Void, _) => "void ",
         (UnaryOp::Delete, _) => "delete ",
         (UnaryOp::Yield, _) => "yield ",
+        (UnaryOp::YieldStar, LanguageId::Python) => "yield from ",
+        (UnaryOp::YieldStar, _) => "yield* ",
+        (UnaryOp::Generator, _) => "",
         _ => "",
     }
 }
@@ -176,6 +179,11 @@ pub(crate) fn format_record_entry(entry: &RecordEntry, val: String, lang: Langua
             LanguageId::Python | LanguageId::Dart => format!("\"{k}\": {val}"),
             LanguageId::Php => format!("\"{k}\" => {val}"),
             LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript => {
+                if matches!(value, Expr::Unary { op: UnaryOp::Generator, .. })
+                    && let Some(gm) = format_js_gen_method_entry(k, &val)
+                {
+                    return gm;
+                }
                 if matches!(value, Expr::Closure { .. })
                     && let Some(acc) = format_js_accessor_entry(k, &val)
                 {
@@ -202,12 +210,8 @@ fn is_js_prop_key(k: &str) -> bool {
         && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_' || *c == b'$')
 }
 
-fn format_js_accessor_entry(key: &str, val: &str) -> Option<String> {
-    let (acc, name) = key.strip_prefix("get ").map(|n| ("get", n))
-        .or_else(|| key.strip_prefix("set ").map(|n| ("set", n)))?;
-    let name = name.trim();
-    if name.is_empty() { return None; }
-    let rest = val.trim_start();
+fn split_arrow_fn(rest: &str) -> Option<(&str, &str, String)> {
+    let rest = rest.trim_start();
     if !rest.starts_with('(') { return None; }
     let mut depth = 0usize;
     let mut close_idx = None;
@@ -231,6 +235,44 @@ fn format_js_accessor_entry(key: &str, val: &str) -> Option<String> {
     } else {
         format!("{{ return {body_tr}; }}")
     };
+    Some((params, ret_part, body))
+}
+
+pub(crate) fn format_js_generator_fn(raw: &str, lang: LanguageId) -> String {
+    if !matches!(lang, LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::Tsx) {
+        return raw.to_string();
+    }
+    let trimmed = raw.trim_start();
+    let (is_async, rest) = match trimmed.strip_prefix("async ") {
+        Some(r) => (true, r.trim_start()),
+        None => (false, trimmed),
+    };
+    let Some((params, ret_part, body)) = split_arrow_fn(rest) else {
+        return raw.to_string();
+    };
+    let asy = if is_async { "async " } else { "" };
+    format!("{asy}function*{params}{ret_part} {body}")
+}
+
+fn format_js_gen_method_entry(key: &str, val: &str) -> Option<String> {
+    let (pfx, rest) = val
+        .strip_prefix("async function*")
+        .map(|r| ("async *", r))
+        .or_else(|| val.strip_prefix("function*").map(|r| ("*", r)))?;
+    let prop = if is_js_prop_key(key) {
+        key.to_string()
+    } else {
+        format!("\"{}\"", crate::printer_expr::escape_str(key))
+    };
+    Some(format!("{pfx}{prop}{rest}"))
+}
+
+fn format_js_accessor_entry(key: &str, val: &str) -> Option<String> {
+    let (acc, name) = key.strip_prefix("get ").map(|n| ("get", n))
+        .or_else(|| key.strip_prefix("set ").map(|n| ("set", n)))?;
+    let name = name.trim();
+    if name.is_empty() { return None; }
+    let (params, ret_part, body) = split_arrow_fn(val)?;
     let prop = if is_js_prop_key(name) {
         name.to_string()
     } else {

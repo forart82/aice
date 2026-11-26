@@ -110,5 +110,6 @@ pub(crate) fn unary_op_str(op: UnaryOp) -> &'static str {
         UnaryOp::Ref => "&", UnaryOp::RefMut => "&mut ", UnaryOp::Deref => "*",
         UnaryOp::Typeof => "typeof ", UnaryOp::Void => "void ",
         UnaryOp::Delete => "delete ", UnaryOp::Yield => "yield ",
+        UnaryOp::YieldStar => "yield* ", UnaryOp::Generator => "",
     }
 }

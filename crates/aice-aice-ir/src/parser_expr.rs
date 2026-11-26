@@ -60,62 +60,34 @@ pub(crate) fn step_member_infix(
     Ok(())
 }
 
-pub(crate) fn parse_new_prefix(
-    p: &mut Parser<'_>,
-    stack: &mut Vec<ParseCont>,
-    vals: &mut Vec<ParseVal>,
-) -> Result<(), TranspileError> {
-    p.advance(); // "new"
-    let mut ctor = Expr::Ident(p.advance().lexeme);
-    while matches!(p.peek_kind(), TokenKind::Dot | TokenKind::ColonColon) {
-        let mk = if p.advance().kind == TokenKind::ColonColon { MemberKind::Scope } else { MemberKind::Dot };
-        let prop = p.expect_ident_or_kw("Expected member name")?.lexeme;
-        ctor = Expr::Member { object: Box::new(ctor), property: prop, kind: mk };
+pub(crate) fn is_new_prefix_start(p: &Parser<'_>, tok: &Token) -> bool {
+    tok.kind == TokenKind::Ident
+        && tok.lexeme == "new"
+        && (p.peek_n(1).kind == TokenKind::Ident
+            || (p.peek_n(1).kind == TokenKind::LBracket
+                && matches!(p.peek_n(2).kind, TokenKind::RBracket | TokenKind::Comma)))
+}
+
+pub(crate) fn looks_like_gen_closure(p: &Parser<'_>, star_offset: usize) -> bool {
+    if p.peek_n(star_offset).kind != TokenKind::Star
+        || p.peek_n(star_offset + 1).kind != TokenKind::LParen
+    {
+        return false;
     }
-    if p.eat(TokenKind::Concat) {
-        match &mut ctor {
-            Expr::Ident(s) => s.push_str("<>"),
-            Expr::Member { property, .. } => property.push_str("<>"),
+    let (mut idx, mut depth) = (p.pos + star_offset + 2, 1usize);
+    while idx < p.tokens.len() && depth > 0 {
+        match p.tokens[idx].kind {
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => depth -= 1,
+            TokenKind::Eof => return false,
             _ => {}
         }
-    } else if p.peek_kind() == TokenKind::Lt {
-        let start = p.peek().span.start_byte;
-        let (mut depth, mut end) = (0usize, start);
-        while !p.at_eof() {
-            let t = p.advance();
-            end = t.span.end_byte;
-            if t.kind == TokenKind::Lt { depth += 1; }
-            else if t.kind == TokenKind::Gt {
-                depth = depth.saturating_sub(1);
-                if depth == 0 { break; }
-            } else if t.kind == TokenKind::Shr {
-                depth = depth.saturating_sub(2);
-                if depth == 0 { break; }
-            }
-        }
-        let gargs = &p.src[start..end];
-        match &mut ctor {
-            Expr::Ident(s) => s.push_str(gargs),
-            Expr::Member { property, .. } => property.push_str(gargs),
-            _ => {}
-        }
+        idx += 1;
     }
-    if p.eat(TokenKind::LParen) {
-        if p.peek_kind() == TokenKind::RParen || p.at_eof() {
-            p.expect(TokenKind::RParen, "Expected ')'")?;
-            vals.push(ParseVal::Expr(Expr::Call {
-                callee: Box::new(ctor), args: Vec::new(), is_optional: false, is_tagged: false, is_new: true,
-            }));
-        } else {
-            stack.push(ParseCont::ExprCallArg { callee: ctor, args: Vec::new(), is_optional: false, is_new: true });
-            stack.push(ParseCont::Expr(1));
-        }
-    } else {
-        vals.push(ParseVal::Expr(Expr::Call {
-            callee: Box::new(ctor), args: Vec::new(), is_optional: false, is_tagged: false, is_new: true,
-        }));
-    }
-    Ok(())
+    matches!(
+        p.tokens.get(idx).map(|t| t.kind),
+        Some(TokenKind::Equal | TokenKind::FatArrow | TokenKind::LBrace | TokenKind::Arrow)
+    )
 }
 
 pub(crate) fn infix_prec(kind: TokenKind) -> Option<(u8, bool)> {
@@ -220,6 +192,9 @@ pub(crate) fn try_contextual_infix(p: &mut Parser<'_>, min_prec: u8) -> Option<(
 pub(crate) fn try_contextual_unary(p: &Parser<'_>, tok: &Token) -> Option<UnaryOp> {
     if tok.kind != TokenKind::Ident {
         return None;
+    }
+    if tok.lexeme == "yield" && p.peek_n(1).kind == TokenKind::Star {
+        return can_start_expr_tok(p.peek_n(2).kind).then_some(UnaryOp::YieldStar);
     }
     let op = match tok.lexeme.as_str() {
         "typeof" => UnaryOp::Typeof,

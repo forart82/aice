@@ -74,7 +74,13 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             if lp { tasks.push(PTask::Lit("(")); }
         }
         Expr::Unary { op, is_postfix, operand } => {
-            let wrap = *op != UnaryOp::Yield
+            if *op == UnaryOp::Generator
+                && let Expr::Closure { is_async, params, ret, body } = operand.as_ref()
+            {
+                push_closure_print(tasks, out, *is_async, true, params, ret.as_ref(), body);
+                return;
+            }
+            let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator)
                 && matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
             if *is_postfix {
                 tasks.push(PTask::Lit(unary_op_str(*op)));
@@ -102,6 +108,23 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             if wrap { out.push('('); }
         }
         Expr::Call { callee, args, is_optional, is_tagged, is_new } => {
+            if *is_new && *is_tagged {
+                if let Some(Expr::Array(elems)) = args.first() {
+                    if elems.is_empty() {
+                        tasks.push(PTask::Lit(" {}"));
+                    } else {
+                        tasks.push(PTask::Lit(" }"));
+                        for (i, el) in elems.iter().enumerate().rev() {
+                            tasks.push(PTask::Expr(el));
+                            if i > 0 { tasks.push(PTask::Lit(", ")); }
+                        }
+                        tasks.push(PTask::Lit(" { "));
+                    }
+                }
+                tasks.push(PTask::Expr(callee));
+                out.push_str(if is_implicit_new_array(callee) { "new" } else { "new " });
+                return;
+            }
             if *is_tagged && args.len() == 1 {
                 tasks.push(PTask::Expr(&args[0]));
                 tasks.push(PTask::Expr(callee));
@@ -117,11 +140,15 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             if *is_new { out.push_str("new "); }
         }
         Expr::Member { object, property, kind } => {
+            let wrap = matches!(object.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
             let op = match kind { MemberKind::Dot => ".", MemberKind::SafeNav => "?.", MemberKind::Scope => "::" };
             tasks.push(PTask::Str(format!("{op}{property}")));
+            if wrap { tasks.push(PTask::Lit(")")); }
             tasks.push(PTask::Expr(object));
+            if wrap { out.push('('); }
         }
         Expr::Index { object, index, is_optional } => {
+            let wrap = matches!(object.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
             tasks.push(PTask::Lit("]"));
             if let Expr::Call { callee, args, .. } = index.as_ref()
                 && matches!(callee.as_ref(), Expr::Ident(s) if s == "\0idx")
@@ -134,7 +161,9 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
                 tasks.push(PTask::Expr(index));
             }
             tasks.push(PTask::Lit(if *is_optional { "?.[" } else { "[" }));
+            if wrap { tasks.push(PTask::Lit(")")); }
             tasks.push(PTask::Expr(object));
+            if wrap { out.push('('); }
         }
         Expr::Array(items) => {
             tasks.push(PTask::Lit("]"));
@@ -164,38 +193,7 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             out.push_str("{ ");
         }
         Expr::Closure { is_async, params, ret, body } => {
-            match body.as_ref() {
-                FnBody::Expr(e) => {
-                    tasks.push(PTask::Expr(e));
-                    tasks.push(PTask::Lit(" = "));
-                }
-                FnBody::Block(stmts) => {
-                    tasks.push(PTask::Lit(" }"));
-                    tasks.push(PTask::InlineStmts(stmts));
-                    tasks.push(PTask::Lit(" { "));
-                }
-                FnBody::SignatureOnly => {}
-            }
-            if let Some(r) = ret {
-                tasks.push(PTask::Ty(r));
-                tasks.push(PTask::Lit(" -> "));
-            }
-            tasks.push(PTask::Lit(")"));
-            for (i, p) in params.iter().enumerate().rev() {
-                if let Some(d) = &p.default {
-                    tasks.push(PTask::Expr(d));
-                    tasks.push(PTask::Lit(" = "));
-                }
-                if let Some(t) = &p.ty {
-                    tasks.push(PTask::Ty(t));
-                    tasks.push(PTask::Lit(": "));
-                }
-                if p.is_optional { tasks.push(PTask::Lit("?")); }
-                tasks.push(PTask::Str(p.name.clone()));
-                if p.is_rest { tasks.push(PTask::Lit("...")); }
-                if i > 0 { tasks.push(PTask::Lit(", ")); }
-            }
-            out.push_str(if *is_async { "async fn(" } else { "fn(" });
+            push_closure_print(tasks, out, *is_async, false, params, ret.as_ref(), body);
         }
         Expr::Assign { target, op, value } => {
             tasks.push(PTask::Expr(value));
@@ -231,4 +229,59 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             out.push_str("match ");
         }
     }
+}
+
+fn is_implicit_new_array(mut e: &Expr) -> bool {
+    while let Expr::Index { object, .. } = e {
+        e = object;
+    }
+    matches!(e, Expr::Ident(s) if s.is_empty())
+}
+
+fn push_closure_print<'a>(
+    tasks: &mut Vec<PTask<'a>>,
+    out: &mut String,
+    is_async: bool,
+    is_generator: bool,
+    params: &'a [crate::ir_types::ParamDecl],
+    ret: Option<&'a AiceType>,
+    body: &'a FnBody,
+) {
+    match body {
+        FnBody::Expr(e) => {
+            tasks.push(PTask::Expr(e));
+            tasks.push(PTask::Lit(" = "));
+        }
+        FnBody::Block(stmts) => {
+            tasks.push(PTask::Lit(" }"));
+            tasks.push(PTask::InlineStmts(stmts));
+            tasks.push(PTask::Lit(" { "));
+        }
+        FnBody::SignatureOnly => {}
+    }
+    if let Some(r) = ret {
+        tasks.push(PTask::Ty(r));
+        tasks.push(PTask::Lit(" -> "));
+    }
+    tasks.push(PTask::Lit(")"));
+    for (i, p) in params.iter().enumerate().rev() {
+        if let Some(d) = &p.default {
+            tasks.push(PTask::Expr(d));
+            tasks.push(PTask::Lit(" = "));
+        }
+        if let Some(t) = &p.ty {
+            tasks.push(PTask::Ty(t));
+            tasks.push(PTask::Lit(": "));
+        }
+        if p.is_optional { tasks.push(PTask::Lit("?")); }
+        tasks.push(PTask::Str(p.name.clone()));
+        if p.is_rest { tasks.push(PTask::Lit("...")); }
+        if i > 0 { tasks.push(PTask::Lit(", ")); }
+    }
+    out.push_str(match (is_async, is_generator) {
+        (true, true) => "async fn*(",
+        (true, false) => "async fn(",
+        (false, true) => "fn*(",
+        (false, false) => "fn(",
+    });
 }

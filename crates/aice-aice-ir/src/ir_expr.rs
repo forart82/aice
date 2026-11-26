@@ -166,6 +166,8 @@ pub enum UnaryOp {
     Void,
     Delete,
     Yield,
+    YieldStar,
+    Generator,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

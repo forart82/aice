@@ -8,7 +8,7 @@ use crate::parser_iter_expr::pop_expr;
 use crate::parser_iter_match::{start_match, step_match_cont};
 use crate::parser_stmt::{
     attach_stmt_trivia, eat_assign_op, is_destructure_ahead, is_obj_destructure_ahead,
-    is_paren_destructure_ahead, is_walrus_ahead,
+    is_paren_destructure_ahead, is_walrus_ahead, parse_array_destructure_elems,
 };
 use crate::parser_types::parse_type_expr;
 
@@ -216,15 +216,14 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::LBracket if is_destructure_ahead(p) => {
-            p.expect(TokenKind::LBracket, "Expected '['")?;
-            let mut names = Vec::new();
-            while p.peek_kind() != TokenKind::RBracket && !p.at_eof() {
-                names.push(p.expect_ident_or_kw("Expected binding name")?.lexeme);
-                if !p.eat(TokenKind::Comma) { break; }
-            }
-            p.expect(TokenKind::RBracket, "Expected ']'")?;
+            let names = parse_array_destructure_elems(p)?;
+            let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
             let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
-            stack.push(ParseCont::StmtDestructure { names, is_mut });
+            if ty.is_some() {
+                stack.push(ParseCont::StmtLet { name: format!("[{}]", names.join(", ")), is_mut, ty });
+            } else {
+                stack.push(ParseCont::StmtDestructure { names, is_mut });
+            }
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::LParen if is_paren_destructure_ahead(p) => {
@@ -249,8 +248,9 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
                 else if tok.kind == TokenKind::RBrace { depth -= 1; end = tok.span.end_byte; }
             }
             let name = p.src.get(start..end).unwrap_or("{}").trim().to_string();
+            let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
             let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
-            stack.push(ParseCont::StmtLet { name, is_mut, ty: None });
+            stack.push(ParseCont::StmtLet { name, is_mut, ty });
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::Ident if is_walrus_ahead(p) => {

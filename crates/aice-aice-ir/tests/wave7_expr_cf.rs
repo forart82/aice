@@ -329,7 +329,7 @@ end
     assert!(aice.contains("w = cur?.nil?()"), "Ruby &.nil? must stay safe-nav:\n{aice}");
     assert!(aice.contains("e = cur?.empty?()"), "Ruby &.empty? must stay safe-nav:\n{aice}");
 
-    assert!(nat.contains("cur&.to_s() or \"nil\""), "Ruby native &.:\n{nat}");
+    assert!(nat.contains("cur&.to_s() || \"nil\""), "Ruby native &.:\n{nat}");
     assert!(!nat.contains("cur?.to_s"), "Ruby emitted invalid ?.:\n{nat}");
     assert!(nat.contains("cur&.fetch(:k, 1)"), "Ruby native &. args:\n{nat}");
     assert!(nat.contains("cur&.a()&.b()"), "Ruby native chained &.:\n{nat}");

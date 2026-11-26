@@ -3,11 +3,11 @@ use crate::ir_code::{BinaryOp, Expr, Stmt, UnaryOp};
 use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
 use crate::parser_expr::{
-    assign_op_from_tok, binary_op_from_tok, infix_prec, is_elvis_ahead, lit_expr_from_tok,
-    looks_like_ternary, parse_new_prefix, step_member_infix, try_contextual_infix,
-    try_contextual_unary,
+    assign_op_from_tok, binary_op_from_tok, infix_prec, is_elvis_ahead, is_new_prefix_start,
+    lit_expr_from_tok, looks_like_gen_closure, looks_like_ternary, step_member_infix,
+    try_contextual_infix, try_contextual_unary,
 };
-use crate::parser_iter::{ParseCont, ParseVal};
+use crate::parser_iter::{ParseCont, ParseVal, parse_new_prefix};
 use crate::parser_iter_lit::{looks_like_closure_after_fn, start_record_entry, step_closure_params, step_lit_cont};
 use crate::parser_iter_match::start_match;
 
@@ -186,14 +186,15 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
                 start_record_entry(p, Vec::new(), stack)?;
             }
         }
-        TokenKind::Fn if looks_like_closure_after_fn(p) => {
-            p.expect(TokenKind::Fn, "Expected 'fn'")?;
+        TokenKind::Fn if looks_like_closure_after_fn(p) || looks_like_gen_closure(p, 1) => {
+            p.advance();
+            if p.eat(TokenKind::Star) { stack.push(ParseCont::ExprUnary { op: UnaryOp::Generator }); }
             p.expect(TokenKind::LParen, "Expected '('")?;
             step_closure_params(p, false, Vec::new(), stack, vals)?;
         }
         TokenKind::Async if p.peek_n(1).kind == TokenKind::Fn => {
-            p.advance();
-            p.expect(TokenKind::Fn, "Expected 'fn'")?;
+            p.advance(); p.advance();
+            if p.eat(TokenKind::Star) { stack.push(ParseCont::ExprUnary { op: UnaryOp::Generator }); }
             p.expect(TokenKind::LParen, "Expected '('")?;
             step_closure_params(p, true, Vec::new(), stack, vals)?;
         }
@@ -207,12 +208,11 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             p.advance();
             vals.push(ParseVal::Expr(Expr::Ident(format!(":{}", p.advance().lexeme))));
         }
-        TokenKind::Ident if tok.lexeme == "new" && p.peek_n(1).kind == TokenKind::Ident => {
-            parse_new_prefix(p, stack, vals)?;
-        }
+        _ if is_new_prefix_start(p, &tok) => parse_new_prefix(p, stack, vals)?,
         _ if let Some(op) = try_contextual_unary(p, &tok) => {
             p.advance();
-            let arg_prec = if op == UnaryOp::Yield { 2 } else { 16 };
+            if op == UnaryOp::YieldStar { p.advance(); }
+            let arg_prec = if matches!(op, UnaryOp::Yield | UnaryOp::YieldStar) { 2 } else { 16 };
             stack.push(ParseCont::ExprUnary { op });
             stack.push(ParseCont::Expr(arg_prec));
         }

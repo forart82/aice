@@ -6,7 +6,7 @@ use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::ExprFin;
 use crate::decompile::trivia::is_comment_kind;
 use crate::ir::TranspileOpts;
-use crate::ir_code::Expr;
+use crate::ir_code::{Expr, UnaryOp};
 
 pub(crate) fn decompile_expr(node: Node<'_>, src: &str, lang: LanguageId) -> Expr {
     let opts = TranspileOpts::default();
@@ -103,5 +103,123 @@ pub(crate) fn push_template_task<'a>(
     env.tasks.push(DTask::FinishExpr(ExprFin::Template { quasis }));
     for ex in sub_exprs.into_iter().rev() {
         env.tasks.push(DTask::Expr(ex));
+    }
+}
+
+pub(crate) fn push_yield_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    if let Some(arg) = named_children(node).into_iter().next() {
+        let is_star = raw
+            .strip_prefix("yield")
+            .is_some_and(|r| r.trim_start().starts_with('*'));
+        let op = if is_star { UnaryOp::YieldStar } else { UnaryOp::Yield };
+        env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op, is_postfix: false }));
+        env.tasks.push(DTask::Expr(arg));
+    } else {
+        env.exprs.push(Expr::Ident(raw.to_string()));
+    }
+}
+
+pub(crate) fn is_simple_cast_ident(s: &str) -> bool {
+    let b = s.as_bytes();
+    !b.is_empty()
+        && (b[0].is_ascii_alphabetic() || b[0] == b'_')
+        && b.iter().all(|c| c.is_ascii_alphanumeric() || *c == b'_')
+        && !matches!(
+            s,
+            "true" | "false" | "nil" | "fn" | "async" | "await" | "match" | "not" | "and" | "or" | "in" | "as" | "is"
+        )
+}
+
+pub(crate) fn push_c_cast_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    let kids = named_children(node);
+    let ty = node.child_by_field_name("type").or_else(|| kids.first().copied());
+    let val = node.child_by_field_name("value").or_else(|| kids.get(1).copied());
+    if let (Some(t), Some(v)) = (ty, val) {
+        let ty_s = node_text(t, env.src).split_whitespace().collect::<Vec<_>>().join(" ");
+        env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: ty_s, quote_complex: true }));
+        env.tasks.push(DTask::Expr(v));
+    } else {
+        env.exprs.push(Expr::Ident(raw.to_string()));
+    }
+}
+
+pub(crate) fn push_new_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    let mut ranks: Vec<(Vec<Node<'a>>, String)> = Vec::new();
+    let elem_ty = if node.kind() == "implicit_array_creation_expression" {
+        let mut commas = 0usize;
+        let mut cur = node.walk();
+        for c in node.children(&mut cur) {
+            if c.kind() == "," { commas += 1; }
+        }
+        ranks.push((Vec::new(), ",".repeat(commas)));
+        String::new()
+    } else if env.lang == LanguageId::CSharp {
+        let Some(mut ty_n) = node.child_by_field_name("type") else {
+            env.exprs.push(Expr::Ident(raw.to_string()));
+            return;
+        };
+        let mut rev_ranks = Vec::new();
+        while ty_n.kind() == "array_type" {
+            let mut cur = ty_n.walk();
+            let mut rk_nodes: Vec<Node<'a>> = ty_n.children_by_field_name("rank", &mut cur).collect();
+            if rk_nodes.is_empty() {
+                rk_nodes = named_children(ty_n).into_iter().filter(|c| c.kind() == "array_rank_specifier").collect();
+            }
+            for rk in rk_nodes.into_iter().rev() {
+                let dims: Vec<Node<'a>> = named_children(rk).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+                let mut commas = 0usize;
+                let mut rc = rk.walk();
+                for c in rk.children(&mut rc) { if c.kind() == "," { commas += 1; } }
+                rev_ranks.push((dims, ",".repeat(commas)));
+            }
+            let Some(inner) = ty_n.child_by_field_name("type") else { break; };
+            ty_n = inner;
+        }
+        rev_ranks.reverse();
+        ranks = rev_ranks;
+        node_text(ty_n, env.src).trim().to_string()
+    } else {
+        let Some(ty_n) = node.child_by_field_name("type") else {
+            env.exprs.push(Expr::Ident(raw.to_string()));
+            return;
+        };
+        for ch in named_children(node) {
+            if ch.kind() == "dimensions_expr" {
+                let dims: Vec<Node<'a>> = named_children(ch).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+                ranks.push((dims, String::new()));
+            } else if ch.kind() == "dimensions" {
+                let cnt = node_text(ch, env.src).matches('[').count().max(1);
+                for _ in 0..cnt { ranks.push((Vec::new(), String::new())); }
+            }
+        }
+        node_text(ty_n, env.src).trim().to_string()
+    };
+    if ranks.is_empty() {
+        env.exprs.push(Expr::Ident(raw.to_string()));
+        return;
+    }
+    let init_node = child_by_kind(node, "initializer_expression")
+        .or_else(|| child_by_kind(node, "array_initializer"))
+        .or_else(|| node.child_by_field_name("value").filter(|v| v.kind() == "array_initializer"));
+    let init_elems: Option<Vec<Node<'a>>> = init_node.map(|n| {
+        named_children(n).into_iter().filter(|c| !is_comment_kind(c.kind())).collect()
+    });
+    env.exprs.push(Expr::Ident(elem_ty));
+    env.tasks.push(DTask::FinishExpr(ExprFin::NewArray { has_init: init_elems.is_some() }));
+    if let Some(elems) = init_elems {
+        env.tasks.push(DTask::FinishExpr(ExprFin::Array(elems.len())));
+        for el in elems.into_iter().rev() {
+            env.tasks.push(DTask::Expr(el));
+        }
+    }
+    for (dims, empty_sep) in ranks.into_iter().rev() {
+        if dims.is_empty() {
+            env.tasks.push(DTask::FinishExpr(ExprFin::EmptyIndex(empty_sep)));
+        } else {
+            env.tasks.push(DTask::FinishExpr(ExprFin::Index { is_optional: false, argc: dims.len() }));
+            for d in dims.into_iter().rev() {
+                env.tasks.push(DTask::Expr(d));
+            }
+        }
     }
 }

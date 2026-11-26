@@ -236,7 +236,7 @@ fn c5_iter5_blocking_and_polish_regressions() {
     let (aice_rb_adv, nat_rb_adv) = roundtrip(LanguageId::Ruby, "adv.rb", rb_adv);
     assert!(aice_rb_adv.contains("in 1..=5") && aice_rb_adv.contains("in 6..10"), "Ruby ranges mis-mapped:\n{aice_rb_adv}");
     assert!(nat_rb_adv.contains("when 1..5") && nat_rb_adv.contains("when 6...10"), "Ruby range inclusivity inverted:\n{nat_rb_adv}");
-    assert!(nat_rb_adv.contains("n < 0 or n > 100"), "Ruby subjectless comma cond dropped:\n{nat_rb_adv}");
+    assert!(nat_rb_adv.contains("n < 0 || n > 100"), "Ruby subjectless comma cond dropped:\n{nat_rb_adv}");
     assert!(nat_rb_adv.contains("rescue Foo::Bar => e"), "Ruby rescue Foo::Bar emitted dot:\n{nat_rb_adv}");
     assert!(nat_rb_adv.contains("  items.each do |it|\n    puts(it)\n    y = it + 1\n  end"), "Ruby do..end misindented:\n{nat_rb_adv}");
 

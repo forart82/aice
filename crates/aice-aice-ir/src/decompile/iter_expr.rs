@@ -2,7 +2,9 @@ use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
-use crate::decompile::expr_common::{push_index_task, push_template_task};
+use crate::decompile::expr_common::{
+    push_c_cast_task, push_index_task, push_new_array_task, push_template_task, push_yield_task,
+};
 use crate::decompile::expr_lit::decompile_string_lit;
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task};
@@ -25,6 +27,8 @@ pub(crate) enum ExprFin {
     Conditional,
     Member { property: String, kind: MemberKind },
     Index { is_optional: bool, argc: usize },
+    EmptyIndex(String),
+    NewArray { has_init: bool },
     Call { has_callee_expr: bool, callee_name: String, recv_prop: Option<String>, recv_safe: bool, argc: usize, has_ruby_blk: bool, is_optional: bool, is_new: bool },
     Template { quasis: Vec<String> },
     TaggedTemplate,
@@ -37,9 +41,9 @@ pub(crate) enum ExprFin {
     StructExpr { sname: String, slots: Vec<ObjSlot> },
     Object(Vec<ObjSlot>),
     Array(usize),
-    TypeCast(String),
+    TypeCast { ty: String, quote_complex: bool },
     Await,
-    Closure { is_async: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, destruct_stmts: Vec<Stmt>, ret: Option<AiceType>, body_kind: u8 },
+    Closure { is_async: bool, is_generator: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, destruct_stmts: Vec<Stmt>, ret: Option<AiceType>, body_kind: u8 },
     RubyBlock { params: Vec<ParamDecl>, has_body: bool },
     InlineJsx(bool),
 }
@@ -200,14 +204,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 env.exprs.push(Expr::Ident(raw.to_string()));
             }
         }
-        "yield_expression" | "yield" if !raw.starts_with("yield from") && !raw.starts_with("yield*") => {
-            if let Some(arg) = named_children(node).into_iter().next() {
-                env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op: UnaryOp::Yield, is_postfix: false }));
-                env.tasks.push(DTask::Expr(arg));
-            } else {
-                env.exprs.push(Expr::Ident(raw.to_string()));
-            }
-        }
+        "yield_expression" | "yield" if !raw.starts_with("yield from") => push_yield_task(env, node, raw),
         "unary_expression" | "unary_operator" | "not_operator" | "prefix_unary_expression"
         | "update_expression" | "postfix_unary_expression" | "pointer_expression" | "unary"
         | "unary_op_expression" | "inc_statement" | "dec_statement" => {
@@ -260,7 +257,12 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }
         }
         "object" | "dictionary" | "hash" | "set_or_map_literal" => push_object_task(env, node, raw),
-        "array_creation_expression" => push_php_array_task(env, node),
+        "array_creation_expression" if env.lang == LanguageId::Php => push_php_array_task(env, node),
+        "array_creation_expression" | "implicit_array_creation_expression"
+            if matches!(env.lang, LanguageId::CSharp | LanguageId::Java) =>
+        {
+            push_new_array_task(env, node, raw);
+        }
         "array" | "array_expression" | "list" | "array_literal" | "list_literal" => {
             let xs: Vec<_> = named_children(node).into_iter()
                 .filter(|c| !matches!(c.kind(), "type_arguments" | "type_argument_list")).collect();
@@ -268,12 +270,13 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             for c in xs.into_iter().rev() { env.tasks.push(DTask::Expr(c)); }
         }
         "arrow_function" | "closure_expression" | "lambda" | "lambda_expression"
-        | "function_expression" | "function_declaration" | "method_definition" => push_lambda_task(env, node),
+        | "function_expression" | "generator_function" | "function_declaration" | "method_definition" => push_lambda_task(env, node),
+        "cast_expression" if matches!(env.lang, LanguageId::C | LanguageId::Cpp) => push_c_cast_task(env, node, raw),
         "type_cast_expression" | "as_expression" => {
             let val = node.child_by_field_name("value").or_else(|| named_children(node).into_iter().next());
             let ty = node.child_by_field_name("type").or_else(|| named_children(node).into_iter().nth(1));
             if let (Some(v), Some(t)) = (val, ty) {
-                env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast(node_text(t, env.src).trim().into())));
+                env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: node_text(t, env.src).trim().into(), quote_complex: false }));
                 env.tasks.push(DTask::Expr(v));
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }

@@ -46,15 +46,16 @@ pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         .child_by_field_name("name")
         .or_else(|| node.child_by_field_name("parameters"))
         .or_else(|| node.child_by_field_name("parameter"))
+        .or_else(|| node.child_by_field_name("body"))
         .map(|n| n.start_byte())
         .unwrap_or(node.end_byte());
-    let is_async = env
-        .src
-        .get(node.start_byte()..hdr_end)
-        .unwrap_or("")
-        .split_whitespace()
-        .any(|w| w == "async");
-    env.tasks.push(DTask::FinishExpr(ExprFin::Closure { is_async, params, default_mask, destruct_stmts, ret, body_kind }));
+    let hdr = env.src.get(node.start_byte()..hdr_end).unwrap_or("");
+    let is_async = hdr.split_whitespace().any(|w| w == "async");
+    let is_generator = matches!(env.lang, LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::Tsx)
+        && (node.kind() == "generator_function" || hdr.contains('*'));
+    env.tasks.push(DTask::FinishExpr(ExprFin::Closure {
+        is_async, is_generator, params, default_mask, destruct_stmts, ret, body_kind,
+    }));
     if let Some(tn) = target_n {
         if body_kind == 1 { env.tasks.push(DTask::Block(tn)); } else { env.tasks.push(DTask::Expr(tn)); }
     }
@@ -165,6 +166,15 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             let object = Box::new(env.exprs.pop().expect("obj"));
             Expr::Index { object, index, is_optional }
         }
+        ExprFin::EmptyIndex(sep) => {
+            let object = Box::new(env.exprs.pop().expect("eidx obj"));
+            Expr::Index { object, index: Box::new(Expr::Ident(sep)), is_optional: false }
+        }
+        ExprFin::NewArray { has_init } => {
+            let args = if has_init { vec![env.exprs.pop().expect("narr init")] } else { Vec::new() };
+            let callee = Box::new(env.exprs.pop().expect("narr callee"));
+            Expr::Call { callee, args, is_optional: false, is_tagged: true, is_new: true }
+        }
         ExprFin::Template { quasis } => {
             let n = quasis.len().saturating_sub(1);
             let exprs = env.exprs.split_off(env.exprs.len() - n);
@@ -214,9 +224,16 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             Expr::Record(build_record_entries(slots, vals))
         }
         ExprFin::Array(n) => Expr::Array(env.exprs.split_off(env.exprs.len() - n)),
-        ExprFin::TypeCast(ty_name) => Expr::Binary { op: BinaryOp::As, left: Box::new(env.exprs.pop().expect("cast")), right: Box::new(Expr::Ident(ty_name)) },
+        ExprFin::TypeCast { ty, quote_complex } => {
+            let rhs = if !quote_complex || crate::decompile::expr_common::is_simple_cast_ident(&ty) {
+                Expr::Ident(ty)
+            } else {
+                Expr::Literal(LiteralVal::Str { value: ty, multiline: false })
+            };
+            Expr::Binary { op: BinaryOp::As, left: Box::new(env.exprs.pop().expect("cast")), right: Box::new(rhs) }
+        }
         ExprFin::Await => Expr::Await(Box::new(env.exprs.pop().expect("await"))),
-        ExprFin::Closure { is_async, mut params, default_mask, mut destruct_stmts, ret, body_kind } => {
+        ExprFin::Closure { is_async, is_generator, mut params, default_mask, mut destruct_stmts, ret, body_kind } => {
             let body = match body_kind {
                 1 => {
                     let mut stmts = env.blocks.pop().unwrap_or_default();
@@ -246,7 +263,12 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             for (p, has_d) in params.iter_mut().zip(default_mask) {
                 if has_d { p.default = defs.next(); }
             }
-            Expr::Closure { is_async, params, ret, body: Box::new(body) }
+            let cl = Expr::Closure { is_async, params, ret, body: Box::new(body) };
+            if is_generator {
+                Expr::Unary { op: UnaryOp::Generator, is_postfix: false, operand: Box::new(cl) }
+            } else {
+                cl
+            }
         }
         ExprFin::RubyBlock { params, has_body } => {
             let stmts = if has_body { env.blocks.pop().unwrap_or_default() } else { Vec::new() };

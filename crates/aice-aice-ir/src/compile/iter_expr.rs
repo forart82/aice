@@ -1,11 +1,13 @@
 use aice_lang_registry::LanguageId;
 
-use crate::compile::expr_emit::{ExprEmitCtx, assign_native, bin_op_native, emit_ident, emit_lit, is_str_like};
+use crate::compile::expr_emit::{
+    ExprEmitCtx, assign_native, bin_op_native, emit_ident, emit_lit, format_in_op, is_str_like,
+};
 use crate::compile::iter_emit::{CTask, EvalState, body_kind_of};
 use crate::compile::iter_expr_call::{finish_make_call, make_inline_jsx, push_eval_call, push_eval_index};
 use crate::compile::iter_expr_fmt::{
-    format_closure, format_closure_param, format_record_entry, format_template,
-    needs_walrus_parens, unary_op_native,
+    format_closure, format_closure_param, format_js_generator_fn, format_record_entry,
+    format_template, needs_walrus_parens, unary_op_native,
 };
 use crate::ir_code::{BinaryOp, Expr, FnBody, MemberKind, RecordEntry, UnaryOp};
 
@@ -21,39 +23,25 @@ pub(crate) fn step_expr_task<'a>(
         CTask::MakeBinary { op, is_str } => {
             let r = st.vals.pop().unwrap();
             let l = st.vals.pop().unwrap();
-            if op == BinaryOp::As && !matches!(lang, LanguageId::Rust | LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Kotlin | LanguageId::CSharp | LanguageId::Dart) {
-                st.vals.push(l);
-                return;
+            if op == BinaryOp::As {
+                if matches!(lang, LanguageId::C | LanguageId::Cpp) {
+                    let ty_s = r.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&r);
+                    st.vals.push(format!("({ty_s}){l}"));
+                    return;
+                }
+                if !matches!(lang, LanguageId::Rust | LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Kotlin | LanguageId::CSharp | LanguageId::Dart) {
+                    st.vals.push(l);
+                    return;
+                }
             }
             if matches!(op, BinaryOp::In | BinaryOp::NotIn) {
-                let neg = op == BinaryOp::NotIn;
-                let s = match (lang, neg) {
-                    (LanguageId::Python, false) => format!("{l} in {r}"),
-                    (LanguageId::Python, true) => format!("{l} not in {r}"),
-                    (LanguageId::Kotlin, false) => format!("{l} in {r}"),
-                    (LanguageId::Kotlin, true) => format!("{l} !in {r}"),
-                    (LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript, false) => format!("{l} in {r}"),
-                    (LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript, true) => format!("!({l} in {r})"),
-                    (LanguageId::Ruby, false) => format!("{r}.include?({l})"),
-                    (LanguageId::Ruby, true) => format!("!{r}.include?({l})"),
-                    (LanguageId::Php, false) => format!("in_array({l}, {r})"),
-                    (LanguageId::Php, true) => format!("!in_array({l}, {r})"),
-                    (LanguageId::Rust, false) => format!("{r}.contains(&{l})"),
-                    (LanguageId::Rust, true) => format!("!{r}.contains(&{l})"),
-                    (LanguageId::CSharp, false) => format!("{r}.Contains({l})"),
-                    (LanguageId::CSharp, true) => format!("!{r}.Contains({l})"),
-                    (LanguageId::Java | LanguageId::Dart, false) => format!("{r}.contains({l})"),
-                    (LanguageId::Java | LanguageId::Dart, true) => format!("!{r}.contains({l})"),
-                    (_, false) => format!("contains({r}, {l})"),
-                    (_, true) => format!("!contains({r}, {l})"),
-                };
-                st.vals.push(s);
+                st.vals.push(format_in_op(op, &l, &r, lang));
                 return;
             }
             let op_s = match (op, lang) {
-                (BinaryOp::And, LanguageId::Python | LanguageId::Ruby) => "and",
+                (BinaryOp::And, LanguageId::Python) => "and",
                 (BinaryOp::And, _) => "&&",
-                (BinaryOp::Or, LanguageId::Python | LanguageId::Ruby) => "or",
+                (BinaryOp::Or, LanguageId::Python) => "or",
                 (BinaryOp::Or, _) => "||",
                 (BinaryOp::Eq, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Php) => "===",
                 (BinaryOp::NotEq, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Php) => "!==",
@@ -78,6 +66,7 @@ pub(crate) fn step_expr_task<'a>(
         }
         CTask::MakeUnary { op, is_postfix, wrap } => {
             let raw = st.vals.pop().unwrap();
+            if op == UnaryOp::Generator { st.vals.push(format_js_generator_fn(&raw, lang)); return; }
             let op_s = unary_op_native(op, lang);
             let inner = if !op_s.is_empty() && wrap { format!("({raw})") } else { raw };
             st.vals.push(if is_postfix { format!("{inner}{op_s}") } else { format!("{op_s}{inner}") });
@@ -225,7 +214,7 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             tasks.push(CTask::EvalExpr(left));
         }
         Expr::Unary { op, is_postfix, operand } => {
-            let wrap = *op != UnaryOp::Yield
+            let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator)
                 && (matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
                     || needs_walrus_parens(operand));
             tasks.push(CTask::MakeUnary { op: *op, is_postfix: *is_postfix, wrap });
@@ -241,6 +230,9 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
         Expr::Call { callee, args, is_optional, is_tagged, is_new } => push_eval_call(callee, args, (*is_optional, *is_tagged, *is_new), lang, ectx, tasks),
         Expr::Member { object, property, kind } => {
             tasks.push(CTask::MakeMember { property, kind: *kind });
+            if matches!(object.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. }) {
+                tasks.push(CTask::WrapParen);
+            }
             tasks.push(CTask::EvalExpr(object));
         }
         Expr::Index { object, index, is_optional } => push_eval_index(object, index, *is_optional, tasks),
