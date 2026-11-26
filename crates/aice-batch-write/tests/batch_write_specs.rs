@@ -1472,3 +1472,212 @@ fn empty_op_clone_fix(path: &str, sym: Option<&str>, code: Option<&str>, delete:
     op.delete = delete.map(str::to_string);
     op
 }
+
+#[test]
+fn wave1_f14_force_overwrite_truncation_and_single_file_create_guards() {
+    let dir = std::env::temp_dir().join(format!("aice_bw_w1_f14_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("aice.config.json"), "{\"enabled\":true}\n").unwrap();
+
+    let run_op = |op: WriteOp| {
+        let gov = aice_governance::authorize(aice_governance::PipelineRequest::new(
+            op.clone(),
+            dir.clone(),
+            aice_governance::OutputSurface::Cli,
+        ))
+        .unwrap();
+        aice_batch_write::execute_batch_write(gov.state(), &op).unwrap()
+    };
+
+    // 1. >25L file overwrite with --overwrite (no --force) MUST reject; with --force MUST succeed
+    let big_40l: String = (0..40).map(|i| format!("export const V_{i} = {i};\n")).collect();
+    std::fs::write(dir.join("big.ts"), &big_40l).unwrap();
+
+    let mut ow_no_force = empty_op_clone_fix("big.ts", None, Some("export const SMALL = 1;\n"), None);
+    ow_no_force.overwrite = true;
+    let rep = run_op(ow_no_force);
+    assert_eq!(rep.exit_code, 1, "expected >25L overwrite without --force to fail");
+    assert!(rep.emitted_output.contains("--force"), "msg={}", rep.emitted_output);
+    assert_eq!(std::fs::read_to_string(dir.join("big.ts")).unwrap(), big_40l);
+
+    // 2. Truncating non-empty >25L OR <=25L file to 0B with --overwrite (no --force) MUST reject
+    let mut trunc_big = empty_op_clone_fix("big.ts", None, Some(""), None);
+    trunc_big.overwrite = true;
+    let rep_tb = run_op(trunc_big);
+    assert_eq!(rep_tb.exit_code, 1);
+    assert!(rep_tb.emitted_output.contains("--force"), "msg={}", rep_tb.emitted_output);
+    assert_eq!(std::fs::read_to_string(dir.join("big.ts")).unwrap(), big_40l);
+
+    std::fs::write(dir.join("small.ts"), "export const S = 1;\n").unwrap();
+    let mut trunc_small = empty_op_clone_fix("small.ts", None, Some(""), None);
+    trunc_small.overwrite = true;
+    let rep_ts = run_op(trunc_small);
+    assert_eq!(rep_ts.exit_code, 1);
+    assert!(rep_ts.emitted_output.contains("--force"), "msg={}", rep_ts.emitted_output);
+    assert_eq!(std::fs::read_to_string(dir.join("small.ts")).unwrap(), "export const S = 1;\n");
+
+    // Non-empty <=25L overwrite with --overwrite (no --force) MUST still succeed (E2E contract)
+    let mut ow_small = empty_op_clone_fix("small.ts", None, Some("export const S = 2;\n"), None);
+    ow_small.overwrite = true;
+    assert_eq!(run_op(ow_small).exit_code, 0);
+    assert_eq!(std::fs::read_to_string(dir.join("small.ts")).unwrap(), "export const S = 2;\n");
+
+    // Truncating with --overwrite --force succeeds; overwriting >25L with --force succeeds
+    let mut trunc_forced = empty_op_clone_fix("small.ts", None, Some(""), None);
+    trunc_forced.overwrite = true;
+    trunc_forced.force = true;
+    assert_eq!(run_op(trunc_forced).exit_code, 0);
+    assert_eq!(std::fs::read_to_string(dir.join("small.ts")).unwrap(), "");
+
+    let mut ow_forced = empty_op_clone_fix("big.ts", None, Some("export const REPLACED = true;\n"), None);
+    ow_forced.overwrite = true;
+    ow_forced.force = true;
+    assert_eq!(run_op(ow_forced).exit_code, 0);
+    assert_eq!(std::fs::read_to_string(dir.join("big.ts")).unwrap(), "export const REPLACED = true;\n");
+
+    // 3. Single-file CLI writes to nonexistent file reject without --create (even with --overwrite)
+    let no_create = empty_op_clone_fix("missing.ts", None, Some("export const M = 1;\n"), None);
+    assert_eq!(run_op(no_create).exit_code, 1);
+    assert!(!dir.join("missing.ts").exists());
+
+    let mut ow_missing = empty_op_clone_fix("missing.ts", None, Some("export const M = 1;\n"), None);
+    ow_missing.overwrite = true;
+    let rep_owm = run_op(ow_missing);
+    assert_eq!(rep_owm.exit_code, 1);
+    assert!(rep_owm.emitted_output.contains("--create"), "msg={}", rep_owm.emitted_output);
+    assert!(!dir.join("missing.ts").exists());
+
+    let mut with_create = empty_op_clone_fix("missing.ts", None, Some("export const M = 1;\n"), None);
+    with_create.create = true;
+    assert_eq!(run_op(with_create).exit_code, 0);
+    assert_eq!(std::fs::read_to_string(dir.join("missing.ts")).unwrap(), "export const M = 1;\n");
+
+    // 4. Bare heredoc === newfile === in --stdin stream STILL creates without --create (T1-F12-01)
+    let mut heredoc_create = empty_op();
+    heredoc_create.dry_run = false;
+    heredoc_create.batch = Some("=== heredoc_new.ts ===\nexport const HD = 1;\n".into());
+    assert_eq!(run_op(heredoc_create).exit_code, 0);
+    assert_eq!(std::fs::read_to_string(dir.join("heredoc_new.ts")).unwrap(), "export const HD = 1;\n");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
+fn wave1_f15_multiline_imports_across_js_py_go_rs_and_bom() {
+    let dir = std::env::temp_dir().join(format!("aice_bw_w1_f15_{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).unwrap();
+    std::fs::write(dir.join("aice.config.json"), "{\"enabled\":true}\n").unwrap();
+
+    let run_imp = |file: &str, payload: &str| {
+        let op = empty_op_clone_fix(file, Some(":imports"), Some(payload), None);
+        let gov = aice_governance::authorize(aice_governance::PipelineRequest::new(
+            op.clone(),
+            dir.clone(),
+            aice_governance::OutputSurface::Cli,
+        ))
+        .unwrap();
+        aice_batch_write::execute_batch_write(gov.state(), &op).unwrap()
+    };
+
+    // 1. JS/TS multi-line import with comments, braces, separate-line `from`, and preserved doc comment
+    let js_src = concat!(
+        "import assert from 'node:assert/strict';\n",
+        "import {\n",
+        "  createMidpoint,\n",
+        "  // comment with } inside\n",
+        "  computeBounds,\n",
+        "} from '../assets/js/whiteboard.js';\n",
+        "import {\n",
+        "  helperA,\n",
+        "  helperB,\n",
+        "}\n",
+        "  from './helpers.js';\n\n",
+        "/** Keep this doc */\n",
+        "export function run() {\n",
+        "  return assert.ok(true);\n",
+        "}\n",
+    );
+    std::fs::write(dir.join("sample.mjs"), js_src).unwrap();
+    let r_js = run_imp("sample.mjs", "import assert from \"node:assert/strict\";\nimport { createMidpoint } from '../assets/js/whiteboard.js';");
+    assert_eq!(r_js.exit_code, 0, "js err: {}", r_js.emitted_output);
+    let after_js = std::fs::read_to_string(dir.join("sample.mjs")).unwrap();
+    assert!(!after_js.contains("computeBounds") && !after_js.contains("helperA"), "dangling JS imports:\n{after_js}");
+    assert!(after_js.contains("/** Keep this doc */") && after_js.contains("export function run()"), "{after_js}");
+
+    // 2. Python multi-line parenthesized import, backslash continuation, comment with ')', and module docstring
+    let py_src = concat!(
+        "\"\"\"Module doc.\"\"\"\n\n",
+        "import os, \\\n",
+        "    sys\n",
+        "from pkg.sub import (\n",
+        "    Alpha,\n",
+        "    # comment with ) inside\n",
+        "    Beta,\n",
+        ")\n\n",
+        "def work():\n",
+        "    return 1\n",
+    );
+    std::fs::write(dir.join("mod.py"), py_src).unwrap();
+    let r_py = run_imp("mod.py", "from pkg.sub import Gamma");
+    assert_eq!(r_py.exit_code, 0, "py err: {}", r_py.emitted_output);
+    let after_py = std::fs::read_to_string(dir.join("mod.py")).unwrap();
+    assert!(after_py.starts_with("\"\"\"Module doc.\"\"\"\n\nfrom pkg.sub import Gamma\n\ndef work():"), "{after_py:?}");
+    assert!(!after_py.contains("Alpha") && !after_py.contains("Beta"), "{after_py}");
+
+    // 3. Go multi-line grouped import (...) after package declaration
+    let go_src = concat!(
+        "package main\n\n",
+        "import (\n",
+        "\t\"fmt\"\n",
+        "\t// comment with ) inside\n",
+        "\t\"os\"\n",
+        ")\n\n",
+        "func main() {\n",
+        "\tfmt.Println(\"ok\")\n",
+        "}\n",
+    );
+    std::fs::write(dir.join("main.go"), go_src).unwrap();
+    let r_go = run_imp("main.go", "import \"fmt\"");
+    assert_eq!(r_go.exit_code, 0, "go err: {}", r_go.emitted_output);
+    let after_go = std::fs::read_to_string(dir.join("main.go")).unwrap();
+    assert_eq!(after_go, "package main\n\nimport \"fmt\"\n\nfunc main() {\n\tfmt.Println(\"ok\")\n}\n");
+
+    // 4. Rust nested multi-line use::{...} + block comment + wrapped path + preserved #[derive]
+    let rs_src = concat!(
+        "//! Crate doc\n\n",
+        "use std::{\n",
+        "    collections::{\n",
+        "        BTreeMap,\n",
+        "        BTreeSet,\n",
+        "    },\n",
+        "    /* comment } ; */\n",
+        "    path::Path,\n",
+        "};\n",
+        "use std::fmt::\n",
+        "    Display;\n\n",
+        "#[derive(Debug)]\n",
+        "pub struct Item;\n",
+    );
+    std::fs::write(dir.join("lib.rs"), rs_src).unwrap();
+    let r_rs = run_imp("lib.rs", "use std::path::PathBuf;");
+    assert_eq!(r_rs.exit_code, 0, "rs err: {}", r_rs.emitted_output);
+    let after_rs = std::fs::read_to_string(dir.join("lib.rs")).unwrap();
+    assert!(!after_rs.contains("BTreeMap") && !after_rs.contains("Display"), "{after_rs}");
+    assert!(after_rs.starts_with("//! Crate doc\n\nuse std::path::PathBuf;\n\n#[derive(Debug)]\npub struct Item;\n"), "{after_rs:?}");
+
+    // 5. BOM + CRLF multi-line TS import
+    std::fs::write(
+        dir.join("bom_multi.ts"),
+        "\u{FEFF}import {\r\n  a,\r\n  b,\r\n} from './a';\r\nexport const x = 1;\r\n",
+    ).unwrap();
+    let r_bom = run_imp("bom_multi.ts", "import { c } from './c';");
+    assert_eq!(r_bom.exit_code, 0, "bom err: {}", r_bom.emitted_output);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("bom_multi.ts")).unwrap(),
+        "\u{FEFF}import { c } from './c';\r\nexport const x = 1;\r\n"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

@@ -8,8 +8,9 @@ use crate::ast_splice::{apply_ast_splice, apply_insert_relative, resolve_symbol_
 use crate::diagnostics::format_firewall_diagnostics;
 use crate::hunk::{extract_hunk_blocks, has_hunk_markers};
 use crate::hunk_match::{EnclosingContext, apply_hunk_blocks};
+use crate::imports_splice::apply_imports_splice;
 use crate::line_splice::{apply_line_range, parse_line_range_selector};
-use crate::types::{BatchSpliceItem, EditSummary, VirtualFile, join_lines_keep, split_lines_keep};
+use crate::types::{BatchSpliceItem, EditSummary, VirtualFile};
 
 fn is_eof_sel(s: &str) -> bool {
     matches!(s.trim().trim_start_matches(':').to_ascii_lowercase().as_str(), "eof" | "end" | "append")
@@ -29,44 +30,6 @@ fn is_overwrite_sel(s: &str) -> bool {
 
 fn is_hunk_sel(s: &str) -> bool {
     matches!(s.trim().trim_start_matches(':').to_ascii_lowercase().as_str(), "hunk")
-}
-
-fn is_import_line(line: &str) -> bool {
-    let t = line.trim_start_matches('\u{FEFF}').trim();
-    t.starts_with("import ") || t.starts_with("from ") || t.starts_with("use ")
-        || t.starts_with("#include") || t.starts_with("using ") || (t.starts_with("const ") && t.contains("require("))
-}
-
-fn apply_imports_splice(src: &str, eol: &str, payload: &str) -> (String, String, usize, usize) {
-    let has_bom = src.starts_with('\u{FEFF}');
-    let body = src.strip_prefix('\u{FEFF}').unwrap_or(src);
-    let (lines, trailing_nl) = split_lines_keep(body);
-    let mut i = 0;
-    while i < lines.len() && (lines[i].trim().is_empty() || lines[i].trim().starts_with("#!") || lines[i].trim().starts_with("package ") || lines[i].trim().starts_with("\"use ")) {
-        i += 1;
-    }
-    let start = i;
-    while i < lines.len() && (is_import_line(&lines[i]) || (lines[i].trim().is_empty() && lines.get(i + 1).is_some_and(|n| is_import_line(n)))) {
-        i += 1;
-    }
-    let (new_imp, _) = split_lines_keep(payload.trim_end_matches(['\r', '\n']));
-    let (mut out, orig, sl, el) = if i > start {
-        let orig = lines[start..i].join(eol);
-        let mut next = Vec::with_capacity(lines.len());
-        next.extend_from_slice(&lines[..start]);
-        next.extend(new_imp);
-        next.extend_from_slice(&lines[i..]);
-        (join_lines_keep(&next, trailing_nl, eol), orig, start + 1, i)
-    } else {
-        let mut next = Vec::with_capacity(lines.len() + new_imp.len() + 1);
-        next.extend_from_slice(&lines[..start]);
-        next.extend(new_imp);
-        if start < lines.len() && !lines[start].trim().is_empty() { next.push(String::new()); }
-        next.extend_from_slice(&lines[start..]);
-        (join_lines_keep(&next, trailing_nl, eol), String::new(), start + 1, start + 1)
-    };
-    if has_bom && !out.is_empty() && !out.starts_with('\u{FEFF}') { out.insert(0, '\u{FEFF}'); }
-    (out, orig, sl, el)
 }
 
 fn apply_clone(
@@ -247,7 +210,7 @@ pub fn apply_item_to_vfs(vf: &mut VirtualFile, item: &BatchSpliceItem) -> Result
 
     if is_imports_sel(sym_str) {
         if !vf.existed_on_disk { return Err(format!("Source file not found: {}", item.requested_display)); }
-        let (next, orig, sl, el) = apply_imports_splice(&vf.current, eol, &item.payload);
+        let (next, orig, sl, el) = apply_imports_splice(&vf.current, lang, eol, &item.payload);
         vf.current = next;
         vf.replaced_baselines.push(orig.clone());
         return Ok(mk_summary(vf, "imports".into(), "Spliced", sl, el, orig, item.payload.clone()));
@@ -264,18 +227,22 @@ pub fn apply_item_to_vfs(vf: &mut VirtualFile, item: &BatchSpliceItem) -> Result
 
     let is_create_or_overwrite = sym_str.is_empty() || is_create_sel(sym_str) || is_overwrite_sel(sym_str);
     if is_create_or_overwrite {
-        if !vf.existed_on_disk && !item.create && !is_create_sel(sym_str) && !item.overwrite {
+        if !vf.existed_on_disk && !item.create && !is_create_sel(sym_str) {
             return Err(format!("Source file not found: {} (pass --create to create a new file)", item.requested_display));
         }
         if vf.existed_on_disk && (item.explicit_create_flag || is_create_sel(sym_str)) && !item.overwrite && !item.force {
             return Err(format!("Target file '{}' already exists (pass --overwrite to replace)", item.requested_display));
         }
+        let orig_ref = vf.original_disk.as_deref().unwrap_or(&vf.current);
+        if vf.existed_on_disk && !orig_ref.is_empty() && item.payload.is_empty() && !item.force {
+            return Err(format!("Refusing to truncate non-empty file '{}' to empty without --force", item.requested_display));
+        }
         let exp_ow = is_overwrite_sel(sym_str) || item.overwrite;
         if vf.existed_on_disk && item.payload.is_empty() && !exp_ow && !item.force && !item.create {
             return Err(format!("Refusing to overwrite existing file '{}' with empty content without --overwrite", item.requested_display));
         }
-        if vf.existed_on_disk && vf.original_disk.as_ref().is_some_and(|s| s.lines().count() > 25) && !exp_ow && !item.force {
-            return Err(format!("Target file '{}' already exists (>25 lines); pass --overwrite or splice surgically", item.requested_display));
+        if vf.existed_on_disk && orig_ref.lines().count() > 25 && !item.force {
+            return Err(format!("Target file '{}' already exists (>25 lines); pass --force to overwrite or splice surgically", item.requested_display));
         }
         let lowered = lower_snippet(&item.payload, lang, item.force_aice_ir, false, None, &fw, &vf.canonical)?;
         let orig = vf.original_disk.clone().unwrap_or_default();

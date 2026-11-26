@@ -256,3 +256,110 @@ fn cli_subcommand_help_aliases_and_mcp_generate_schemas_parsing() {
         .unwrap();
     assert!(!read_props.contains_key("dsl"), "dead 'dsl' schema prop must be removed");
 }
+
+#[test]
+fn wave1_f16_failed_batch_splice_logs_honest_errors_across_cli_and_mcp() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    let bin = env!("CARGO_BIN_EXE_aice");
+
+    // 1. CLI failed multi-file batch rollback logs to errors.jsonl while keeping T3-05 gains.jsonl clean,
+    //    and `aice gain --json` reports honest failedRetryTurns & spliceErrorRatePct > 0.
+    let cli_dir = temp_dir("f16_cli");
+    let cli_home = cli_dir.join("aice_home");
+    std::fs::create_dir_all(cli_dir.join("src")).unwrap();
+    std::fs::write(cli_dir.join("aice.config.json"), "{\"enabled\":true}\n").unwrap();
+    std::fs::write(cli_dir.join("src/a.rs"), "pub fn alpha() -> i32 { 1 }\n").unwrap();
+    std::fs::write(cli_dir.join("src/b.rs"), "pub fn beta() -> i32 { 2 }\n").unwrap();
+
+    let run_aice = |args: &[&str], stdin_data: Option<&str>, cwd: &Path, aice_home: &Path| {
+        let mut cmd = Command::new(bin);
+        cmd.args(args)
+            .current_dir(cwd)
+            .env("HOME", aice_home)
+            .env("AICE_HOME", aice_home)
+            .env_remove("AICE_TELEMETRY_PATH")
+            .env_remove("AICE_TELEMETRY_ERRORS_PATH")
+            .env_remove("AICE_TELEMETRY_SUPPRESS")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        if stdin_data.is_some() {
+            cmd.stdin(Stdio::piped());
+        }
+        let mut child = cmd.spawn().unwrap();
+        if let Some(input) = stdin_data {
+            child.stdin.as_mut().unwrap().write_all(input.as_bytes()).unwrap();
+        }
+        child.wait_with_output().unwrap()
+    };
+
+    // Valid splice first so gains.jsonl has 1 successful write for this project
+    let ok = run_aice(&["splice", "src/a.rs:alpha", "-c", "pub fn alpha() -> i32 { 10 }"], None, &cli_dir, &cli_home);
+    assert_eq!(ok.status.code(), Some(0));
+    let gains_path = cli_home.join("telemetry/gains.jsonl");
+    let errs_path = cli_home.join("telemetry/errors.jsonl");
+    let gains_before = std::fs::read_to_string(&gains_path).unwrap().lines().count();
+
+    // Failed multi-file batch rollback (SyntaxFirewall) -> 0 new gains rows, +1 errors.jsonl row
+    let bad_batch = "=== src/a.rs:alpha ===\npub fn alpha() -> i32 { 99 }\n=== src/b.rs:beta ===\npub fn beta( { {{{{\n";
+    let fail = run_aice(&["splice", "--stdin"], Some(bad_batch), &cli_dir, &cli_home);
+    assert_eq!(fail.status.code(), Some(1));
+    assert_eq!(std::fs::read_to_string(&gains_path).unwrap().lines().count(), gains_before);
+    let errs_cli = std::fs::read_to_string(&errs_path).expect("CLI batch failure must create errors.jsonl");
+    assert!(errs_cli.contains("\"surface\":\"cli\"") && errs_cli.contains("\"operation\":\"splice\""), "{errs_cli}");
+    assert!(errs_cli.contains("\"wastedInputTokens\":"), "{errs_cli}");
+
+    // Dry-run failed batch must NOT append to errors.jsonl
+    let err_lines_before_dry = errs_cli.lines().count();
+    let dry_fail = run_aice(&["splice", "--stdin", "--dry-run"], Some(bad_batch), &cli_dir, &cli_home);
+    assert_eq!(dry_fail.status.code(), Some(1));
+    assert_eq!(std::fs::read_to_string(&errs_path).unwrap().lines().count(), err_lines_before_dry);
+
+    // Pre-commit batch failure (--batch malformed JSON) also logs to errors.jsonl, 0 gains rows
+    let mal_fail = run_aice(&["splice", "--batch", "{bad"], None, &cli_dir, &cli_home);
+    assert_eq!(mal_fail.status.code(), Some(1));
+    assert_eq!(std::fs::read_to_string(&gains_path).unwrap().lines().count(), gains_before);
+    assert_eq!(std::fs::read_to_string(&errs_path).unwrap().lines().count(), err_lines_before_dry + 1);
+
+    // `aice gain --json` reflects the failed batch splices honestly
+    let gain_out = run_aice(&["gain", "--json"], None, &cli_dir, &cli_home);
+    assert_eq!(gain_out.status.code(), Some(0));
+    let gain_str = String::from_utf8_lossy(&gain_out.stdout);
+    let gain_val = aice_governance::parse_json(&gain_str).expect("valid gain --json");
+    let econ = gain_val.as_object().unwrap();
+    assert!(econ.get("failedRetryTurns").and_then(JsonValue::as_u64).unwrap_or(0) >= 2, "{gain_str}");
+    assert!(econ.get("spliceErrorRatePct").and_then(JsonValue::as_f64).unwrap_or(0.0) > 0.0, "{gain_str}");
+
+    // 2. MCP failed multi-file batch rollback logs to errors.jsonl (surface:mcp) and drives honest spliceErrorRatePct
+    let mcp_dir = temp_dir("f16_mcp");
+    let mcp_home = mcp_dir.join("aice_home");
+    std::fs::create_dir_all(mcp_dir.join("src")).unwrap();
+    std::fs::write(mcp_dir.join("aice.config.json"), "{\"enabled\":true}\n").unwrap();
+    std::fs::write(mcp_dir.join("src/a.ts"), "export function alpha(): number { return 1; }\n").unwrap();
+    std::fs::write(mcp_dir.join("src/b.ts"), "export function beta(): number { return 2; }\n").unwrap();
+
+    let mcp_msgs = concat!(
+        "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/call\",\"params\":{\"name\":\"aice_splice\",\"arguments\":{\"filePath\":\"src/a.ts\",\"symbol\":\"alpha\",\"code\":\"export function alpha(): number { return 11; }\"}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"aice_splice\",\"arguments\":{\"filePath\":\"src/b.ts\",\"symbol\":\"beta\",\"code\":\"export function beta(): number { return 22; }\"}}}\n",
+        "{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"tools/call\",\"params\":{\"name\":\"aice_splice\",\"arguments\":{\"code\":\"=== src/a.ts:alpha ===\\nexport function alpha(): number { return 33; }\\n=== src/b.ts:beta ===\\nexport function beta( { broken ===\\n\"}}}\n",
+    );
+    let mcp_out = run_aice(&["mcp"], Some(mcp_msgs), &mcp_dir, &mcp_home);
+    assert_eq!(mcp_out.status.code(), Some(0), "mcp stderr={}", String::from_utf8_lossy(&mcp_out.stderr));
+    let mcp_errs = std::fs::read_to_string(mcp_home.join("telemetry/errors.jsonl"))
+        .expect("MCP batch rollback must create errors.jsonl");
+    assert!(mcp_errs.contains("\"surface\":\"mcp\"") && mcp_errs.contains("\"operation\":\"splice\""), "{mcp_errs}");
+    assert_eq!(mcp_errs.lines().count(), 1, "{mcp_errs}");
+
+    let mcp_gain = run_aice(&["gain", "--json"], None, &mcp_dir, &mcp_home);
+    assert_eq!(mcp_gain.status.code(), Some(0));
+    let mg_str = String::from_utf8_lossy(&mcp_gain.stdout);
+    let mg_val = aice_governance::parse_json(&mg_str).expect("valid mcp gain --json");
+    let mg_econ = mg_val.as_object().unwrap();
+    assert_eq!(mg_econ.get("failedRetryTurns").and_then(JsonValue::as_u64), Some(1), "{mg_str}");
+    let err_pct = mg_econ.get("spliceErrorRatePct").and_then(JsonValue::as_f64).unwrap_or(0.0);
+    assert!((err_pct - 33.3).abs() < 0.2, "expected ~33.3% spliceErrorRatePct (1/3), got {err_pct}\n{mg_str}");
+
+    let _ = std::fs::remove_dir_all(&cli_dir);
+    let _ = std::fs::remove_dir_all(&mcp_dir);
+}

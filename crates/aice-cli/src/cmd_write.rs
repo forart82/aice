@@ -6,10 +6,12 @@ use aice_governance::{
 };
 use aice_pipeline::{
     DefaultPipelineExecutor, PipelineExecutor, StdoutWriter, has_write_targets,
-    is_disallowed_write_selector, meter_and_seal, record_failure_for_cli,
-    validate_raw_write_target, validate_write_op_selectors,
+    is_disallowed_write_selector, meter_and_seal, validate_raw_write_target,
+    validate_write_op_selectors,
 };
 use aice_telemetry::TelemetryOpKind;
+
+use crate::{record_batch_error_only, record_write_failure};
 
 use crate::cli::CliParseError;
 use crate::cmd_write_targets::{
@@ -209,32 +211,20 @@ where
 }
 
 pub fn run_write(mut op: WriteOp, cwd: &Path) -> i32 {
-    let op_kind = if op.create {
-        TelemetryOpKind::Create
-    } else {
-        TelemetryOpKind::Splice
-    };
-    let label = op
-        .path
-        .as_ref()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| "<batch-splice>".to_string());
+    let op_kind = if op.create { TelemetryOpKind::Create } else { TelemetryOpKind::Splice };
+    let label = op.path.as_ref().map(|p| p.display().to_string()).unwrap_or_else(|| "<batch-splice>".to_string());
     let mut is_batch = is_batch_write_op(&op);
     if let Err(e) = resolve_manifest_files(&mut op, cwd) {
         let is_disabled = matches!(e, GovernanceError::Disabled);
         let msg = e.to_string();
         eprintln!("{msg}");
-        if !op.dry_run && !is_batch {
-            record_failure_for_cli(cwd, op_kind, OutputSurface::Cli, &label, &msg, None, is_disabled);
-        }
+        record_write_failure(cwd, op_kind, OutputSurface::Cli, &label, &msg, None, op.dry_run, is_batch, is_disabled);
         return 1;
     }
     is_batch |= is_batch_write_op(&op);
     if let Err(msg) = validate_write_op_selectors(cwd, &op) {
         eprintln!("{msg}");
-        if !op.dry_run && !is_batch {
-            record_failure_for_cli(cwd, op_kind, OutputSurface::Cli, &label, &msg, None, false);
-        }
+        record_write_failure(cwd, op_kind, OutputSurface::Cli, &label, &msg, None, op.dry_run, is_batch, false);
         return 1;
     }
     let wasted = {
@@ -245,21 +235,18 @@ pub fn run_write(mut op: WriteOp, cwd: &Path) -> i32 {
     let req = PipelineRequest::new(op, cwd.to_path_buf(), OutputSurface::Cli);
     match authorize(req) {
         Ok(gov) => match DefaultPipelineExecutor.execute_write(gov) {
-            Ok(res) => StdoutWriter::emit(meter_and_seal(res)),
+            Ok(res) => {
+                let metered = meter_and_seal(res);
+                if !dry_run && metered.exit_code() != 0 && metered.summary().ledger_path.is_none() {
+                    let msg = if metered.stderr_payload().is_empty() { metered.payload() } else { metered.stderr_payload() };
+                    record_batch_error_only(cwd, op_kind, OutputSurface::Cli, &label, msg, wasted.as_deref());
+                }
+                StdoutWriter::emit(metered)
+            }
             Err(e) => {
                 let msg = e.to_string();
                 eprintln!("{msg}");
-                if !dry_run && !is_batch {
-                    record_failure_for_cli(
-                        cwd,
-                        op_kind,
-                        OutputSurface::Cli,
-                        &label,
-                        &msg,
-                        wasted.as_deref(),
-                        false,
-                    );
-                }
+                record_write_failure(cwd, op_kind, OutputSurface::Cli, &label, &msg, wasted.as_deref(), dry_run, is_batch, false);
                 1
             }
         },
@@ -267,17 +254,7 @@ pub fn run_write(mut op: WriteOp, cwd: &Path) -> i32 {
             let is_disabled = matches!(e, GovernanceError::Disabled);
             let msg = e.to_string();
             eprintln!("{msg}");
-            if !dry_run && !is_batch {
-                record_failure_for_cli(
-                    cwd,
-                    op_kind,
-                    OutputSurface::Cli,
-                    &label,
-                    &msg,
-                    wasted.as_deref(),
-                    is_disabled,
-                );
-            }
+            record_write_failure(cwd, op_kind, OutputSurface::Cli, &label, &msg, wasted.as_deref(), dry_run, is_batch, is_disabled);
             1
         }
     }

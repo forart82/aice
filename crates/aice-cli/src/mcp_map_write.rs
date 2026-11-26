@@ -7,10 +7,11 @@ use aice_governance::{
     authorize, parse_json, split_target_selector,
 };
 use aice_pipeline::{
-    DefaultPipelineExecutor, PipelineExecutor, StdoutWriter, meter_and_seal, record_failure_for_cli,
+    DefaultPipelineExecutor, PipelineExecutor, StdoutWriter, meter_and_seal,
 };
 use aice_telemetry::TelemetryOpKind;
 
+use crate::{record_batch_error_only, record_write_failure};
 use crate::mcp_args::{RpcErr, opt_bool, opt_str};
 
 const NULL_ITEM_ERR: &str = "Invalid null or non-object item in splice 'files'/'batch'/'edits' array. Provide valid edit objects or a flat === <file>:<selector> === heredoc stream in 'code'.";
@@ -119,7 +120,12 @@ pub fn handle_write(
             }
             match DefaultPipelineExecutor.execute_write(gov) {
                 Ok(res) => {
-                    let _ = StdoutWriter::emit_mcp_tool_result(meter_and_seal(res), id, framed);
+                    let metered = meter_and_seal(res);
+                    if !dry_run && metered.exit_code() != 0 && metered.summary().ledger_path.is_none() {
+                        let msg = if metered.stderr_payload().is_empty() { metered.payload() } else { metered.stderr_payload() };
+                        record_batch_error_only(cwd, op_kind, OutputSurface::Mcp, &label, msg, wasted.as_deref());
+                    }
+                    let _ = StdoutWriter::emit_mcp_tool_result(metered, id, framed);
                 }
                 Err(e) => emit_write_err(
                     cwd, op_kind, &label, &e.to_string(), wasted.as_deref(), dry_run, is_batch, false, id, framed,
@@ -172,9 +178,7 @@ fn emit_write_err(
     framed: bool,
 ) {
     StdoutWriter::emit_mcp_tool_error(id, msg, framed);
-    if !dry_run && !is_batch {
-        record_failure_for_cli(cwd, op_kind, OutputSurface::Mcp, label, msg, wasted, is_disabled);
-    }
+    record_write_failure(cwd, op_kind, OutputSurface::Mcp, label, msg, wasted, dry_run, is_batch, is_disabled);
 }
 
 fn parse_manifest_arg(

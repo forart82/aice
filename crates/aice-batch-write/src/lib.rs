@@ -7,6 +7,7 @@ pub mod diagnostics;
 pub mod diff;
 pub mod hunk;
 pub mod hunk_match;
+pub mod imports_splice;
 pub mod json_manifest;
 pub mod line_splice;
 pub mod manifest;

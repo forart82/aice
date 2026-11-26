@@ -20,8 +20,56 @@ use std::path::Path;
 
 use aice_governance::{OutputSurface, find_project_root, load_config};
 use aice_pipeline::record_failure_for_cli;
-use aice_telemetry::TelemetryOpKind;
+use aice_telemetry::{RecordTelemetryErrorInput, TelemetryOpKind, count_cl100k, record_error_event};
 use cli::{CliAction, CliParseError};
+
+pub(crate) fn record_batch_error_only(
+    cwd: &Path,
+    op_kind: TelemetryOpKind,
+    surface: OutputSurface,
+    label: &str,
+    msg: &str,
+    wasted: Option<&str>,
+) {
+    let root = find_project_root(cwd);
+    let surface_label = match surface {
+        OutputSurface::Cli => "cli",
+        OutputSurface::Mcp => "mcp",
+    };
+    record_error_event(&RecordTelemetryErrorInput {
+        target_path: None,
+        project_root: Some(&root),
+        file_path: Some(label),
+        operation: op_kind.as_str(),
+        surface: surface_label,
+        agent: None,
+        error_message: msg,
+        wasted_input_tokens: wasted.map(count_cl100k),
+        explicit_telemetry_path: None,
+    });
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn record_write_failure(
+    cwd: &Path,
+    op_kind: TelemetryOpKind,
+    surface: OutputSurface,
+    label: &str,
+    msg: &str,
+    wasted: Option<&str>,
+    dry_run: bool,
+    is_batch: bool,
+    is_disabled: bool,
+) {
+    if dry_run || is_disabled {
+        return;
+    }
+    if is_batch {
+        record_batch_error_only(cwd, op_kind, surface, label, msg, wasted);
+    } else {
+        record_failure_for_cli(cwd, op_kind, surface, label, msg, wasted, false);
+    }
+}
 
 fn infer_cli_parse_op(args: &[String]) -> Option<TelemetryOpKind> {
     for arg in args {
