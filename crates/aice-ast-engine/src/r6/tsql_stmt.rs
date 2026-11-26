@@ -2,7 +2,9 @@ use crate::r5::checks::ErrorSpan;
 use crate::r6::sql_expr::check_sql_stmt_completeness;
 use crate::r6::sql_lex::{SqlTok, SqlTokKind, sp};
 use crate::r6::sql_pratt::validate_pratt_expr;
+use crate::r6::tsql_alter::validate_tsql_alter_table;
 use crate::r6::tsql_ddl::{validate_tsql_create_table, validate_tsql_view};
+use crate::r6::tsql_ddl_hdr::{find_create_index_kw, validate_tsql_create_index};
 use crate::r6::tsql_dml::validate_tsql_dml;
 use crate::r6::tsql_query::{validate_tsql_predicates, validate_tsql_selects};
 use crate::r6::tsql_with::{validate_tsql_embedded_queries, validate_tsql_query_only, validate_tsql_with};
@@ -45,7 +47,10 @@ pub(crate) fn consume_simple(
                         || (t.is_kw(src, "ALTER")
                             && !(i == start + 2
                                 && clean[start].is_kw(src, "CREATE")
-                                && clean[start + 1].is_kw(src, "OR")))
+                                && clean[start + 1].is_kw(src, "OR"))
+                            && !(clean[start].is_kw(src, "ALTER")
+                                && clean.get(start + 1).is_some_and(|n| n.is_kw(src, "TABLE"))
+                                && clean.get(i + 1).is_some_and(|n| n.is_kw(src, "COLUMN"))))
                         || t.is_kw(src, "BEGIN"))))
         {
             break;
@@ -135,6 +140,10 @@ fn validate_tsql_stmt(stmt: &[SqlTok], src: &str, errs: &mut Vec<ErrorSpan>) {
     }
     if stmt[0].is_kw(src, "CREATE") && obj_i == 1 && stmt.get(1).is_some_and(|t| t.is_kw(src, "TABLE")) {
         validate_tsql_create_table(stmt, src, errs);
+    } else if stmt[0].is_kw(src, "ALTER") && obj_i == 1 && stmt.get(1).is_some_and(|t| t.is_kw(src, "TABLE")) {
+        validate_tsql_alter_table(stmt, src, errs);
+    } else if obj_i == 1 && let Some((idx_kw, is_cs, is_ft)) = find_create_index_kw(stmt, src) {
+        validate_tsql_create_index(stmt, idx_kw, is_cs, is_ft, src, errs);
     }
     if stmt[0].is_kw(src, "INSERT")
         || stmt[0].is_kw(src, "UPDATE")

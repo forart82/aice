@@ -2,12 +2,13 @@ use crate::r5::checks::ErrorSpan;
 use crate::r6::sql_lex::{SqlTok, SqlTokKind, sp};
 use crate::r6::sql_pratt::validate_pratt_expr;
 use crate::r6::tsql_ctbl::validate_ctbl_tail;
+use crate::r6::tsql_ddl_extra::validate_tsql_col_def;
 use crate::r6::tsql_dml::{consume_dml_target, validate_col_list};
 use crate::r6::tsql_query::{is_tsql_ident_tok, validate_fk_constraint, validate_key_constraint};
 use crate::r6::tsql_stmt::{matching_rparen, split_comma_top};
 use crate::r6::tsql_with::validate_tsql_query_only;
 
-const COL_CONSTRAINT_KWS: &[&str] = &[
+pub(super) const COL_CONSTRAINT_KWS: &[&str] = &[
     "NULL", "NOT", "PRIMARY", "KEY", "UNIQUE", "IDENTITY", "DEFAULT",
     "CHECK", "REFERENCES", "CONSTRAINT", "COLLATE", "ROWGUIDCOL",
     "SPARSE", "FILESTREAM", "MASKED", "GENERATED", "HIDDEN", "ENCRYPTED",
@@ -15,7 +16,7 @@ const COL_CONSTRAINT_KWS: &[&str] = &[
     "FOR", "REPLICATION", "ACTION", "CASCADE", "NO", "SET", "ASC", "DESC",
 ];
 
-const TBL_CONSTRAINT_KWS: &[&str] = &[
+pub(super) const TBL_CONSTRAINT_KWS: &[&str] = &[
     "CONSTRAINT", "PRIMARY", "UNIQUE", "CHECK", "FOREIGN", "INDEX", "PERIOD",
 ];
 
@@ -119,80 +120,12 @@ pub(crate) fn validate_tsql_create_table(stmt: &[SqlTok], src: &str, errs: &mut 
             validate_tbl_constraint(item, src, errs);
             continue;
         }
-        if item.len() < 2 {
-            errs.push(sp(item[0].line, item[0].col, "Column missing data type in CREATE TABLE"));
-            continue;
-        }
-        let mut j = 1usize;
-        if item[j].is_kw(src, "AS") {
-            j += 1;
-            if item.get(j).is_some_and(|t| t.kind == SqlTokKind::LParen) {
-                let Some(next_j) = validate_paren_expr(item, j, "computed column", src, errs) else { continue; };
-                j = next_j;
-            } else {
-                let a = item.get(j).unwrap_or(&item[j - 1]);
-                errs.push(sp(a.line, a.col, "Expected '(' after AS in computed column"));
-                continue;
-            }
-        } else {
-            j += 1;
-            while item.get(j).is_some_and(|t| t.kind == SqlTokKind::Dot) { j += 2.min(item.len() - j); }
-            if item.get(j).is_some_and(|t| t.is_kw(src, "VARYING") || t.is_kw(src, "PRECISION")) { j += 1; }
-            if item.get(j).is_some_and(|t| t.kind == SqlTokKind::LParen) {
-                j = matching_rparen(item, j).map_or(item.len(), |r| r + 1);
-            }
-        }
-        while j < item.len() {
-            let t = &item[j];
-            if t.kind == SqlTokKind::LParen {
-                let rp = matching_rparen(item, j);
-                if j > 0 && item[j - 1].is_kw(src, "WITH") && rp == Some(j + 1) {
-                    errs.push(sp(t.line, t.col, "Empty '()' in WITH options"));
-                    break;
-                }
-                j = rp.map_or(item.len(), |r| r + 1);
-            } else if t.is_kw(src, "CONSTRAINT") || t.is_kw(src, "COLLATE") {
-                j += 2.min(item.len() - j);
-            } else if t.is_kw(src, "DEFAULT") {
-                let Some(next_j) = validate_default(item, j, COL_CONSTRAINT_KWS, src, errs) else { break; };
-                j = next_j;
-            } else if t.is_kw(src, "CHECK") {
-                let Some(next_j) = validate_check(item, j, src, errs) else { break; };
-                j = next_j;
-            } else if t.is_kw(src, "REFERENCES") {
-                j += 2.min(item.len() - j);
-                while item.get(j).is_some_and(|n| n.kind == SqlTokKind::Dot) { j += 2.min(item.len() - j); }
-            } else if t.is_kw(src, "ON") {
-                if item.get(j + 1).is_some_and(|n| n.is_kw(src, "DELETE") || n.is_kw(src, "UPDATE")) {
-                    j += 2;
-                    if item.get(j).is_some_and(|n| n.is_kw(src, "SET"))
-                        && item.get(j + 1).is_some_and(|n| n.is_kw(src, "DEFAULT") || n.is_kw(src, "NULL"))
-                    {
-                        j += 2;
-                    }
-                } else if item.get(j + 1).is_some_and(|n| {
-                    matches!(n.kind, SqlTokKind::Word | SqlTokKind::BracketIdent | SqlTokKind::QuotedIdent | SqlTokKind::StringLit)
-                }) {
-                    j += 2;
-                } else {
-                    errs.push(sp(t.line, t.col, "Expected filegroup or DELETE/UPDATE after ON in CREATE TABLE"));
-                    break;
-                }
-            } else if t.is_kw(src, "GENERATED") {
-                j += 1;
-                while j < item.len() && !COL_CONSTRAINT_KWS.iter().any(|k| item[j].is_kw(src, k)) { j += 1; }
-            } else if COL_CONSTRAINT_KWS.iter().any(|k| t.is_kw(src, k)) {
-                j += 1;
-            } else {
-                errs.push(sp(t.line, t.col, format!("Expected ',' before '{}' in CREATE TABLE", t.slice(src))));
-                break;
-            }
-        }
+        validate_tsql_col_def(item, src, errs, false);
     }
     validate_ctbl_tail(&stmt[rp + 1..], true, src, errs);
 }
 
-fn validate_check(item: &[SqlTok], mut j: usize, src: &str, errs: &mut Vec<ErrorSpan>) -> Option<usize> {
+pub(super) fn validate_check(item: &[SqlTok], mut j: usize, src: &str, errs: &mut Vec<ErrorSpan>) -> Option<usize> {
     let t = &item[j];
     j += 1;
     if item.get(j).is_some_and(|n| n.is_kw(src, "NOT"))
@@ -209,7 +142,7 @@ fn validate_check(item: &[SqlTok], mut j: usize, src: &str, errs: &mut Vec<Error
     }
 }
 
-fn validate_default(
+pub(super) fn validate_default(
     item: &[SqlTok], j: usize, stops: &[&str], src: &str, errs: &mut Vec<ErrorSpan>,
 ) -> Option<usize> {
     let j = j + 1;
@@ -223,7 +156,7 @@ fn validate_default(
     validate_pratt_expr(item, src, &mut idx, 0, stops).map(|()| idx).map_err(|e| errs.push(e)).ok()
 }
 
-fn validate_tbl_constraint(item: &[SqlTok], src: &str, errs: &mut Vec<ErrorSpan>) {
+pub(super) fn validate_tbl_constraint(item: &[SqlTok], src: &str, errs: &mut Vec<ErrorSpan>) {
     let j = if item[0].is_kw(src, "CONSTRAINT") {
         if item.len() < 3 || !is_tsql_ident_tok(&item[1]) {
             errs.push(sp(item[0].line, item[0].col, "Incomplete CONSTRAINT definition"));
@@ -258,7 +191,7 @@ fn validate_tbl_constraint(item: &[SqlTok], src: &str, errs: &mut Vec<ErrorSpan>
     }
 }
 
-fn validate_paren_expr(
+pub(super) fn validate_paren_expr(
     item: &[SqlTok], lp: usize, ctx: &str, src: &str, errs: &mut Vec<ErrorSpan>,
 ) -> Option<usize> {
     let rp = matching_rparen(item, lp)?;

@@ -128,7 +128,10 @@ fn is_major_boundary(t: &SqlTok, src: &str) -> bool {
 
 fn check_empty_clause(stmt: &[SqlTok], src: &str, idx: usize) -> bool {
     let t = &stmt[idx];
-    if t.is_kw(src, "VALUES") && is_insert_default_values(stmt, src, idx) {
+    if t.is_kw(src, "VALUES")
+        && (is_insert_default_values(stmt, src, idx)
+            || (idx > 0 && stmt[idx - 1].is_kw(src, "WITH") && stmt[0].is_kw(src, "ALTER")))
+    {
         return false;
     }
     let Some(next) = stmt.get(idx + 1) else { return true; };

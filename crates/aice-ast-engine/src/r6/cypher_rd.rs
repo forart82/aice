@@ -32,7 +32,7 @@ pub(super) fn verify_cypher_rd_and_mask(src: &str) -> CypherRdResult {
     check_cypher_delims(&toks, &mut errs);
     let mut ddl_masks = Vec::new();
     let mut has_dml = false;
-    for (stmt, byte_start, byte_end) in split_semi_ranges(&toks) {
+    for (stmt, byte_start, byte_end) in split_semi_ranges(&toks, &mut errs) {
         if is_cypher_ddl(stmt, src) {
             validate_cypher_ddl(stmt, src, &mut errs);
             ddl_masks.push((byte_start, byte_end));
@@ -145,7 +145,7 @@ fn check_cypher_delims(toks: &[CTok], errs: &mut Vec<ErrorSpan>) {
     }
 }
 
-fn split_semi_ranges(toks: &[CTok]) -> Vec<(&[CTok], usize, usize)> {
+fn split_semi_ranges<'a>(toks: &'a [CTok], errs: &mut Vec<ErrorSpan>) -> Vec<(&'a [CTok], usize, usize)> {
     let (mut out, mut start, mut d) = (Vec::new(), 0usize, 0usize);
     for (i, t) in toks.iter().enumerate() {
         match t.kind {
@@ -154,6 +154,8 @@ fn split_semi_ranges(toks: &[CTok]) -> Vec<(&[CTok], usize, usize)> {
             CK::Semi if d == 0 => {
                 if start < i {
                     out.push((&toks[start..i], toks[start].start, t.end));
+                } else {
+                    errs.push(sp(t.line, t.col, "Unexpected empty Cypher statement ';'"));
                 }
                 start = i + 1;
             }

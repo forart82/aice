@@ -30,15 +30,49 @@ fn supports_module_header_aice_ir(lang: LanguageId) -> bool {
             | LanguageId::Dart
             | LanguageId::Php
             | LanguageId::Ruby
+            | LanguageId::GraphQl
+            | LanguageId::MySql
+            | LanguageId::PostgreSql
+            | LanguageId::Sqlite
+            | LanguageId::TSql
+            | LanguageId::AnsiSql
+            | LanguageId::DbMigration
+            | LanguageId::Prisma
+            | LanguageId::Cypher
+            | LanguageId::Html
+            | LanguageId::Css
     )
+}
+
+fn resolve_aice_target_lang(module_name: &str, lang: LanguageId) -> LanguageId {
+    if !matches!(
+        lang,
+        LanguageId::AnsiSql
+            | LanguageId::MySql
+            | LanguageId::PostgreSql
+            | LanguageId::Sqlite
+            | LanguageId::TSql
+            | LanguageId::DbMigration
+    ) {
+        return lang;
+    }
+    match module_name.to_ascii_lowercase().as_str() {
+        "mysql" => LanguageId::MySql,
+        "postgresql" | "postgres" | "plpgsql" | "pg" => LanguageId::PostgreSql,
+        "sqlite" | "sqlite3" => LanguageId::Sqlite,
+        "tsql" | "mssql" => LanguageId::TSql,
+        "migration" | "dbmigration" | "db_migration" => LanguageId::DbMigration,
+        _ => lang,
+    }
 }
 
 pub(crate) fn is_explicit_aice_module(raw: &str, lang: LanguageId) -> bool {
     supports_module_header_aice_ir(lang)
         && has_explicit_aice_module_header(raw)
         && parse_aice(raw).is_ok_and(|m| {
+            let eff = resolve_aice_target_lang(&m.module_name, lang);
             !m.items.is_empty()
-                && compile_module(&m, lang)
+                && compile_module(&m, eff)
                     .is_ok_and(|c| raw.trim().is_empty() || !c.trim().is_empty())
         })
 }
@@ -72,14 +106,15 @@ pub fn lower_snippet_with_scope(
     }
     if force_aice_ir {
         let module = parse_aice(raw).map_err(|e| format!("AICE IR parse error: {e}"))?;
-        let compiled = compile_module(&module, lang).map_err(|e| format!("AICE IR compile error: {e}"))?;
+        let eff = resolve_aice_target_lang(&module.module_name, lang);
+        let compiled = compile_module(&module, eff).map_err(|e| format!("AICE IR compile error: {e}"))?;
         if !raw.trim().is_empty() && compiled.trim().is_empty() {
-            return Err(format!("AICE IR produced empty output for {}", lang.canonical_name()));
+            return Err(format!("AICE IR produced empty output for {}", eff.canonical_name()));
         }
         return Ok(if whole_file {
             compiled
         } else {
-            unwrap_module_wrappers(&compiled, &module, lang, unwrap_enclosing_class)
+            unwrap_module_wrappers(&compiled, &module, eff, unwrap_enclosing_class)
         });
     }
     let py_hybrid_walrus =
@@ -99,15 +134,18 @@ pub fn lower_snippet_with_scope(
         && looks_like_full_aice_module(raw)
         && let Ok(module) = parse_aice(raw)
         && !module.items.is_empty()
-        && let Ok(compiled) = compile_module(&module, lang)
-        && (raw.trim().is_empty() || !compiled.trim().is_empty())
-        && matches!(firewall.verify(&compiled, path, lang), FirewallVerdict::Valid)
     {
-        return Ok(if whole_file {
-            compiled
-        } else {
-            unwrap_module_wrappers(&compiled, &module, lang, unwrap_enclosing_class)
-        });
+        let eff = resolve_aice_target_lang(&module.module_name, lang);
+        if let Ok(compiled) = compile_module(&module, eff)
+            && (raw.trim().is_empty() || !compiled.trim().is_empty())
+            && matches!(firewall.verify(&compiled, path, eff), FirewallVerdict::Valid)
+        {
+            return Ok(if whole_file {
+                compiled
+            } else {
+                unwrap_module_wrappers(&compiled, &module, eff, unwrap_enclosing_class)
+            });
+        }
     }
     if lang == LanguageId::Python && crate::py_walrus::has_illegal_walrus(raw) {
         return Ok(raw.to_string());

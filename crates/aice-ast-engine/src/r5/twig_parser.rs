@@ -109,8 +109,14 @@ fn parse_twig_tree(src: &str, tokens: &[TwigTok], errors: &mut Vec<ErrorSpan>) -
     for tok in tokens {
         match &tok.kind {
             TwigTokKind::Comment => push_leaf(&mut stack, "twig_comment", None, tok),
-            TwigTokKind::Output => push_leaf(&mut stack, "twig_output", None, tok),
+            TwigTokKind::Output => {
+                validate_twig_pipes(src, tok, errors);
+                push_leaf(&mut stack, "twig_output", None, tok);
+            }
             TwigTokKind::Tag { keyword, rest } => {
+                if !matches!(keyword.as_str(), "verbatim" | "endverbatim") {
+                    validate_twig_pipes(src, tok, errors);
+                }
                 handle_tag(keyword, rest, tok, &mut stack, errors);
             }
         }
@@ -147,4 +153,104 @@ fn parse_twig_tree(src: &str, tokens: &[TwigTok], errors: &mut Vec<ErrorSpan>) -
         end_byte: src.len(),
         children: root.children,
     }
+}
+
+fn validate_twig_pipes(src: &str, tok: &TwigTok, errors: &mut Vec<ErrorSpan>) {
+    let raw = src.get(tok.start_byte..tok.end_byte).unwrap_or("");
+    let b = raw.as_bytes();
+    if b.len() < 4 || !b.contains(&b'|') {
+        return;
+    }
+    let open = if b.get(2) == Some(&b'-') { 3 } else { 2 };
+    let close = if b.len() >= open + 3 && b[b.len() - 3] == b'-' { 3 } else { 2 };
+    let end = b.len().saturating_sub(close);
+    if open >= end {
+        return;
+    }
+    let (mut line, mut col) = (tok.line, tok.col + open);
+    scan_twig_pipe_expr(&b[open..end], &mut 0, &mut line, &mut col, false, errors);
+}
+
+fn scan_twig_pipe_expr(
+    b: &[u8],
+    i: &mut usize,
+    line: &mut usize,
+    col: &mut usize,
+    stop_on_rbrace: bool,
+    errors: &mut Vec<ErrorSpan>,
+) {
+    let mut brace_d = 0usize;
+    let mut prev_sig: Option<u8> = None;
+    while *i < b.len() {
+        let ch = b[*i];
+        if ch == b'\'' || ch == b'"' {
+            let quote = ch;
+            adv_byte(ch, i, line, col);
+            while *i < b.len() {
+                if b[*i] == b'\\' {
+                    adv_byte(b[*i], i, line, col);
+                    if *i < b.len() {
+                        adv_byte(b[*i], i, line, col);
+                    }
+                    continue;
+                }
+                if quote == b'"' && b[*i..].starts_with(b"#{") {
+                    adv_byte(b'#', i, line, col);
+                    adv_byte(b'{', i, line, col);
+                    scan_twig_pipe_expr(b, i, line, col, true, errors);
+                    continue;
+                }
+                let q = b[*i];
+                adv_byte(q, i, line, col);
+                if q == quote {
+                    break;
+                }
+            }
+            prev_sig = Some(quote);
+            continue;
+        }
+        if stop_on_rbrace {
+            if ch == b'{' {
+                brace_d += 1;
+            } else if ch == b'}' {
+                adv_byte(ch, i, line, col);
+                if brace_d == 0 {
+                    return;
+                }
+                brace_d -= 1;
+                prev_sig = Some(b'}');
+                continue;
+            }
+        }
+        if ch == b'|' {
+            let bad_lhs = prev_sig.is_none_or(|p| matches!(p, b'(' | b'[' | b'{' | b',' | b':' | b'?' | b'|'));
+            let mut k = *i + 1;
+            while k < b.len() && b[k].is_ascii_whitespace() {
+                k += 1;
+            }
+            let has_filter_ident = b
+                .get(k)
+                .is_some_and(|&c| c.is_ascii_alphabetic() || c == b'_' || c >= 0x80);
+            if bad_lhs || !has_filter_ident {
+                errors.push(err_sp(*line, *col, "Dangling '|' filter operator in Twig expression"));
+            }
+            prev_sig = Some(b'|');
+            adv_byte(ch, i, line, col);
+            continue;
+        }
+        if !ch.is_ascii_whitespace() {
+            prev_sig = Some(ch);
+        }
+        adv_byte(ch, i, line, col);
+    }
+}
+
+fn adv_byte(ch: u8, i: &mut usize, line: &mut usize, col: &mut usize) {
+    if ch == b'\n' {
+        *line += 1;
+        *col = 1;
+    } else {
+        *col += 1;
+    }
+    *i += 1;
 }

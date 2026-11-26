@@ -4,6 +4,7 @@ use crate::r5::checks::ErrorSpan;
 use crate::r6::sql_expr::{check_delimiters, strip_comments};
 use crate::r6::sql_lex::{LexOpts, LineIndex, SqlTok, SqlTokKind, lex_sql, sp};
 use crate::r6::sql_symbols::make_rd_node;
+use crate::r6::tsql_ddl_hdr::validate_tsql_routine_hdr;
 use crate::r6::tsql_stmt::{consume_simple, is_tsql_cond_stop, validate_tsql_cond};
 
 pub const TSQL_LEX: LexOpts = LexOpts {
@@ -222,16 +223,10 @@ fn parse_tsql_ddl(
         if let Some(n) = clean.get(i) { name = format!("{name}.{}", n.ident_name(src)); i += 1; }
     }
     if matches!(kind, "procedure" | "function" | "trigger") {
-        let mut d = 0usize;
-        while i < clean.len() {
-            if clean[i].kind == SqlTokKind::LParen { d += 1; }
-            else if clean[i].kind == SqlTokKind::RParen { d = d.saturating_sub(1); }
-            else if d == 0 && clean[i].is_kw(src, "AS") { i += 1; break; }
-            i += 1;
-        }
-        let end_b = clean[i.min(clean.len() - 1)].end;
+        let next_i = validate_tsql_routine_hdr(clean, start, i, kind, src, errs);
+        let end_b = clean[next_i.min(clean.len() - 1)].end;
         nodes.push(make_rd_node(kind, Some(name), clean[start].start, end_b, li, src));
-        return (i, Some(nodes.len() - 1));
+        return (next_i, Some(nodes.len() - 1));
     }
     let end_i = consume_simple(clean, start, src, errs);
     let end_tok = &clean[end_i.saturating_sub(1).max(start)];
