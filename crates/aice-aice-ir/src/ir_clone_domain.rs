@@ -76,8 +76,8 @@ impl Clone for DataNode {
     fn clone(&self) -> Self {
         enum Task<'a> {
             Enter(&'a DataNode),
-            Seq { key: Option<String>, len: usize, trivia: Trivia },
-            Map { key: Option<String>, len: usize, trivia: Trivia },
+            Seq { key: Option<String>, len: usize, anchor: Option<String>, trivia: Trivia },
+            Map { key: Option<String>, len: usize, anchor: Option<String>, trivia: Trivia },
             Table { path: String, arr: bool, len: usize, trivia: Trivia },
             Xml { tag: String, attrs: Vec<(String, String)>, text: Option<String>, len: usize, trivia: Trivia },
         }
@@ -100,12 +100,12 @@ impl Clone for DataNode {
                     DataNode::DtdDecl { kind, name, spec, trivia } => {
                         out.push(DataNode::DtdDecl { kind: kind.clone(), name: name.clone(), spec: spec.clone(), trivia: trivia.clone() });
                     }
-                    DataNode::Seq { key, items, trivia } => {
-                        tasks.push(Task::Seq { key: key.clone(), len: items.len(), trivia: trivia.clone() });
+                    DataNode::Seq { key, items, anchor, trivia } => {
+                        tasks.push(Task::Seq { key: key.clone(), len: items.len(), anchor: anchor.clone(), trivia: trivia.clone() });
                         for it in items.iter().rev() { tasks.push(Task::Enter(it)); }
                     }
-                    DataNode::Map { key, entries, trivia } => {
-                        tasks.push(Task::Map { key: key.clone(), len: entries.len(), trivia: trivia.clone() });
+                    DataNode::Map { key, entries, anchor, trivia } => {
+                        tasks.push(Task::Map { key: key.clone(), len: entries.len(), anchor: anchor.clone(), trivia: trivia.clone() });
                         for it in entries.iter().rev() { tasks.push(Task::Enter(it)); }
                     }
                     DataNode::TableSection { path, is_array_table, entries, trivia } => {
@@ -117,13 +117,13 @@ impl Clone for DataNode {
                         for it in children.iter().rev() { tasks.push(Task::Enter(it)); }
                     }
                 },
-                Task::Seq { key, len, trivia } => {
+                Task::Seq { key, len, anchor, trivia } => {
                     let items = out.split_off(out.len() - len);
-                    out.push(DataNode::Seq { key, items, trivia });
+                    out.push(DataNode::Seq { key, items, anchor, trivia });
                 }
-                Task::Map { key, len, trivia } => {
+                Task::Map { key, len, anchor, trivia } => {
                     let entries = out.split_off(out.len() - len);
-                    out.push(DataNode::Map { key, entries, trivia });
+                    out.push(DataNode::Map { key, entries, anchor, trivia });
                 }
                 Task::Table { path, arr, len, trivia } => {
                     let entries = out.split_off(out.len() - len);

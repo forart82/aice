@@ -31,7 +31,7 @@ pub(crate) fn parse_data(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem,
                 prolog.push(p.expect(TokenKind::String, "Expected prolog string")?.lexeme);
                 let _ = p.take_trailing_comment();
             } else {
-                root.push(parse_data_node(p, ntr, format == DataFormatKind::Xml)?);
+                root.push(parse_data_node(p, ntr, format)?);
             }
             p.eat_stmt_end();
         }
@@ -43,18 +43,15 @@ pub(crate) fn parse_data(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem,
 enum DataOwner {
     Table { path: String, is_array_table: bool, tr: Trivia },
     Xml { tag: String, attrs: Vec<(String, String)>, tr: Trivia },
-    Keyed { key: Option<String>, tr: Trivia, force_map: bool },
+    Keyed { key: Option<String>, anchor: Option<String>, tr: Trivia, force_map: bool },
 }
 
-enum DataStep {
-    Done(DataNode),
-    EnterChildren(DataOwner, Vec<DataNode>),
-}
+enum DataStep { Done(DataNode), EnterChildren(DataOwner, Vec<DataNode>) }
 
-fn parse_data_node(p: &mut Parser<'_>, init_trivia: Trivia, is_xml: bool) -> Result<DataNode, TranspileError> {
-    let mut blocks: Vec<Vec<DataNode>> = Vec::new();
-    let mut owners: Vec<DataOwner> = Vec::new();
-    match step_data_node(p, init_trivia, is_xml)? {
+fn parse_data_node(p: &mut Parser<'_>, init_trivia: Trivia, fmt: DataFormatKind) -> Result<DataNode, TranspileError> {
+    let (mut blocks, mut owners) = (Vec::<Vec<DataNode>>::new(), Vec::<DataOwner>::new());
+    let (is_xml, is_yaml) = (fmt == DataFormatKind::Xml, fmt == DataFormatKind::Yaml);
+    match step_data_node(p, init_trivia, is_xml, is_yaml)? {
         DataStep::Done(n) => return Ok(n),
         DataStep::EnterChildren(owner, seed) => {
             p.skip_newlines();
@@ -79,7 +76,7 @@ fn parse_data_node(p: &mut Parser<'_>, init_trivia: Trivia, is_xml: bool) -> Res
         let ntr = p.collect_leading_trivia();
         if p.peek_kind() == TokenKind::Dedent || p.at_eof() { continue; }
         let in_xml = is_xml || matches!(owners.last(), Some(DataOwner::Xml { .. }));
-        match step_data_node(p, ntr, in_xml)? {
+        match step_data_node(p, ntr, in_xml, is_yaml)? {
             DataStep::Done(node) => {
                 if let Some(cur) = blocks.last_mut() { cur.push(node); }
                 p.eat_stmt_end();
@@ -103,11 +100,11 @@ fn build_data_parent(owner: DataOwner, children: Vec<DataNode>) -> DataNode {
     match owner {
         DataOwner::Table { path, is_array_table, tr } => DataNode::TableSection { path, is_array_table, entries: children, trivia: tr },
         DataOwner::Xml { tag, attrs, tr } => DataNode::XmlElem { tag, attrs, text: None, children, trivia: tr },
-        DataOwner::Keyed { key, tr, force_map } => {
+        DataOwner::Keyed { key, anchor, tr, force_map } => {
             let is_seq = !force_map && children.iter().any(|n| {
                 matches!(n, DataNode::Scalar { key: None, .. } | DataNode::Map { key: None, .. } | DataNode::Seq { key: None, .. })
             });
-            if is_seq { DataNode::Seq { key, items: children, trivia: tr } } else { DataNode::Map { key, entries: children, trivia: tr } }
+            if is_seq { DataNode::Seq { key, items: children, anchor, trivia: tr } } else { DataNode::Map { key, entries: children, anchor, trivia: tr } }
         }
     }
 }
@@ -173,7 +170,17 @@ fn parse_inline_seq(p: &mut Parser<'_>, key: Option<String>, mut tr: Trivia) -> 
     }
     p.expect(TokenKind::RBracket, "Expected ']'")?;
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
-    Ok(DataNode::Seq { key, items, trivia: tr })
+    Ok(DataNode::Seq { key, items, anchor: None, trivia: tr })
+}
+
+fn parse_yaml_anchor(p: &mut Parser<'_>) -> Option<String> {
+    if p.peek_kind() != TokenKind::Amp { return None; }
+    let start = p.advance().span.end_byte;
+    let mut end = start;
+    while !p.at_eof() && p.peek().span.start_byte == end && !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Dedent | TokenKind::Comment | TokenKind::Colon | TokenKind::Comma | TokenKind::RBracket | TokenKind::RBrace) {
+        end = p.advance().span.end_byte;
+    }
+    (end > start).then(|| p.src[start..end].to_string())
 }
 
 fn looks_like_inline_map_key(p: &Parser<'_>) -> bool {
@@ -188,13 +195,13 @@ fn looks_like_inline_map_key(p: &Parser<'_>) -> bool {
 }
 
 fn wrap_xml(res: Result<XmlParsed, TranspileError>) -> Result<DataStep, TranspileError> {
-    match res? {
-        XmlParsed::Done(n) => Ok(DataStep::Done(n)),
-        XmlParsed::EnterChildren { tag, attrs, tr } => Ok(DataStep::EnterChildren(DataOwner::Xml { tag, attrs, tr }, Vec::new())),
-    }
+    Ok(match res? {
+        XmlParsed::Done(n) => DataStep::Done(n),
+        XmlParsed::EnterChildren { tag, attrs, tr } => DataStep::EnterChildren(DataOwner::Xml { tag, attrs, tr }, Vec::new()),
+    })
 }
 
-fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool) -> Result<DataStep, TranspileError> {
+fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool, is_yaml: bool) -> Result<DataStep, TranspileError> {
     if p.peek_kind() != TokenKind::String && p.peek().lexeme == "section" && !matches!(p.peek_n(1).kind, TokenKind::Colon | TokenKind::Equal) {
         p.advance();
         let is_array_table = p.eat(TokenKind::LBracket) && p.eat(TokenKind::RBracket);
@@ -226,8 +233,8 @@ fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool) -> Result<Da
         if !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment) && looks_like_inline_map_key(p) {
             let k = if p.peek_kind() == TokenKind::String { p.advance().lexeme } else { p.line_rest_raw_until_colon() };
             p.expect(TokenKind::Colon, "Expected ':'")?;
-            let first = finish_keyed_value(p, Some(k), Trivia::default())?;
-            return Ok(DataStep::EnterChildren(DataOwner::Keyed { key: None, tr, force_map: true }, vec![first]));
+            let first = finish_keyed_value(p, Some(k), None, Trivia::default())?;
+            return Ok(DataStep::EnterChildren(DataOwner::Keyed { key: None, anchor: None, tr, force_map: true }, vec![first]));
         }
         None
     } else {
@@ -235,14 +242,15 @@ fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool) -> Result<Da
         if !p.eat(TokenKind::Colon) { p.expect(TokenKind::Equal, "Expected ':' or '='")?; }
         Some(k)
     };
+    let anchor = if is_yaml { parse_yaml_anchor(p) } else { None };
     if matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment) {
         if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
-        return Ok(DataStep::EnterChildren(DataOwner::Keyed { key, tr, force_map: false }, Vec::new()));
+        return Ok(DataStep::EnterChildren(DataOwner::Keyed { key, anchor, tr, force_map: false }, Vec::new()));
     }
-    Ok(DataStep::Done(finish_keyed_value(p, key, tr)?))
+    Ok(DataStep::Done(finish_keyed_value(p, key, anchor, tr)?))
 }
 
-fn finish_keyed_value(p: &mut Parser<'_>, key: Option<String>, mut tr: Trivia) -> Result<DataNode, TranspileError> {
+fn finish_keyed_value(p: &mut Parser<'_>, key: Option<String>, anchor: Option<String>, mut tr: Trivia) -> Result<DataNode, TranspileError> {
     if p.peek_kind() == TokenKind::LBracket && p.peek_n(1).kind != TokenKind::RBracket {
         return parse_inline_seq(p, key, tr);
     }
@@ -251,11 +259,11 @@ fn finish_keyed_value(p: &mut Parser<'_>, key: Option<String>, mut tr: Trivia) -
         let entries = parse_inline_kv_list(p, Some(TokenKind::RBrace))?;
         p.expect(TokenKind::RBrace, "Expected '}'")?;
         if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
-        return Ok(DataNode::Map { key, entries, trivia: tr });
+        return Ok(DataNode::Map { key, entries, anchor, trivia: tr });
     }
     let val = parse_data_scalar(p, false)?;
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
-    Ok(DataNode::Scalar { key, val, anchor: None, tag: None, trivia: tr })
+    Ok(DataNode::Scalar { key, val, anchor, tag: None, trivia: tr })
 }
 
 fn parse_data_scalar(p: &mut Parser<'_>, in_delim: bool) -> Result<DataScalar, TranspileError> {

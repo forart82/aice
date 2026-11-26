@@ -9,8 +9,8 @@ use crate::ir_domain::{DataDecl, DataFormatKind, DataNode, DataScalar};
 
 enum YTask<'a> {
     Node(Option<String>, Node<'a>, Trivia),
-    FinishMap { key: Option<String>, len: usize, trivia: Trivia },
-    FinishSeq { key: Option<String>, len: usize, trivia: Trivia },
+    FinishMap { key: Option<String>, len: usize, anchor: Option<String>, trivia: Trivia },
+    FinishSeq { key: Option<String>, len: usize, anchor: Option<String>, trivia: Trivia },
 }
 
 pub(crate) fn decompile_yaml(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -27,7 +27,7 @@ pub(crate) fn decompile_yaml(root: Node<'_>, src: &str, opts: &TranspileOpts) ->
             nodes.push(yaml_node_iter(doc, src, opts));
         }
     }
-    let flat = if nodes.len() == 1 && matches!(nodes[0], DataNode::Map { key: None, .. }) {
+    let flat = if nodes.len() == 1 && matches!(nodes[0], DataNode::Map { key: None, anchor: None, .. }) {
         if let DataNode::Map { entries, .. } = &mut nodes[0] {
             std::mem::take(entries)
         } else {
@@ -46,15 +46,23 @@ pub(crate) fn decompile_yaml(root: Node<'_>, src: &str, opts: &TranspileOpts) ->
     Ok(m)
 }
 
-fn unwrap_yaml_wrapper<'a>(mut node: Node<'a>) -> Option<Node<'a>> {
+fn unwrap_yaml_wrapper<'a>(mut node: Node<'a>, src: &str) -> (Option<Node<'a>>, Option<String>) {
+    let mut anchor: Option<String> = None;
     loop {
         if !matches!(node.kind(), "block_node" | "flow_node") {
-            return Some(node);
+            return (Some(node), anchor);
         }
-        let next = named_children(node)
-            .into_iter()
-            .find(|c| !matches!(c.kind(), "anchor" | "tag" | "comment"));
-        node = next?;
+        let mut next = None;
+        for c in named_children(node) {
+            if c.kind() == "anchor" && anchor.is_none() {
+                let a = node_text(c, src).trim().trim_start_matches('&').trim();
+                if !a.is_empty() { anchor = Some(a.to_string()); }
+            } else if next.is_none() && !matches!(c.kind(), "anchor" | "tag" | "comment") {
+                next = Some(c);
+            }
+        }
+        let Some(n) = next else { return (None, anchor); };
+        node = n;
     }
 }
 
@@ -64,9 +72,10 @@ fn yaml_node_iter(root: Node<'_>, src: &str, opts: &TranspileOpts) -> DataNode {
     while let Some(t) = tasks.pop() {
         match t {
             YTask::Node(key, raw_node, tr) => {
-                let Some(node) = unwrap_yaml_wrapper(raw_node) else {
+                let (inner_opt, anchor) = unwrap_yaml_wrapper(raw_node, src);
+                let Some(node) = inner_opt else {
                     out.push(DataNode::Scalar {
-                        key, val: DataScalar::Null, anchor: None, tag: None, trivia: tr,
+                        key, val: DataScalar::Null, anchor, tag: None, trivia: tr,
                     });
                     continue;
                 };
@@ -76,7 +85,7 @@ fn yaml_node_iter(root: Node<'_>, src: &str, opts: &TranspileOpts) -> DataNode {
                             .into_iter()
                             .filter(|p| matches!(p.kind(), "block_mapping_pair" | "flow_pair"))
                             .collect();
-                        tasks.push(YTask::FinishMap { key, len: pairs.len(), trivia: tr });
+                        tasks.push(YTask::FinishMap { key, len: pairs.len(), anchor, trivia: tr });
                         for p in pairs.into_iter().rev() {
                             let ptr = collect_trivia(p, src, opts);
                             let k = p.child_by_field_name("key")
@@ -96,7 +105,7 @@ fn yaml_node_iter(root: Node<'_>, src: &str, opts: &TranspileOpts) -> DataNode {
                             .into_iter()
                             .filter(|c| !is_comment_kind(c.kind()))
                             .collect();
-                        tasks.push(YTask::FinishSeq { key, len: items.len(), trivia: tr });
+                        tasks.push(YTask::FinishSeq { key, len: items.len(), anchor, trivia: tr });
                         for it in items.into_iter().rev() {
                             let inner = if it.kind() == "block_sequence_item" {
                                 named_children(it).into_iter().find(|c| !is_comment_kind(c.kind()))
@@ -123,19 +132,19 @@ fn yaml_node_iter(root: Node<'_>, src: &str, opts: &TranspileOpts) -> DataNode {
                             _ if raw.parse::<f64>().is_ok() => DataScalar::Float(raw.into()),
                             _ => DataScalar::Str(raw.into()),
                         };
-                        out.push(DataNode::Scalar { key, val, anchor: None, tag: None, trivia: tr });
+                        out.push(DataNode::Scalar { key, val, anchor, tag: None, trivia: tr });
                     }
                 }
             }
-            YTask::FinishMap { key, len, trivia } => {
+            YTask::FinishMap { key, len, anchor, trivia } => {
                 let entries = out.split_off(out.len() - len);
-                let mut dn = DataNode::Map { key, entries, trivia: Trivia::default() };
+                let mut dn = DataNode::Map { key, entries, anchor, trivia: Trivia::default() };
                 set_node_trivia(&mut dn, trivia);
                 out.push(dn);
             }
-            YTask::FinishSeq { key, len, trivia } => {
+            YTask::FinishSeq { key, len, anchor, trivia } => {
                 let items = out.split_off(out.len() - len);
-                let mut dn = DataNode::Seq { key, items, trivia: Trivia::default() };
+                let mut dn = DataNode::Seq { key, items, anchor, trivia: Trivia::default() };
                 set_node_trivia(&mut dn, trivia);
                 out.push(dn);
             }

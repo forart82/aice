@@ -101,25 +101,18 @@ fn decompile_css(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<Aice
                 }));
             }
             "rule_set" => m.items.push(AiceItem::Style(decompile_css_rule(ch, src, opts, tr))),
-            "media_statement" | "supports_statement" | "scope_statement" | "keyframes_statement" => {
-                let raw = node_text(ch, src).trim();
-                let hdr = raw.split('{').next().unwrap_or("@media").trim().to_string();
-                let mut children = Vec::new();
-                if let Some(blk) = child_by_kind(ch, "block").or_else(|| child_by_kind(ch, "keyframe_block_list")) {
-                    for sub in named_children(blk) {
-                        if matches!(sub.kind(), "rule_set" | "keyframe_block") {
-                            children.push(decompile_css_rule(sub, src, opts, Trivia::default()));
-                        }
-                    }
-                }
-                m.items.push(AiceItem::Style(StyleDecl {
-                    selector: hdr, props: Vec::new(), children, trivia: tr, span: node_span(ch),
-                }));
-            }
+            _ if is_css_at_block(ch) => m.items.push(AiceItem::Style(decompile_css_rule(ch, src, opts, tr))),
             _ => {}
         }
     }
     Ok(m)
+}
+
+fn is_css_at_block(node: Node<'_>) -> bool {
+    matches!(
+        node.kind(),
+        "media_statement" | "supports_statement" | "scope_statement" | "keyframes_statement" | "at_rule"
+    ) && child_by_kind(node, "block").or_else(|| child_by_kind(node, "keyframe_block_list")).is_some()
 }
 
 fn decompile_css_rule(root: Node<'_>, src: &str, opts: &TranspileOpts, init_tr: Trivia) -> StyleDecl {
@@ -132,18 +125,22 @@ fn decompile_css_rule(root: Node<'_>, src: &str, opts: &TranspileOpts, init_tr: 
     while let Some(t) = tasks.pop() {
         match t {
             CTask::Enter(node, tr) => {
-                let selector = child_by_kind(node, "selectors")
-                    .or_else(|| child_by_kind(node, "keyframe_selector"))
-                    .map(|s| node_text(s, src).trim().to_string())
-                    .or_else(|| {
-                        (node.kind() == "keyframe_block")
-                            .then(|| node_text(node, src).split('{').next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
-                            .flatten()
-                    })
-                    .unwrap_or_else(|| "*".into());
+                let selector = if is_css_at_block(node) {
+                    node_text(node, src).trim().split('{').next().unwrap_or("@rule").trim().to_string()
+                } else {
+                    child_by_kind(node, "selectors")
+                        .or_else(|| child_by_kind(node, "keyframe_selector"))
+                        .map(|s| node_text(s, src).trim().to_string())
+                        .or_else(|| {
+                            (node.kind() == "keyframe_block")
+                                .then(|| node_text(node, src).split('{').next().map(|s| s.trim().to_string()).filter(|s| !s.is_empty()))
+                                .flatten()
+                        })
+                        .unwrap_or_else(|| "*".into())
+                };
                 let mut props = Vec::new();
                 let mut child_rules = Vec::new();
-                if let Some(blk) = child_by_kind(node, "block") {
+                if let Some(blk) = child_by_kind(node, "block").or_else(|| child_by_kind(node, "keyframe_block_list")) {
                     for ch in named_children(blk) {
                         if is_comment_kind(ch.kind()) { continue; }
                         let ptr = collect_trivia(ch, src, opts);
@@ -152,7 +149,7 @@ fn decompile_css_rule(root: Node<'_>, src: &str, opts: &TranspileOpts, init_tr: 
                             let raw_line = node_text(ch, src).trim().trim_end_matches(';');
                             let val = raw_line.split_once(':').map(|(_, v)| v.trim().to_string()).unwrap_or_default();
                             props.push(StyleProp { name: compress_css_prop(raw_prop).to_string(), value: Some(val), trivia: ptr });
-                        } else if ch.kind() == "rule_set" {
+                        } else if matches!(ch.kind(), "rule_set" | "keyframe_block") || is_css_at_block(ch) {
                             child_rules.push((ch, ptr));
                         }
                     }

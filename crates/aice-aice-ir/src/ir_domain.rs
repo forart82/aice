@@ -130,11 +130,13 @@ pub enum DataNode {
     Seq {
         key: Option<String>,
         items: Vec<DataNode>,
+        anchor: Option<String>,
         trivia: Trivia,
     },
     Map {
         key: Option<String>,
         entries: Vec<DataNode>,
+        anchor: Option<String>,
         trivia: Trivia,
     },
     TableSection {

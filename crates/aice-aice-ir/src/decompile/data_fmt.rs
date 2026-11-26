@@ -157,11 +157,11 @@ fn run_data_task<'a>(init: DTask<'a>, src: &str, opts: &TranspileOpts) -> DataNo
             }
             DTask::FinishMap { key, len, trivia } => {
                 let entries = out.split_off(out.len() - len);
-                out.push(DataNode::Map { key, entries, trivia });
+                out.push(DataNode::Map { key, entries, anchor: None, trivia });
             }
             DTask::FinishSeq { key, len, trivia } => {
                 let items = out.split_off(out.len() - len);
-                out.push(DataNode::Seq { key, items, trivia });
+                out.push(DataNode::Seq { key, items, anchor: None, trivia });
             }
         }
     }

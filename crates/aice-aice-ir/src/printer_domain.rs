@@ -14,6 +14,15 @@ pub(crate) fn print_tokens(c: &mut PrintCtx<'_>, ts: &TokenSheetDecl, d: usize) 
     for (k, v) in &ts.entries { c.line(d + 1, &format!("{k}: {v}")); }
 }
 
+fn node_has_anchor(n: &DataNode) -> bool {
+    matches!(
+        n,
+        DataNode::Scalar { anchor: Some(_), .. }
+            | DataNode::Seq { anchor: Some(_), .. }
+            | DataNode::Map { anchor: Some(_), .. }
+    )
+}
+
 fn fmt_inline_map_entries(entries: &[DataNode], max_len: usize) -> Option<String> {
     if entries.is_empty() || entries.len() > max_len {
         return None;
@@ -21,7 +30,7 @@ fn fmt_inline_map_entries(entries: &[DataNode], max_len: usize) -> Option<String
     let mut parts = Vec::with_capacity(entries.len());
     for en in entries {
         match en {
-            DataNode::Scalar { key: Some(k), val, trivia, .. } if trivia.is_empty() => {
+            DataNode::Scalar { key: Some(k), val, anchor: None, trivia, .. } if trivia.is_empty() => {
                 if let DataScalar::Raw(r) = val
                     && (r.contains(',') || r.contains('}') || r.contains('\n'))
                 {
@@ -29,7 +38,9 @@ fn fmt_inline_map_entries(entries: &[DataNode], max_len: usize) -> Option<String
                 }
                 parts.push(format!("{}={}", fmt_data_key(k), fmt_data_scalar(val, true)));
             }
-            DataNode::Seq { key: Some(k), items, trivia } if trivia.is_empty() => {
+            DataNode::Seq { key: Some(k), items, anchor: None, trivia }
+                if trivia.is_empty() && items.iter().all(|i| !node_has_anchor(i)) =>
+            {
                 let seq = fmt_inline_data_seq(items)?;
                 parts.push(format!("{}={seq}", fmt_data_key(k)));
             }
@@ -61,7 +72,7 @@ pub(crate) fn print_data(c: &mut PrintCtx<'_>, dd: &DataDecl, d: usize) {
             DPrint::InlineMapFirst(n, dep) => (n, dep, true, false),
         };
         match node {
-            DataNode::Scalar { key, val, trivia, .. } => {
+            DataNode::Scalar { key, val, anchor, trivia, .. } => {
                 c.emit_trivia(trivia, nd);
                 let sep = if dd.format == DataFormatKind::Yaml { "=" } else { ": " };
                 let pfx = match key {
@@ -69,11 +80,21 @@ pub(crate) fn print_data(c: &mut PrintCtx<'_>, dd: &DataDecl, d: usize) {
                     Some(k) => format!("{}{sep}", fmt_data_key(k)),
                     None => "- ".to_string(),
                 };
-                c.line_tr(nd, &format!("{pfx}{}", fmt_data_scalar(val, false)), trivia);
+                let anc = anchor.as_deref().map(|a| format!("&{a} ")).unwrap_or_default();
+                let rendered = match val {
+                    DataScalar::Str(s) if dd.format == DataFormatKind::Yaml && s.starts_with('&') => {
+                        format!("\"{}\"", escape_str(s))
+                    }
+                    _ => fmt_data_scalar(val, false),
+                };
+                c.line_tr(nd, &format!("{pfx}{anc}{rendered}"), trivia);
             }
-            DataNode::Seq { key, items, trivia } => {
+            DataNode::Seq { key, items, anchor, trivia } => {
                 c.emit_trivia(trivia, nd);
-                if let Some(inline) = fmt_inline_data_seq(items) {
+                if anchor.is_none()
+                    && items.iter().all(|i| !node_has_anchor(i))
+                    && let Some(inline) = fmt_inline_data_seq(items)
+                {
                     let pfx = match key {
                         Some(k) if inline_dash => format!("- {}: ", fmt_data_key(k)),
                         Some(k) => format!("{}: ", fmt_data_key(k)),
@@ -81,18 +102,20 @@ pub(crate) fn print_data(c: &mut PrintCtx<'_>, dd: &DataDecl, d: usize) {
                     };
                     c.line_tr(nd, &format!("{pfx}{inline}"), trivia);
                 } else {
+                    let anc = anchor.as_deref().map(|a| format!(" &{a}")).unwrap_or_default();
                     let hdr = match key {
-                        Some(k) if inline_dash => format!("- {}:", fmt_data_key(k)),
-                        Some(k) => format!("{}:", fmt_data_key(k)),
-                        None => "-".into(),
+                        Some(k) if inline_dash => format!("- {}:{anc}", fmt_data_key(k)),
+                        Some(k) => format!("{}:{anc}", fmt_data_key(k)),
+                        None => format!("-{anc}"),
                     };
                     c.line_tr(nd, &hdr, trivia);
                     for it in items.iter().rev() { stack.push(DPrint::Node(it, nd + 1, false)); }
                 }
             }
-            DataNode::Map { key, entries, trivia } => {
+            DataNode::Map { key, entries, anchor, trivia } => {
                 c.emit_trivia(trivia, nd);
                 if c.opts.compact
+                    && anchor.is_none()
                     && trivia.trailing.is_none()
                     && let Some(inline) = fmt_inline_map_entries(entries, 4)
                 {
@@ -103,17 +126,19 @@ pub(crate) fn print_data(c: &mut PrintCtx<'_>, dd: &DataDecl, d: usize) {
                     };
                     c.line_tr(nd, &format!("{pfx}{{{inline}}}"), trivia);
                 } else if key.is_none()
+                    && anchor.is_none()
                     && trivia.trailing.is_none()
                     && let Some((first, rest)) = entries.split_first()
-                    && matches!(first, DataNode::Scalar { key: Some(_), trivia: ft, .. } if ft.leading.is_empty())
+                    && matches!(first, DataNode::Scalar { key: Some(_), anchor: None, trivia: ft, .. } if ft.leading.is_empty())
                 {
                     for en in rest.iter().rev() { stack.push(DPrint::Node(en, nd + 1, false)); }
                     stack.push(DPrint::InlineMapFirst(first, nd));
                 } else {
+                    let anc = anchor.as_deref().map(|a| format!(" &{a}")).unwrap_or_default();
                     let hdr = match key {
-                        Some(k) if inline_dash => format!("- {}:", fmt_data_key(k)),
-                        Some(k) => format!("{}:", fmt_data_key(k)),
-                        None => "-".into(),
+                        Some(k) if inline_dash => format!("- {}:{anc}", fmt_data_key(k)),
+                        Some(k) => format!("{}:{anc}", fmt_data_key(k)),
+                        None => format!("-{anc}"),
                     };
                     c.line_tr(nd, &hdr, trivia);
                     for en in entries.iter().rev() { stack.push(DPrint::Node(en, nd + 1, false)); }

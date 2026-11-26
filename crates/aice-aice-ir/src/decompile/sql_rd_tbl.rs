@@ -207,13 +207,28 @@ fn split_table_entries_with_trivia(
 }
 
 pub(crate) fn parse_create_index_text(stmt: &str, unique: bool, trivia: Trivia) -> DbSchemaDecl {
-    let lp = stmt.find('(').unwrap_or(stmt.len());
-    let rp = stmt.rfind(')').unwrap_or(stmt.len());
-    let parts: Vec<&str> = stmt[..lp].split_whitespace().collect();
+    let trimmed = stmt.trim().trim_end_matches(';').trim();
+    let Some(lp) = trimmed.find('(') else {
+        return DbSchemaDecl::RawDdl { text: trimmed.to_string(), trivia };
+    };
+    let Some(rp) = find_matching_rparen(trimmed, lp) else {
+        return DbSchemaDecl::RawDdl { text: trimmed.to_string(), trivia };
+    };
+    let tail = trimmed[rp + 1..].trim();
+    let parts: Vec<&str> = trimmed[..lp].split_whitespace().collect();
+    let has_extra_hdr = parts.iter().any(|w| {
+        w.eq_ignore_ascii_case("CONCURRENTLY")
+            || w.eq_ignore_ascii_case("USING")
+            || w.eq_ignore_ascii_case("EXISTS")
+    });
     let on_pos = parts.iter().position(|w| w.eq_ignore_ascii_case("ON"));
-    let name = on_pos.and_then(|i| parts.get(i.saturating_sub(1))).copied().unwrap_or("idx").to_string();
-    let table = on_pos.and_then(|i| parts.get(i + 1)).copied().unwrap_or("tbl").to_string();
-    let cols = if lp < rp { stmt[lp + 1..rp].split(',').map(|s| s.trim().to_string()).collect() } else { Vec::new() };
+    if !tail.is_empty() || has_extra_hdr || on_pos.is_none() {
+        return DbSchemaDecl::RawDdl { text: trimmed.to_string(), trivia };
+    }
+    let on_i = on_pos.unwrap();
+    let name = parts.get(on_i.saturating_sub(1)).copied().unwrap_or("idx").to_string();
+    let table = parts.get(on_i + 1).copied().unwrap_or("tbl").to_string();
+    let cols = split_top_commas(&trimmed[lp + 1..rp]).into_iter().map(|s| s.trim().to_string()).collect();
     DbSchemaDecl::Index { name, unique, table, cols, trivia }
 }
 

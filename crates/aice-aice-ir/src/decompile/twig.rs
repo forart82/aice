@@ -50,17 +50,28 @@ fn walk_twig_iter(root: &RdNode, src: &str, opts: &TranspileOpts) -> Vec<LayoutN
     loop {
         let next_child = {
             let f = stack.last_mut().expect("twig frame");
-            if f.idx < f.children_sorted.len() {
+            let mut chosen = None;
+            while f.idx < f.children_sorted.len() {
                 let ch = f.children_sorted[f.idx];
                 f.idx += 1;
+                if ch.end_byte <= f.cursor {
+                    continue;
+                }
                 if ch.start_byte > f.cursor {
-                    process_gap(src, f.cursor, ch.start_byte, &mut f.html_stack, &mut f.active_branch, &mut f.branches, &mut f.cur_nodes, opts);
+                    let consumed = process_gap(
+                        src, f.cursor, ch.start_byte, f.inner_end, &mut f.html_stack,
+                        &mut f.active_branch, &mut f.branches, &mut f.cur_nodes, opts,
+                    );
+                    f.cursor = consumed.max(f.cursor);
+                    if ch.end_byte <= f.cursor {
+                        continue;
+                    }
                 }
                 f.cursor = ch.end_byte.max(f.cursor);
-                Some(ch)
-            } else {
-                None
+                chosen = Some(ch);
+                break;
             }
+            chosen
         };
         if let Some(ch) = next_child {
             let f = stack.last_mut().expect("twig frame");
@@ -113,8 +124,8 @@ fn walk_twig_iter(root: &RdNode, src: &str, opts: &TranspileOpts) -> Vec<LayoutN
         }
         let mut finished = stack.pop().expect("twig frame");
         if finished.inner_end > finished.cursor {
-            process_gap(
-                src, finished.cursor, finished.inner_end, &mut finished.html_stack,
+            let _ = process_gap(
+                src, finished.cursor, finished.inner_end, finished.inner_end, &mut finished.html_stack,
                 &mut finished.active_branch, &mut finished.branches, &mut finished.cur_nodes, opts,
             );
         }
@@ -131,7 +142,7 @@ fn walk_twig_iter(root: &RdNode, src: &str, opts: &TranspileOpts) -> Vec<LayoutN
                 "twig_if" => (TemplateCtrlKind::If, lbl.to_string()),
                 "twig_for" => (TemplateCtrlKind::For, lbl.to_string()),
                 "twig_block" => (TemplateCtrlKind::Block, lbl.strip_prefix("block:").unwrap_or(lbl).to_string()),
-                "twig_macro" => (TemplateCtrlKind::Macro, lbl.strip_prefix("macro:").unwrap_or(lbl).to_string()),
+                "twig_macro" => (TemplateCtrlKind::Macro, extract_macro_sig(src, finished.node, lbl)),
                 "twig_set_block" => (TemplateCtrlKind::Set, lbl.strip_prefix("set:").unwrap_or(lbl).to_string()),
                 _ => (TemplateCtrlKind::RawTag, finished.node.kind.clone()),
             };
@@ -160,11 +171,12 @@ fn push_layout_node(
 
 #[allow(clippy::too_many_arguments)]
 fn process_gap(
-    src: &str, s: usize, e: usize, html_stack: &mut Vec<ElemBuilder>,
+    src: &str, s: usize, e: usize, limit: usize, html_stack: &mut Vec<ElemBuilder>,
     active_branch: &mut Option<(String, Vec<LayoutNode>)>, branches: &mut Vec<(String, Vec<LayoutNode>)>,
     cur_nodes: &mut Vec<LayoutNode>, opts: &TranspileOpts,
-) {
-    for tok in scan_gap(src, s, e) {
+) -> usize {
+    let (toks, consumed) = scan_gap(src, s, e, limit);
+    for tok in toks {
         match tok {
             GapToken::ElseIf(cond) => {
                 while let Some(elem) = html_stack.pop() {
@@ -220,6 +232,26 @@ fn process_gap(
             }
         }
     }
+    consumed
+}
+
+fn extract_macro_sig(src: &str, node: &RdNode, lbl: &str) -> String {
+    let close = find_tag_close(src, node.start_byte);
+    if let Some(raw) = src.get(node.start_byte..close) {
+        let inner = raw
+            .trim()
+            .strip_prefix("{%")
+            .and_then(|s| s.strip_suffix("%}"))
+            .map(|s| s.trim_matches(|c: char| matches!(c, '-' | '~') || c.is_whitespace()))
+            .unwrap_or("");
+        if let Some(rest) = inner.strip_prefix("macro")
+            && rest.starts_with(char::is_whitespace)
+        {
+            let sig = rest.trim();
+            if !sig.is_empty() { return sig.to_string(); }
+        }
+    }
+    lbl.strip_prefix("macro:").unwrap_or(lbl).to_string()
 }
 
 fn classify_twig_tag(lbl: &str) -> (TemplateCtrlKind, String) {

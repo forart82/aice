@@ -92,18 +92,35 @@ fn collect_sql_node(root: Node<'_>, src: &str, opts: &TranspileOpts, items: &mut
                 }));
             }
             "create_index" => {
-                let raw = node_text(node, src);
-                let refs: Vec<String> = named_children(node).into_iter()
-                    .filter(|c| matches!(c.kind(), "object_reference" | "identifier"))
-                    .map(|c| node_text(c, src).trim().to_string()).collect();
-                let name = refs.first().cloned().unwrap_or_else(|| "idx".into());
-                let table = refs.get(1).cloned().unwrap_or_else(|| "tbl".into());
-                let cols = child_by_kind(node, "index_fields")
-                    .map(|f| named_children(f).into_iter().map(|c| node_text(c, src).trim().to_string()).collect())
+                let raw = node_text(node, src).trim().trim_end_matches(';').trim();
+                let fields_node = child_by_kind(node, "index_fields");
+                let has_where = child_by_kind(node, "where").is_some();
+                let has_tail = fields_node.is_some_and(|f| {
+                    !src[f.end_byte()..node.end_byte()].trim().trim_end_matches(';').trim().is_empty()
+                });
+                let head_up = fields_node
+                    .map(|f| src[node.start_byte()..f.start_byte()].to_ascii_uppercase())
                     .unwrap_or_default();
-                items.push(AiceItem::DbSchema(DbSchemaDecl::Index {
-                    name, unique: raw.to_ascii_uppercase().contains("UNIQUE"), table, cols, trivia: tr,
-                }));
+                if has_where
+                    || has_tail
+                    || head_up.contains("USING ")
+                    || head_up.contains("CONCURRENTLY")
+                    || head_up.contains("IF NOT EXISTS")
+                {
+                    items.push(AiceItem::DbSchema(DbSchemaDecl::RawDdl { text: raw.to_string(), trivia: tr }));
+                } else {
+                    let refs: Vec<String> = named_children(node).into_iter()
+                        .filter(|c| matches!(c.kind(), "object_reference" | "identifier"))
+                        .map(|c| node_text(c, src).trim().to_string()).collect();
+                    let name = refs.first().cloned().unwrap_or_else(|| "idx".into());
+                    let table = refs.get(1).cloned().unwrap_or_else(|| "tbl".into());
+                    let cols = fields_node
+                        .map(|f| named_children(f).into_iter().map(|c| node_text(c, src).trim().to_string()).collect())
+                        .unwrap_or_default();
+                    items.push(AiceItem::DbSchema(DbSchemaDecl::Index {
+                        name, unique: raw.to_ascii_uppercase().contains("UNIQUE"), table, cols, trivia: tr,
+                    }));
+                }
             }
             _ => {
                 let raw = node_text(node, src).trim().trim_end_matches(';').trim().to_string();

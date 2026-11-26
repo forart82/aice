@@ -96,18 +96,25 @@ fn run_data_tasks<'a>(ec: &mut EmitCtx, mut tasks: Vec<EmitOp<'a>>) {
 fn step_yaml<'a>(ec: &mut EmitCtx, node: &'a DataNode, as_seq: bool, tasks: &mut Vec<EmitOp<'a>>) {
     let dash = if as_seq { "- " } else { "" };
     match node {
-        DataNode::Scalar { key, val, trivia, .. } => {
+        DataNode::Scalar { key, val, anchor, trivia, .. } => {
             ec.emit_trivia(trivia, CommentStyle::Hash);
             let v = yaml_scalar(val);
+            let anc = anchor.as_deref().map(|a| format!("&{a} ")).unwrap_or_default();
             match key {
-                Some(k) => ec.line(&format!("{dash}{k}: {v}")),
-                None => ec.line(&format!("- {v}")),
+                Some(k) => ec.line(&format!("{dash}{k}: {anc}{v}")),
+                None => ec.line(&format!("- {anc}{v}")),
             }
         }
-        DataNode::Map { key, entries, trivia } => {
+        DataNode::Map { key, entries, anchor, trivia } => {
             ec.emit_trivia(trivia, CommentStyle::Hash);
+            let anc = anchor.as_deref().map(|a| format!(" &{a}")).unwrap_or_default();
             if let Some(k) = key {
-                ec.line(&format!("{dash}{k}:"));
+                ec.line(&format!("{dash}{k}:{anc}"));
+                ec.push();
+                tasks.push(EmitOp::Pop);
+                for en in entries.iter().rev() { tasks.push(EmitOp::Yaml(en, false)); }
+            } else if !anc.is_empty() {
+                ec.line(&format!("-{anc}"));
                 ec.push();
                 tasks.push(EmitOp::Pop);
                 for en in entries.iter().rev() { tasks.push(EmitOp::Yaml(en, false)); }
@@ -118,9 +125,11 @@ fn step_yaml<'a>(ec: &mut EmitCtx, node: &'a DataNode, as_seq: bool, tasks: &mut
                 tasks.push(EmitOp::Yaml(first, true));
             }
         }
-        DataNode::Seq { key, items, trivia } => {
+        DataNode::Seq { key, items, anchor, trivia } => {
             ec.emit_trivia(trivia, CommentStyle::Hash);
-            if let Some(k) = key { ec.line(&format!("{dash}{k}:")); }
+            let anc = anchor.as_deref().map(|a| format!(" &{a}")).unwrap_or_default();
+            if let Some(k) = key { ec.line(&format!("{dash}{k}:{anc}")); }
+            else if !anc.is_empty() { ec.line(&format!("-{anc}")); }
             ec.push();
             tasks.push(EmitOp::Pop);
             for it in items.iter().rev() { tasks.push(EmitOp::Yaml(it, true)); }
@@ -189,12 +198,12 @@ fn emit_toml(dd: &DataDecl) -> String {
                 ec.emit_trivia(trivia, CommentStyle::Hash);
                 ec.line(&format!("{k} = {}", json_scalar(val)));
             }
-            DataNode::Map { key: Some(k), entries, trivia } => {
+            DataNode::Map { key: Some(k), entries, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Hash);
                 let inner: Vec<String> = entries.iter().filter_map(toml_kv_pair).collect();
                 ec.line(&format!("{k} = {{ {} }}", inner.join(", ")));
             }
-            DataNode::Seq { key: Some(k), items, trivia } => {
+            DataNode::Seq { key: Some(k), items, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Hash);
                 let inner: Vec<String> = items.iter().map(toml_node_val).collect();
                 ec.line(&format!("{k} = [{}]", inner.join(", ")));

@@ -157,21 +157,93 @@ fn collect_gql_implements(root: Node<'_>, src: &str, out: &mut Vec<String>) {
     }
 }
 
+fn is_cypher_ddl_start(s: &str) -> bool {
+    let mut w = s.split_whitespace();
+    let Some(w1) = w.next() else { return false; };
+    let Some(w2) = w.next() else { return false; };
+    if w1.eq_ignore_ascii_case("CREATE") {
+        return w2.eq_ignore_ascii_case("CONSTRAINT")
+            || w2.eq_ignore_ascii_case("INDEX")
+            || w2.eq_ignore_ascii_case("UNIQUE")
+            || w2.eq_ignore_ascii_case("FULLTEXT")
+            || w2.eq_ignore_ascii_case("RANGE")
+            || w2.eq_ignore_ascii_case("TEXT")
+            || w2.eq_ignore_ascii_case("POINT")
+            || w2.eq_ignore_ascii_case("VECTOR")
+            || w2.eq_ignore_ascii_case("LOOKUP");
+    }
+    if w1.eq_ignore_ascii_case("DROP") || w1.eq_ignore_ascii_case("SHOW") {
+        return w2.eq_ignore_ascii_case("CONSTRAINT")
+            || w2.eq_ignore_ascii_case("CONSTRAINTS")
+            || w2.eq_ignore_ascii_case("INDEX")
+            || w2.eq_ignore_ascii_case("INDEXES");
+    }
+    false
+}
+
+fn is_cypher_ddl_cont(s: &str) -> bool {
+    let Some(w) = s.split_whitespace().next() else { return false; };
+    w.eq_ignore_ascii_case("REQUIRE")
+        || w.eq_ignore_ascii_case("FOR")
+        || w.eq_ignore_ascii_case("ON")
+        || w.eq_ignore_ascii_case("OPTIONS")
+        || w.eq_ignore_ascii_case("IS")
+        || w.eq_ignore_ascii_case("ASSERT")
+}
+
+fn is_cypher_stmt_start(s: &str) -> bool {
+    let Some(w) = s.split_whitespace().next() else { return false; };
+    w.eq_ignore_ascii_case("MATCH")
+        || w.eq_ignore_ascii_case("OPTIONAL")
+        || w.eq_ignore_ascii_case("CREATE")
+        || w.eq_ignore_ascii_case("MERGE")
+        || w.eq_ignore_ascii_case("CALL")
+        || w.eq_ignore_ascii_case("UNWIND")
+        || w.eq_ignore_ascii_case("DROP")
+        || w.eq_ignore_ascii_case("SHOW")
+}
+
 fn decompile_cypher(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     let mut m = AiceModule::new(LanguageId::Cypher, "cypher");
-    for ch in named_children(root) {
-        if is_comment_kind(ch.kind()) { continue; }
+    let kids: Vec<Node<'_>> = named_children(root).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+    let mut i = 0usize;
+    while i < kids.len() {
+        let ch = kids[i];
         let tr = collect_trivia(ch, src, opts);
+        let head_txt = node_text(ch, src).trim();
+        let is_ddl = is_cypher_ddl_start(head_txt);
+        let mut j = i;
+        if is_ddl || ch.has_error() || ch.is_error() {
+            while j + 1 < kids.len() {
+                let cur_txt = node_text(kids[j], src).trim_end();
+                let gap = src.get(kids[j].end_byte()..kids[j + 1].start_byte()).unwrap_or("");
+                if cur_txt.ends_with(';') || gap.contains(';') { break; }
+                let nxt = kids[j + 1];
+                let nxt_txt = node_text(nxt, src).trim();
+                if is_cypher_stmt_start(nxt_txt) { break; }
+                if nxt.has_error() || nxt.is_error() || is_cypher_ddl_cont(nxt_txt) {
+                    j += 1;
+                } else {
+                    break;
+                }
+            }
+        }
         let mut clauses = Vec::new();
-        collect_cypher_clauses(ch, src, &mut clauses);
-        if clauses.is_empty() {
-            let raw = node_text(ch, src).trim().trim_end_matches(';').trim().to_string();
+        if j > i || is_ddl {
+            let raw = src.get(ch.start_byte()..kids[j].end_byte()).unwrap_or("").trim().trim_end_matches(';').trim().to_string();
             if !raw.is_empty() { clauses.push(("cypher".into(), raw)); }
+        } else {
+            collect_cypher_clauses(ch, src, &mut clauses);
+            if clauses.is_empty() {
+                let raw = head_txt.trim_end_matches(';').trim().to_string();
+                if !raw.is_empty() { clauses.push(("cypher".into(), raw)); }
+            }
         }
         m.items.push(AiceItem::DbQuery(DbQueryDecl {
             dialect: LanguageId::Cypher, kind: DbQueryKind::Cypher, name: None,
             ctes: Vec::new(), clauses, trivia: tr,
         }));
+        i = j + 1;
     }
     Ok(m)
 }
