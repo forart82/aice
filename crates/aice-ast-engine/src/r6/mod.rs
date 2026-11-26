@@ -44,7 +44,7 @@ mod tsql_with;
 
 use aice_lang_registry::{LanguageAdapter, LanguageId, ParseError, ParsedTree, SymbolNode};
 
-use crate::r5::checks::{ErrorSpan, format_context, spans_to_diagnostics};
+use crate::r5::checks::{ErrorSpan, spans_to_diagnostics};
 use crate::ts_pool::ParserPool;
 use crate::{AdapterBundle, SyntaxIssue};
 
@@ -100,12 +100,12 @@ pub fn extract_r6_symbols(lang: LanguageId, tree: &ParsedTree, src: &str) -> Vec
     }
 }
 
-pub fn verify_r6_firewall(
+pub(crate) fn collect_r6_error_spans(
     lang: LanguageId,
     src: &str,
     pool: &mut ParserPool,
-) -> Result<(), Vec<SyntaxIssue>> {
-    let spans: Vec<ErrorSpan> = match lang {
+) -> Vec<ErrorSpan> {
+    match lang {
         LanguageId::AnsiSql => sql_ansi::verify_ansi_spans(src, pool),
         LanguageId::PostgreSql => plpgsql::verify_pg_spans(src, pool),
         LanguageId::MySql => mysql::verify_mysql_spans(src, pool),
@@ -115,18 +115,25 @@ pub fn verify_r6_firewall(
         LanguageId::GraphQl => graphql::verify_graphql_spans(src, pool),
         LanguageId::Cypher => cypher::verify_cypher_spans(src, pool),
         LanguageId::DbMigration => migrations::verify_migration_spans(src, pool),
-        _ => {
-            return Err(vec![SyntaxIssue {
-                line: 1,
-                column: 1,
-                message: format!("Unsupported R6 language: {}", lang.canonical_name()),
-                context: format_context(src, 1),
-            }]);
-        }
-    };
+        _ => vec![ErrorSpan {
+            line: 1,
+            column: 1,
+            end_line: 1,
+            message: format!("Unsupported R6 language: {}", lang.canonical_name()),
+        }],
+    }
+}
+
+pub fn verify_r6_firewall(
+    lang: LanguageId,
+    src: &str,
+    pool: &mut ParserPool,
+) -> Result<(), Vec<SyntaxIssue>> {
+    let spans = collect_r6_error_spans(lang, src, pool);
     if spans.is_empty() {
         Ok(())
     } else {
-        Err(spans_to_diagnostics(src, spans))
+        let refined = crate::firewall_span::refine_error_spans(lang, src, std::path::Path::new(""), None, None, spans, pool);
+        Err(spans_to_diagnostics(src, refined))
     }
 }

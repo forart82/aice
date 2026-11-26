@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use aice_lang_registry::{FirewallDiagnostic, FirewallVerdict, LanguageId, SyntaxFirewall};
+use crate::firewall_span::refine_error_spans;
 use crate::r5::checks::{
     ErrorSpan, collect_r5_error_spans_with_tree, collect_r5_with_base_edit, format_context, spans_to_diagnostics,
 };
@@ -34,16 +35,18 @@ impl SyntaxFirewall for DefaultSyntaxFirewall {
         }
         with_parser_pool(|pool| {
             let Some(base) = baseline_native else {
-                let (cand_spans, _) = collect_lang_spans_with_tree(lang, candidate_native, path, pool);
+                let (cand_spans, cand_tree) = collect_lang_spans_with_tree(lang, candidate_native, path, pool);
+                let cand_spans = refine_error_spans(lang, candidate_native, path, None, cand_tree.as_ref(), cand_spans, pool);
                 return verdict_from_spans(candidate_native, cand_spans);
             };
             let (base_spans, base_tree) = collect_lang_spans_with_tree(lang, base, path, pool);
-            let cand_spans = if base.len() >= 2048 && let Some(ref bt) = base_tree {
+            let (cand_spans, cand_tree) = if base.len() >= 2048 && let Some(ref bt) = base_tree {
                 collect_r5_with_base_edit(lang, base, candidate_native, bt, path, pool)
             } else {
-                collect_lang_spans_with_tree(lang, candidate_native, path, pool).0
+                collect_lang_spans_with_tree(lang, candidate_native, path, pool)
             };
             if base_spans.is_empty() {
+                let cand_spans = refine_error_spans(lang, candidate_native, path, Some(base), cand_tree.as_ref(), cand_spans, pool);
                 return verdict_from_spans(candidate_native, cand_spans);
             }
             verify_prebroken_delta(lang, path, pool, base, candidate_native, &base_spans, &cand_spans, base_tree.as_ref())
@@ -78,15 +81,7 @@ fn collect_lang_spans_with_tree(
     match lang {
         PlainText | Aice => (Vec::new(), None),
         AnsiSql | PostgreSql | MySql | Sqlite | TSql | Prisma | GraphQl | Cypher
-        | DbMigration => match crate::r6::verify_r6_firewall(lang, src, pool) {
-            Ok(()) => (Vec::new(), None),
-            Err(issues) => (
-                issues.into_iter().map(|d| ErrorSpan {
-                    line: d.line, column: d.column, end_line: d.line, message: d.message,
-                }).collect(),
-                None,
-            ),
-        },
+        | DbMigration => (crate::r6::collect_r6_error_spans(lang, src, pool), None),
         _ => match collect_r5_error_spans_with_tree(lang, src, path, pool) {
             Ok(res) => res,
             Err(span) => (vec![span], None),

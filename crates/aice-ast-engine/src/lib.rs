@@ -57,6 +57,8 @@ mod dep_resolve_rust;
 mod dep_resolve_rust_idx;
 mod dep_tarjan;
 pub mod firewall;
+mod firewall_delim;
+mod firewall_span;
 pub mod intra_ast;
 mod intra_ast_kinds;
 mod intra_ast_match;

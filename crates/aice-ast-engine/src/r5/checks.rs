@@ -154,12 +154,11 @@ pub(crate) fn collect_r5_with_base_edit(
     base_tree: &tree_sitter::Tree,
     path: &Path,
     pool: &mut ParserPool,
-) -> Vec<ErrorSpan> {
+) -> (Vec<ErrorSpan>, Option<tree_sitter::Tree>) {
     let mut edited = base_tree.clone();
     edited.edit(&build_ts_edit(base, cand));
     collect_r5_error_spans_with_old(lang, cand, Some(&edited), path, pool)
-        .map(|(s, _)| s)
-        .unwrap_or_else(|e| vec![e])
+        .unwrap_or_else(|e| (vec![e], None))
 }
 
 pub(crate) fn collect_r5_error_spans_with_old(
@@ -211,9 +210,12 @@ pub fn verify_r5_firewall(
     path: &Path,
     pool: &mut ParserPool,
 ) -> Result<(), Vec<FirewallDiagnostic>> {
-    match collect_r5_error_spans(lang, src, path, pool) {
-        Ok(spans) if spans.is_empty() => Ok(()),
-        Ok(spans) => Err(spans_to_diagnostics(src, spans)),
+    match collect_r5_error_spans_with_tree(lang, src, path, pool) {
+        Ok((spans, _)) if spans.is_empty() => Ok(()),
+        Ok((spans, tree)) => Err(spans_to_diagnostics(
+            src,
+            crate::firewall_span::refine_error_spans(lang, src, path, None, tree.as_ref(), spans, pool),
+        )),
         Err(span) => Err(spans_to_diagnostics(src, vec![span])),
     }
 }

@@ -175,7 +175,7 @@ fn scan_markup_tags(src: &str, is_xml: bool, check_balance: bool) -> Vec<ErrorSp
     }
 
     if check_balance {
-        for unclosed in stack {
+        for unclosed in stack.into_iter().rev() {
             errors.push(err_at(
                 unclosed.line,
                 unclosed.col,
