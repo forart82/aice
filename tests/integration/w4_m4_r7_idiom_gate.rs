@@ -221,12 +221,19 @@ fn r7_report_schema_and_exact_bpe_verification() {
         let stdout = String::from_utf8(out.stdout).unwrap();
         assert!(!stdout.contains("// Auto-outlined") && !stdout.contains("// ... [truncated"), "{wid} truncated");
         let actual_no = count_both(&stdout);
-        // Wave 1 IR fidelity fixes (F-01..F-04) stopped erasing TSX component bodies,
-        // TS/JS shorthand props, JS default params, and Rust shorthand struct fields;
-        // keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-1 counts.
+        // Wave 1 (F-01..F-04) & Wave 2 (F-17, F-18, F-24) IR fidelity fixes stopped erasing
+        // TSX/shorthand/default params, JS/C#/Java/PHP `new`, C# lambda params, multiline
+        // directives, Kotlin ctor defaults/nullability, PHP promoted ctors/new args, and
+        // MySQL KEY/T-SQL proc params; keep docs/IDIOM_GATE_REPORT.md historically untouched
+        // and lock exact post-Wave-2 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
-            "C-01" => (2132, 2168),
+            "C-01" => (2134, 2170),
             "C-02" => (1701, 1674),
+            "C-05" => (1569, 1590),
+            "C-06" => (1470, 1477),
+            "C-07" => (1329, 1347),
+            "C-08" => (1456, 1465),
+            "C-11" => (2128, 2144),
             _ => (no_cl, no_o2),
         };
         assert_eq!(actual_no.cl100k, exp_cl, "{wid} without_idioms_cl100k mismatch");
