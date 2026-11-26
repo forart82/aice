@@ -42,7 +42,7 @@ fn drain_json_orphan<R: Read>(
     reader: &mut R,
     buf: &mut Vec<u8>,
     eof: &mut bool,
-    start: usize,
+    mut start: usize,
 ) -> io::Result<()> {
     let mut idx = start;
     let mut depth = 0usize;
@@ -94,6 +94,11 @@ fn drain_json_orphan<R: Read>(
             }
             idx += 1;
         }
+        if idx > 64 * 1024 && buf.len() > 128 * 1024 {
+            buf.drain(..idx - 1);
+            idx = 1;
+            start = 0;
+        }
         if *eof || read_chunk_into(reader, buf, eof)? == 0 {
             buf.clear();
             return Ok(());
@@ -126,6 +131,11 @@ fn drain_non_json_orphan<R: Read>(
         if let Some(nl_pos) = buf.iter().position(|&b| b == b'\n') {
             buf.drain(..=nl_pos);
             return Ok(());
+        }
+        if buf.len() > 64 * 1024 {
+            let keep = 32;
+            let drop_len = buf.len() - keep;
+            buf.drain(..drop_len);
         }
         if *eof || read_chunk_into(reader, buf, eof)? == 0 {
             buf.clear();

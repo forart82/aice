@@ -63,7 +63,8 @@ pub fn compute_project_systemic_economics(
     let (mut real_nat_sum, mut real_saved_sum) = (0usize, 0isize);
     let (mut read_non_err_saved, mut write_non_err_saved) = (0isize, 0isize);
     let (mut single_reads, mut single_losses) = (0usize, 0usize);
-    let mut last_read_by_file: BTreeMap<String, u64> = BTreeMap::new();
+    let mut last_read_by_file: BTreeMap<String, (u64, bool)> = BTreeMap::new();
+    let mut last_read_ts: Option<u64> = None;
     let mut last_write_ts: Option<u64> = None;
     let mut prev_wrap: Option<(u64, String, bool)> = None;
     let mut mcp_ts = Vec::new();
@@ -122,28 +123,47 @@ pub fn compute_project_systemic_economics(
                     } else {
                         vec![ev.file_path.as_str()]
                     };
-                    let (mut par, mut pag) = (false, false);
-                    for f in targets {
-                        if f.is_empty() || (f.starts_with('<') && f != "<stdin>") {
-                            continue;
-                        }
-                        if let Some(&prev_ts) = last_read_by_file.get(f)
-                            && ev.timestamp_ms >= prev_ts
-                        {
-                            let d = ev.timestamp_ms - prev_ts;
-                            if d < PARALLEL_SLICE_GAP_MS {
-                                par = true;
-                            } else if d <= 180_000 && last_write_ts.is_none_or(|w| w < prev_ts) {
-                                pag = true;
+                    let concrete: Vec<&str> = targets
+                        .into_iter()
+                        .filter(|f| !f.is_empty() && (!f.starts_with('<') || *f == "<stdin>"))
+                        .collect();
+                    if !concrete.is_empty() {
+                        let is_auto_outline = !ev.is_search_mode
+                            && rnat == ev.native_cl100k
+                            && ev.native_cl100k >= 300
+                            && ev.aice_cl100k.saturating_mul(100)
+                                <= ev.native_cl100k.saturating_mul(40);
+                        let is_targeted_slice = !ev.is_search_mode && rnat < ev.native_cl100k;
+                        let same_turn = last_read_ts.is_some_and(|prev| {
+                            ev.timestamp_ms >= prev && ev.timestamp_ms - prev < PARALLEL_SLICE_GAP_MS
+                        });
+                        let (mut par, mut pag) = (false, false);
+                        for f in concrete {
+                            if let Some(&(prev_ts, prev_outline)) = last_read_by_file.get(f)
+                                && ev.timestamp_ms >= prev_ts
+                            {
+                                let d = ev.timestamp_ms - prev_ts;
+                                if d < PARALLEL_SLICE_GAP_MS || same_turn {
+                                    par = true;
+                                } else if d <= 180_000
+                                    && last_write_ts.is_none_or(|w| w < prev_ts)
+                                    && !(prev_outline && is_targeted_slice)
+                                {
+                                    pag = true;
+                                }
                             }
+                            last_read_by_file
+                                .insert(f.to_string(), (ev.timestamp_ms, is_auto_outline));
                         }
-                        last_read_by_file.insert(f.to_string(), ev.timestamp_ms);
-                    }
-                    if par {
-                        parallel_calls += 1;
-                    }
-                    if pag {
-                        seq_pag_turns += 1;
+                        if same_turn && is_targeted_slice {
+                            par = true;
+                        }
+                        if par {
+                            parallel_calls += 1;
+                        } else if pag {
+                            seq_pag_turns += 1;
+                        }
+                        last_read_ts = Some(ev.timestamp_ms);
                     }
                 }
             }

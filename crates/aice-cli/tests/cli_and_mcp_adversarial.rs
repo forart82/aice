@@ -11,7 +11,7 @@ use aice_cli::cmd_write::parse_write_args_with_stdin;
 use aice_cli::cmd_write_targets::{looks_like_manifest_file, should_consume_delete_arg};
 use aice_cli::flags_norm::normalize_ingress_flags;
 use aice_cli::mcp_args::{opt_bool, opt_str, opt_usize, split_read_target_string};
-use aice_cli::mcp_framing::{FrameEvent, McpFrameReader};
+use aice_cli::mcp_framing::{FrameEvent, MAX_MCP_FRAME_BYTES, McpFrameReader};
 use aice_cli::mcp_map_read::handle_read;
 use aice_cli::mcp_map_write::handle_write;
 use aice_cli::mcp_schemas::{build_initialize_result, build_tools_list_result};
@@ -362,4 +362,91 @@ fn wave1_f16_failed_batch_splice_logs_honest_errors_across_cli_and_mcp() {
 
     let _ = std::fs::remove_dir_all(&cli_dir);
     let _ = std::fs::remove_dir_all(&mcp_dir);
+}
+
+#[test]
+fn wave2_f32_mcp_frame_cap_shrink_and_non_ledger_dry_run() {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+
+    assert_eq!(MAX_MCP_FRAME_BYTES, 64 * 1024 * 1024);
+
+    // 1. Oversized Content-Length (> 64 MiB, fits in usize) returns ParseError without OOM and recovers next ping
+    let over_cap = MAX_MCP_FRAME_BYTES + 1;
+    let payload = format!(
+        "Content-Length: {over_cap}\r\n\r\n{{\"huge\":true}}\nContent-Length: 40\r\n\r\n{{\"jsonrpc\":\"2.0\",\"id\":9,\"method\":\"ping\"}}"
+    );
+    let mut cap_reader = McpFrameReader::new(Cursor::new(payload.into_bytes()));
+    assert!(matches!(cap_reader.next_frame().unwrap(), Some(FrameEvent::ParseError)));
+    assert!(matches!(cap_reader.next_frame().unwrap(), Some(FrameEvent::Message(_))));
+    assert!(cap_reader.next_frame().unwrap().is_none());
+
+    // 2. Oversized Content-Length with immediate EOF returns ParseError without allocating
+    let huge_eof = format!("Content-Length: {}\r\n\r\n", 1024usize * 1024 * 1024);
+    let mut eof_reader = McpFrameReader::new(Cursor::new(huge_eof.into_bytes()));
+    assert!(matches!(eof_reader.next_frame().unwrap(), Some(FrameEvent::ParseError)));
+    assert!(eof_reader.buf_capacity() <= 64 * 1024);
+
+    // 3. Large valid Content-Length frame (> 256 KiB) grows buffer then shrinks capacity back down to <= 64 KiB
+    let big_str = "a".repeat(320 * 1024);
+    let big_body = format!("{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"pad\":\"{big_str}\"}}");
+    let big_frame = format!("Content-Length: {}\r\n\r\n{big_body}", big_body.len());
+    let mut shrink_reader = McpFrameReader::new(Cursor::new(big_frame.into_bytes()));
+    assert!(matches!(shrink_reader.next_frame().unwrap(), Some(FrameEvent::Message(_))));
+    assert!(
+        shrink_reader.buf_capacity() <= 64 * 1024,
+        "expected buf capacity <= 64 KiB after draining large frame, got {}",
+        shrink_reader.buf_capacity()
+    );
+
+    // 4. Large newline-delimited frame also shrinks buffer capacity back down to <= 64 KiB
+    let big_nl = format!("{big_body}\n");
+    let mut nl_reader = McpFrameReader::new(Cursor::new(big_nl.into_bytes()));
+    assert!(matches!(nl_reader.next_frame().unwrap(), Some(FrameEvent::Message(_))));
+    assert!(
+        nl_reader.buf_capacity() <= 64 * 1024,
+        "expected newline buf capacity <= 64 KiB, got {}",
+        nl_reader.buf_capacity()
+    );
+
+    // 5. End-to-end `aice mcp` emits -32700 Parse error on > 64 MiB Content-Length and serves following ping
+    let dir = temp_dir("f32_mcp");
+    let home = dir.join("aice_home");
+    std::fs::write(dir.join("aice.config.json"), "{\"enabled\":true}\n").unwrap();
+    std::fs::write(dir.join("src_a.rs"), "pub fn alpha() -> i32 { 1 }\n").unwrap();
+
+    let bin = env!("CARGO_BIN_EXE_aice");
+    let mcp_in = format!(
+        "Content-Length: {over_cap}\r\n\r\n{{\"bad\":1}}\nContent-Length: 40\r\n\r\n{{\"jsonrpc\":\"2.0\",\"id\":7,\"method\":\"ping\"}}"
+    );
+    let mut child = Command::new(bin)
+        .arg("mcp")
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env("AICE_HOME", &home)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child.stdin.as_mut().unwrap().write_all(mcp_in.as_bytes()).unwrap();
+    let out = child.wait_with_output().unwrap();
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("-32700"), "expected -32700 parse error, got: {stdout}");
+    assert!(stdout.contains("\"id\":7"), "expected recovered ping id=7, got: {stdout}");
+
+    // 6. Non-ledger CLI `splice --dry-run` succeeds cleanly without creating gains.jsonl
+    let dry = Command::new(bin)
+        .args(["splice", "src_a.rs:alpha", "-c", "pub fn alpha() -> i32 { 2 }", "--dry-run"])
+        .current_dir(&dir)
+        .env("HOME", &home)
+        .env("AICE_HOME", &home)
+        .env_remove("AICE_TELEMETRY_PATH")
+        .output()
+        .unwrap();
+    assert_eq!(dry.status.code(), Some(0), "stderr={}", String::from_utf8_lossy(&dry.stderr));
+    assert!(!home.join("telemetry/gains.jsonl").exists());
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

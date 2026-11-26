@@ -8,6 +8,10 @@ use crate::mcp_framing_probe::{
     trim_ascii_slice,
 };
 
+pub const MAX_MCP_FRAME_BYTES: usize = 64 * 1024 * 1024;
+const MCP_BUF_SHRINK_THRESHOLD: usize = 256 * 1024;
+const MCP_BUF_SHRINK_TARGET: usize = 64 * 1024;
+
 #[derive(Debug)]
 pub enum FrameEvent {
     Message(JsonValue),
@@ -30,10 +34,21 @@ impl<R: Read> McpFrameReader<R> {
         self.is_framed
     }
 
+    pub fn buf_capacity(&self) -> usize {
+        self.buf.capacity()
+    }
+
+    fn maybe_shrink_buf(&mut self) {
+        if self.buf.is_empty() && self.buf.capacity() > MCP_BUF_SHRINK_THRESHOLD {
+            self.buf.shrink_to(MCP_BUF_SHRINK_TARGET);
+        }
+    }
+
     pub fn next_frame(&mut self) -> io::Result<Option<FrameEvent>> {
         loop {
             trim_leading_ws(&mut self.buf);
             if self.buf.is_empty() {
+                self.maybe_shrink_buf();
                 if self.eof || self.read_chunk()? == 0 {
                     return Ok(None);
                 }
@@ -47,6 +62,7 @@ impl<R: Read> McpFrameReader<R> {
             }
             if let Some(nl) = self.buf.iter().position(|&b| b == b'\n') {
                 let raw: Vec<u8> = self.buf.drain(..=nl).collect();
+                self.maybe_shrink_buf();
                 let trimmed = trim_ascii_slice(&raw);
                 if !trimmed.is_empty() {
                     return Ok(Some(parse_utf8_json(trimmed)));
@@ -57,6 +73,11 @@ impl<R: Read> McpFrameReader<R> {
                 let raw = std::mem::take(&mut self.buf);
                 let trimmed = trim_ascii_slice(&raw);
                 return Ok((!trimmed.is_empty()).then(|| parse_utf8_json(trimmed)));
+            }
+            if self.buf.len() > MAX_MCP_FRAME_BYTES {
+                self.buf.clear();
+                self.maybe_shrink_buf();
+                return Ok(Some(FrameEvent::ParseError));
             }
             self.read_chunk()?;
         }
@@ -91,8 +112,9 @@ impl<R: Read> McpFrameReader<R> {
             if let Some(found) = find_header_end(&self.buf) {
                 break found;
             }
-            if self.eof {
+            if self.eof || self.buf.len() > MAX_MCP_FRAME_BYTES {
                 self.buf.clear();
+                self.maybe_shrink_buf();
                 return Ok(Some(FrameEvent::ParseError));
             }
             self.read_chunk()?;
@@ -101,20 +123,25 @@ impl<R: Read> McpFrameReader<R> {
         let header_str = String::from_utf8_lossy(&self.buf[..hdr_end]).into_owned();
         self.buf.drain(..hdr_end + sep_len);
 
-        let Some(content_len) = parse_content_length_header(&header_str) else {
+        let Some(content_len) = parse_content_length_header(&header_str)
+            .filter(|&n| n <= MAX_MCP_FRAME_BYTES)
+        else {
             drain_orphaned_body(&mut self.reader, &mut self.buf, &mut self.eof)?;
+            self.maybe_shrink_buf();
             return Ok(Some(FrameEvent::ParseError));
         };
 
         while self.buf.len() < content_len {
             if self.eof {
                 self.buf.clear();
+                self.maybe_shrink_buf();
                 return Ok(Some(FrameEvent::ParseError));
             }
             self.read_chunk()?;
         }
 
         let body: Vec<u8> = self.buf.drain(..content_len).collect();
+        self.maybe_shrink_buf();
         Ok(Some(parse_utf8_json(&body)))
     }
 }

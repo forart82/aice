@@ -94,7 +94,14 @@ pub fn meter_rich_payload_with(
     input: &TelemetryRichInput<'_>,
     env_fn: &dyn Fn(&str) -> Option<String>,
 ) -> TelemetryRichSummary {
-    let (native_bpe, aice_bpe, realistic_native_cl100k) = if input.should_meter_bpe {
+    let suppressed = is_telemetry_suppressed();
+    let excluded = should_exclude_from_global_ledger_with(
+        input.project_root,
+        input.explicit_telemetry_path,
+        env_fn,
+    );
+    let should_count_bpe = input.should_meter_bpe && !suppressed && !excluded;
+    let (native_bpe, aice_bpe, realistic_native_cl100k) = if should_count_bpe {
         let nb = count_both(input.raw_baseline);
         let ab = count_both(input.emitted_payload);
         let rn = input
@@ -115,12 +122,6 @@ pub fn meter_rich_payload_with(
     let content_hash = sha256_hex(input.raw_baseline.as_bytes());
 
     let mut ledger_path = None;
-    let suppressed = is_telemetry_suppressed();
-    let excluded = should_exclude_from_global_ledger_with(
-        input.project_root,
-        input.explicit_telemetry_path,
-        env_fn,
-    );
     if input.record_ledger && !suppressed && !excluded {
         let ts_ms = current_epoch_ms();
         let proj_str = input.project_root.display().to_string();
@@ -203,7 +204,13 @@ pub fn record_cli_failure_telemetry(
     wasted_payload: Option<&str>,
     explicit_telemetry_path: Option<&Path>,
 ) -> TelemetryRichSummary {
-    let wasted_tokens = wasted_payload.map(count_cl100k);
+    let skip_bpe = is_telemetry_suppressed()
+        || should_exclude_from_global_ledger_with(project_root, explicit_telemetry_path, &std_env);
+    let wasted_tokens = if skip_bpe {
+        None
+    } else {
+        wasted_payload.map(count_cl100k)
+    };
     meter_rich_payload(&TelemetryRichInput {
         project_root,
         file_label: "<cli-error>",

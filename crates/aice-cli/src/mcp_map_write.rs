@@ -9,7 +9,7 @@ use aice_governance::{
 use aice_pipeline::{
     DefaultPipelineExecutor, PipelineExecutor, StdoutWriter, meter_and_seal,
 };
-use aice_telemetry::TelemetryOpKind;
+use aice_telemetry::{TelemetryOpKind, with_suppressed_telemetry};
 
 use crate::{record_batch_error_only, record_write_failure};
 use crate::mcp_args::{RpcErr, opt_bool, opt_str};
@@ -120,7 +120,7 @@ pub fn handle_write(
             }
             match DefaultPipelineExecutor.execute_write(gov) {
                 Ok(res) => {
-                    let metered = meter_and_seal(res);
+                    let metered = if dry_run { with_suppressed_telemetry(|| meter_and_seal(res)) } else { meter_and_seal(res) };
                     if !dry_run && metered.exit_code() != 0 && metered.summary().ledger_path.is_none() {
                         let msg = if metered.stderr_payload().is_empty() { metered.payload() } else { metered.stderr_payload() };
                         record_batch_error_only(cwd, op_kind, OutputSurface::Mcp, &label, msg, wasted.as_deref());

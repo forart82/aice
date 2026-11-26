@@ -766,3 +766,203 @@ fn c1_g2_c1_g3_c1_g8_relative_symlink_zero_event_and_transcript_edge_cases() {
 
     let _ = fs::remove_dir_all(&tmp);
 }
+
+#[test]
+fn wave2_f27_parallel_slices_and_auto_outline_followups_not_penalized_as_pagination() {
+    use aice_telemetry::economics::compute_project_systemic_economics;
+    use aice_telemetry::TelemetryEvent;
+
+    let make_ev = |ts: u64, fp: &str, mf: &[&str], op: &str, n1: usize, rn: usize, a1: usize| {
+        let mf_json: Vec<String> = mf.iter().map(|s| format!("\"{s}\"")).collect();
+        let mf_part = if mf_json.is_empty() {
+            String::new()
+        } else {
+            format!(",\"mf\":[{}]", mf_json.join(","))
+        };
+        let rs = rn as isize - a1 as isize;
+        let line = format!(
+            r#"{{"t":{ts},"r":"/home/user/trial1","p":"trial1","f":"{fp}"{mf_part},"o":"{op}","nc":{},"ac":{},"n1":{n1},"a1":{a1},"n2":{n1},"a2":{a1},"rn":{rn},"rs":{rs}}}"#,
+            n1 * 4,
+            a1 * 4
+        );
+        TelemetryEvent::from_json_line(&line).expect("parse synthetic event")
+    };
+
+    // 1. Parallel same-turn targeted slices across distinct files increment parallelSliceCalls, 0 seq_pag_turns
+    let par_distinct = vec![
+        make_ev(10_000, "src/a.rs", &["src/a.rs"], "read", 1200, 300, 220),
+        make_ev(10_800, "src/b.rs", &["src/b.rs"], "read", 1100, 280, 200),
+        make_ev(11_500, "src/c.rs", &["src/c.rs"], "read", 900, 250, 180),
+    ];
+    let econ_par = compute_project_systemic_economics(&par_distinct, &[]);
+    assert_eq!(econ_par.parallel_slice_calls, 2);
+    assert_eq!(econ_par.sequential_pagination_turns, 0);
+    assert_eq!(econ_par.pagination_replay_tax_cl100k, 0);
+
+    // 2. Trial-1 pattern: auto-outline multi-file -> next-turn parallel targeted symbol slices across files -> honest TOKEN-REDUCING
+    let trial1_like = vec![
+        // Turn 1: auto-outline 4 large files (rn == n1, a1 << n1)
+        make_ev(
+            100_000,
+            "<multi-context>",
+            &["src/session/mod.rs", "src/ipc/mod.rs", "src/app.rs", "src/ui/mod.rs"],
+            "context",
+            15_494,
+            15_494,
+            2_740,
+        ),
+        // Same turn: auto-outline 3 test files
+        make_ev(
+            103_000,
+            "<multi-context>",
+            &["tests/ipc.rs", "tests/session.rs", "tests/ui.rs"],
+            "context",
+            4_509,
+            4_509,
+            812,
+        ),
+        // Turn 2 (parallel burst of 3 targeted slices following auto-outline):
+        make_ev(
+            125_000,
+            "<multi-context>",
+            &["src/session/mod.rs", "src/app.rs"],
+            "context",
+            5_325,
+            2_416,
+            2_253,
+        ),
+        make_ev(126_600, "src/ipc/mod.rs", &["src/ipc/mod.rs"], "context", 6_213, 3_067, 2_728),
+        make_ev(
+            127_400,
+            "<multi-context>",
+            &["src/ui/mod.rs", "tests/ipc.rs", "tests/ui.rs"],
+            "context",
+            6_985,
+            4_017,
+            3_929,
+        ),
+        // Turn 3: splice
+        make_ev(160_000, "<batch-splice>", &["src/app.rs", "src/ipc/mod.rs"], "splice", 4_920, 4_920, 143),
+    ];
+    let econ_t1 = compute_project_systemic_economics(&trial1_like, &[]);
+    assert_eq!(econ_t1.parallel_slice_calls, 2);
+    assert_eq!(econ_t1.sequential_pagination_turns, 0);
+    assert_eq!(econ_t1.pagination_replay_tax_cl100k, 0);
+    assert_eq!(econ_t1.end_to_end_verdict, "TOKEN-REDUCING");
+    assert!(econ_t1.net_end_to_end_saved_cl100k > 0);
+
+    // 3. Genuine sequential repeat line-paging (slice -> later-turn slice on same file, no write) IS penalized
+    let seq_paging = vec![
+        make_ev(200_000, "src/big.rs", &["src/big.rs"], "read", 2000, 400, 320),
+        make_ev(225_000, "src/big.rs", &["src/big.rs"], "read", 2000, 400, 320),
+        make_ev(250_000, "src/big.rs", &["src/big.rs"], "read", 2000, 400, 320),
+    ];
+    let econ_pag = compute_project_systemic_economics(&seq_paging, &[]);
+    assert_eq!(econ_pag.parallel_slice_calls, 0);
+    assert_eq!(econ_pag.sequential_pagination_turns, 2);
+    assert_eq!(econ_pag.pagination_replay_tax_cl100k, 17_000);
+
+    // 4. Explicit outline -> next-turn targeted slice is NOT penalized, whereas repeat full re-read IS
+    let explicit_ol_and_reread = vec![
+        make_ev(300_000, "src/lib.rs", &["src/lib.rs"], "outline", 1200, 1200, 160),
+        make_ev(320_000, "src/lib.rs", &["src/lib.rs"], "read", 1200, 300, 240),
+        make_ev(350_000, "src/full.rs", &["src/full.rs"], "read", 500, 500, 420),
+        make_ev(375_000, "src/full.rs", &["src/full.rs"], "read", 500, 500, 420),
+    ];
+    let econ_ol = compute_project_systemic_economics(&explicit_ol_and_reread, &[]);
+    assert_eq!(econ_ol.sequential_pagination_turns, 1);
+}
+
+#[test]
+fn wave2_f32_excluded_and_suppressed_skip_bpe_while_recorded_rows_keep_exact_dual_bpe() {
+    let tmp = unique_temp_dir("f32_bpe");
+    let gains = tmp.join("gains.jsonl");
+    let raw_cjk = "// 日本語コメント: 東京タワー🗼 — café résumé naïve 🚀\nconst msg = \"你好世界\";\n";
+    let emitted_cjk = "// AICE\nconst msg = \"你好世界\";\n";
+    let no_override_env = |_: &str| -> Option<String> { None };
+
+    // 1. Ephemeral /tmp workspace without override -> excluded -> skips BPE metering (0 cl100k/o200k)
+    let excl = meter_rich_payload_with(
+        &TelemetryRichInput {
+            project_root: &tmp.join("ephemeral_ws"),
+            file_label: "src/i18n.ts",
+            op_kind: TelemetryOpKind::Read,
+            surface_label: "cli",
+            raw_baseline: raw_cjk,
+            emitted_payload: emitted_cjk,
+            realistic_native_payload: None,
+            multi_files: &[],
+            language: None,
+            agent: None,
+            is_search_mode: false,
+            preserved_trivia_tokens: 0,
+            wasted_input_tokens: None,
+            explicit_telemetry_path: None,
+            record_ledger: true,
+            should_meter_bpe: true,
+        },
+        &no_override_env,
+    );
+    assert!(excl.summary.ledger_path.is_none());
+    assert_eq!(excl.summary.native_cl100k, 0);
+    assert_eq!(excl.summary.native_o200k, 0);
+    assert_eq!(excl.summary.aice_cl100k, 0);
+    assert_eq!(excl.summary.aice_o200k, 0);
+
+    // 2. Suppressed telemetry -> skips BPE metering even on non-ephemeral workspace
+    let supp = with_suppressed_telemetry(|| {
+        meter_rich_payload(&TelemetryRichInput {
+            project_root: Path::new("/home/test/real_ws"),
+            file_label: "src/i18n.ts",
+            op_kind: TelemetryOpKind::Splice,
+            surface_label: "cli",
+            raw_baseline: raw_cjk,
+            emitted_payload: emitted_cjk,
+            realistic_native_payload: None,
+            multi_files: &[],
+            language: None,
+            agent: None,
+            is_search_mode: false,
+            preserved_trivia_tokens: 0,
+            wasted_input_tokens: None,
+            explicit_telemetry_path: Some(&gains),
+            record_ledger: true,
+            should_meter_bpe: true,
+        })
+    });
+    assert!(supp.summary.ledger_path.is_none());
+    assert_eq!(supp.summary.native_cl100k, 0);
+    assert_eq!(supp.summary.native_o200k, 0);
+
+    // 3. Recorded ledger row preserves 100% exact Law 3 dual-BPE (cl100k + o200k)
+    let rec = meter_rich_payload(&TelemetryRichInput {
+        project_root: Path::new("/home/test/real_ws"),
+        file_label: "src/i18n.ts",
+        op_kind: TelemetryOpKind::Read,
+        surface_label: "cli",
+        raw_baseline: raw_cjk,
+        emitted_payload: emitted_cjk,
+        realistic_native_payload: None,
+        multi_files: &[],
+        language: None,
+        agent: None,
+        is_search_mode: false,
+        preserved_trivia_tokens: 0,
+        wasted_input_tokens: None,
+        explicit_telemetry_path: Some(&gains),
+        record_ledger: true,
+        should_meter_bpe: true,
+    });
+    assert!(rec.summary.ledger_path.is_some());
+    assert_eq!(rec.summary.native_cl100k, count_cl100k(raw_cjk));
+    assert_eq!(rec.summary.native_o200k, count_o200k(raw_cjk));
+    assert_ne!(rec.summary.native_cl100k, rec.summary.native_o200k);
+    let rows = load_telemetry_events(&gains, false);
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].native_cl100k, count_cl100k(raw_cjk));
+    assert_eq!(rows[0].native_o200k, count_o200k(raw_cjk));
+    assert_eq!(rows[0].aice_cl100k, count_cl100k(emitted_cjk));
+    assert_eq!(rows[0].aice_o200k, count_o200k(emitted_cjk));
+
+    let _ = fs::remove_dir_all(&tmp);
+}

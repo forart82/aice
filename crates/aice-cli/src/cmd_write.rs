@@ -9,7 +9,7 @@ use aice_pipeline::{
     is_disallowed_write_selector, meter_and_seal, validate_raw_write_target,
     validate_write_op_selectors,
 };
-use aice_telemetry::TelemetryOpKind;
+use aice_telemetry::{TelemetryOpKind, with_suppressed_telemetry};
 
 use crate::{record_batch_error_only, record_write_failure};
 
@@ -236,7 +236,7 @@ pub fn run_write(mut op: WriteOp, cwd: &Path) -> i32 {
     match authorize(req) {
         Ok(gov) => match DefaultPipelineExecutor.execute_write(gov) {
             Ok(res) => {
-                let metered = meter_and_seal(res);
+                let metered = if dry_run { with_suppressed_telemetry(|| meter_and_seal(res)) } else { meter_and_seal(res) };
                 if !dry_run && metered.exit_code() != 0 && metered.summary().ledger_path.is_none() {
                     let msg = if metered.stderr_payload().is_empty() { metered.payload() } else { metered.stderr_payload() };
                     record_batch_error_only(cwd, op_kind, OutputSurface::Cli, &label, msg, wasted.as_deref());
