@@ -82,10 +82,16 @@ fn parse_compact_md_body(root_level: u8, root_heading: String, tr: Trivia, body:
             continue;
         }
         let hashes = trimmed.bytes().take_while(|&b| b == b'#').count();
-        if (1..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ') {
+        let compact_h = trimmed.as_bytes().first() == Some(&b'h')
+            && trimmed.as_bytes().get(1).is_some_and(|b| (b'1'..=b'6').contains(b))
+            && trimmed.get(2..4) == Some(": ");
+        if ((1..=6).contains(&hashes) && trimmed.as_bytes().get(hashes) == Some(&b' ')) || compact_h {
             flush_para(&mut para_buf, &mut stack);
-            let lvl = hashes as u8;
-            let heading = trimmed[hashes + 1..].trim().to_string();
+            let (lvl, heading) = if compact_h {
+                (trimmed.as_bytes()[1] - b'0', trimmed[4..].trim().to_string())
+            } else {
+                (hashes as u8, trimmed[hashes + 1..].trim().to_string())
+            };
             while stack.last().is_some_and(|f| f.flat && f.level >= lvl) {
                 let _ = close_doc_frame(&mut stack);
             }
@@ -124,19 +130,19 @@ fn parse_compact_md_body(root_level: u8, root_heading: String, tr: Trivia, body:
             if let Some(cur) = stack.last_mut() { cur.blocks.push(DocBlock::Table { headers, rows }); }
             continue;
         }
-        if let Some(t) = trimmed.strip_prefix("- [x] ").or_else(|| trimmed.strip_prefix("- [X] ")) {
+        if let Some(t) = trimmed.strip_prefix("- [x] ").or_else(|| trimmed.strip_prefix("- [X] ")).or_else(|| trimmed.strip_prefix("[x] ")).or_else(|| trimmed.strip_prefix("[X] ")) {
             flush_para(&mut para_buf, &mut stack);
             if let Some(cur) = stack.last_mut() { cur.blocks.push(DocBlock::ListItem { ordered: false, checked: Some(true), text: t.into() }); }
             i += 1;
             continue;
         }
-        if let Some(t) = trimmed.strip_prefix("- [ ] ") {
+        if let Some(t) = trimmed.strip_prefix("- [ ] ").or_else(|| trimmed.strip_prefix("[ ] ")) {
             flush_para(&mut para_buf, &mut stack);
             if let Some(cur) = stack.last_mut() { cur.blocks.push(DocBlock::ListItem { ordered: false, checked: Some(false), text: t.into() }); }
             i += 1;
             continue;
         }
-        if let Some(t) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+        if let Some(t) = trimmed.strip_prefix("li: ").or_else(|| trimmed.strip_prefix("- ")).or_else(|| trimmed.strip_prefix("* ")) {
             flush_para(&mut para_buf, &mut stack);
             if let Some(cur) = stack.last_mut() { cur.blocks.push(DocBlock::ListItem { ordered: false, checked: None, text: t.into() }); }
             i += 1;

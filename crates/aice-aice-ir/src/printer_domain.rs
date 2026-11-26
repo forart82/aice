@@ -63,9 +63,10 @@ pub(crate) fn print_data(c: &mut PrintCtx<'_>, dd: &DataDecl, d: usize) {
         match node {
             DataNode::Scalar { key, val, trivia, .. } => {
                 c.emit_trivia(trivia, nd);
+                let sep = if dd.format == DataFormatKind::Yaml { "=" } else { ": " };
                 let pfx = match key {
                     Some(k) if inline_dash => format!("- {}: ", fmt_data_key(k)),
-                    Some(k) => format!("{}: ", fmt_data_key(k)),
+                    Some(k) => format!("{}{sep}", fmt_data_key(k)),
                     None => "- ".to_string(),
                 };
                 c.line_tr(nd, &format!("{pfx}{}", fmt_data_scalar(val, false)), trivia);

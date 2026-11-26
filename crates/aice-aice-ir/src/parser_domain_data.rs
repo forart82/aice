@@ -195,7 +195,7 @@ fn wrap_xml(res: Result<XmlParsed, TranspileError>) -> Result<DataStep, Transpil
 }
 
 fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool) -> Result<DataStep, TranspileError> {
-    if p.peek().lexeme == "section" && !matches!(p.peek_n(1).kind, TokenKind::Colon) {
+    if p.peek_kind() != TokenKind::String && p.peek().lexeme == "section" && !matches!(p.peek_n(1).kind, TokenKind::Colon | TokenKind::Equal) {
         p.advance();
         let is_array_table = p.eat(TokenKind::LBracket) && p.eat(TokenKind::RBracket);
         let path = if p.peek_kind() == TokenKind::String { p.advance().lexeme } else { p.line_rest_raw_until_colon() };
@@ -208,7 +208,7 @@ fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool) -> Result<Da
         if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
         return Ok(DataStep::EnterChildren(DataOwner::Table { path, is_array_table, tr }, Vec::new()));
     }
-    if p.peek().lexeme == "dtd" && !matches!(p.peek_n(1).kind, TokenKind::Colon) {
+    if p.peek_kind() != TokenKind::String && p.peek().lexeme == "dtd" && !matches!(p.peek_n(1).kind, TokenKind::Colon | TokenKind::Equal) {
         p.advance();
         let kind = p.expect_ident_or_kw("Expected dtd kind")?.lexeme;
         let name = p.expect_ident_or_kw("Expected dtd name")?.lexeme;
@@ -217,7 +217,7 @@ fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool) -> Result<Da
         if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
         return Ok(DataStep::Done(DataNode::DtdDecl { kind, name, spec, trivia: tr }));
     }
-    if p.peek().lexeme == "xml" && !matches!(p.peek_n(1).kind, TokenKind::Colon) {
+    if p.peek_kind() != TokenKind::String && p.peek().lexeme == "xml" && !matches!(p.peek_n(1).kind, TokenKind::Colon | TokenKind::Equal) {
         p.advance();
         return wrap_xml(parse_xml_elem(p, tr));
     }
@@ -231,8 +231,8 @@ fn step_data_node(p: &mut Parser<'_>, mut tr: Trivia, is_xml: bool) -> Result<Da
         }
         None
     } else {
-        let k = if p.peek_kind() == TokenKind::String { p.advance().lexeme } else { p.line_rest_raw_until_colon() };
-        p.expect(TokenKind::Colon, "Expected ':'")?;
+        let k = parse_xml_attr_key(p)?;
+        if !p.eat(TokenKind::Colon) { p.expect(TokenKind::Equal, "Expected ':' or '='")?; }
         Some(k)
     };
     if matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment) {

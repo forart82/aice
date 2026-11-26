@@ -222,6 +222,6 @@ fn w3_m5_sql_cte_slice_projects_aice_ir() {
     let txt = stdout_str(&out);
     assert!(txt.contains("module sql"), "expected module sql:\n{txt}");
     assert!(txt.contains("query \"sql\" \"select\":"), "expected query header:\n{txt}");
-    assert!(txt.contains("with \"active_cls\":"), "expected CTE AICE IR:\n{txt}");
+    assert!(txt.contains("with \"active_cls\"|"), "expected CTE AICE IR:\n{txt}");
     assert!(!txt.contains("// aice L"), "unexpected raw SQL fallback:\n{txt}");
 }

@@ -40,12 +40,12 @@ fn render_compact_doc_blocks(out: &mut String, blocks: &[DocBlock], prev_was_par
                 *prev_was_para = false;
                 if !out.is_empty() { out.push('\n'); }
                 if let Some(chk) = checked {
-                    out.push_str(if *chk { "- [x] " } else { "- [ ] " });
+                    out.push_str(if *chk { "[x] " } else { "[ ] " });
                 } else if *ordered {
                     out.push_str(&format!("{ord_idx}. "));
                     ord_idx += 1;
                 } else {
-                    out.push_str("- ");
+                    out.push_str("li: ");
                 }
                 out.push_str(text);
             }
@@ -67,8 +67,8 @@ fn render_compact_doc_blocks(out: &mut String, blocks: &[DocBlock], prev_was_par
             DocBlock::Table { headers, rows } => {
                 *prev_was_para = false;
                 if !out.is_empty() { out.push('\n'); }
-                out.push_str(&format!("| {} |", headers.join(" | ")));
-                for r in rows { out.push_str(&format!("\n| {} |", r.join(" | "))); }
+                out.push_str(&format!("|{}|", headers.join("|")));
+                for r in rows { out.push_str(&format!("\n|{}|", r.join("|"))); }
                 ord_idx = 1;
             }
         }
@@ -83,10 +83,8 @@ fn render_compact_doc_body(root: &DocSection) -> String {
     while let Some(sec) = stack.pop() {
         if !sec.heading.is_empty() {
             if !out.is_empty() { out.push('\n'); }
-            let lvl = sec.level.clamp(1, 6) as usize;
-            out.push_str(&"######"[..lvl]);
-            out.push(' ');
-            out.push_str(&sec.heading);
+            let lvl = sec.level.clamp(1, 6);
+            out.push_str(&format!("h{lvl}: {}", sec.heading));
             prev_was_para = false;
         }
         render_compact_doc_blocks(&mut out, &sec.blocks, &mut prev_was_para);
@@ -140,14 +138,11 @@ pub(crate) fn print_sh(c: &mut PrintCtx<'_>, sh: &ShellDecl, d: usize) {
         }
         ShellDecl::Fn { name, body_lines, trivia } => {
             c.emit_trivia(trivia, d);
-            let joined = body_lines.join("\n");
-            if trivia.trailing.is_none() && body_lines.len() >= 2 && !joined.contains("\"\"\"") {
-                c.line(d, &format!("sh fn {name}: \"\"\"\n{joined}\n\"\"\""));
-                return;
-            }
             c.line_tr(d, &format!("sh fn {name}:"), trivia);
             for l in body_lines {
-                if !l.contains('\n') { c.line(d + 1, &format!("| {l}")); }
+                if !l.contains('\n') {
+                    if l.is_empty() { c.line(d + 1, "|"); } else { c.line(d + 1, &format!("| {l}")); }
+                }
                 else { c.line(d + 1, &format!("\"{}\"", escape_str(l))); }
             }
         }
