@@ -90,6 +90,12 @@ pub fn parse_search_args(args: &[String]) -> Result<SearchOp, CliParseError> {
         ));
     };
 
+    if pattern.is_empty() {
+        return Err(CliParseError::Message(
+            "search pattern cannot be empty".to_string(),
+        ));
+    }
+
     Ok(SearchOp {
         pattern,
         targets,

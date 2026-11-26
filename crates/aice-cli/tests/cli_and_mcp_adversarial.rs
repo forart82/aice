@@ -608,3 +608,73 @@ fn wave3_f38_f39_f46_f49_dup_content_length_schema_mcp_dedup_and_error_only_gain
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn wave4_cli_f40_f41_f54_f55_f42_end_to_end_ux_and_stderr_newlines() {
+    use std::process::{Command, Stdio};
+
+    let bin = env!("CARGO_BIN_EXE_aice");
+    let dir = temp_dir("w4_cli_ux");
+    let home = dir.join("home");
+    std::fs::create_dir_all(dir.join("src")).unwrap();
+    std::fs::write(dir.join("aice.config.json"), "{\"enabled\":true}\n").unwrap();
+    std::fs::write(dir.join("src/app.ts"), "export let count = 0;\nexport const MAX = 5;\n").unwrap();
+    std::fs::write(dir.join("deploy.yaml"), "apiVersion: v1\nkind: Service\n").unwrap();
+
+    let run = |args: &[&str]| {
+        Command::new(bin)
+            .args(args)
+            .current_dir(&dir)
+            .env("HOME", &home)
+            .env("AICE_HOME", &home)
+            .env_remove("AICE_TELEMETRY_PATH")
+            .env_remove("AICE_TELEMETRY_ERRORS_PATH")
+            .env_remove("AICE_TELEMETRY_SUPPRESS")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .output()
+            .unwrap()
+    };
+
+    // F-40: empty search pattern, invalid regexes, missing target dir -> rc=1 + trailing `\n`
+    for args in [
+        &["search", ""][..],
+        &["search", "/[unclosed/"][..],
+        &["search", "/unclosed["][..],
+        &["search", "count", "missing_dir_123"][..],
+        &["find", "missing_dir_123/"][..],
+    ] {
+        let out = run(args);
+        assert_eq!(out.status.code(), Some(1), "expected rc=1 for {args:?}");
+        let err = String::from_utf8_lossy(&out.stderr);
+        assert!(!err.is_empty() && err.ends_with('\n'), "missing \\n for {args:?}: {err:?}");
+    }
+
+    // F-40: find --help exits 0 and documents real find flags
+    let fh = run(&["find", "--help"]);
+    assert_eq!(fh.status.code(), Some(0));
+    let fh_txt = String::from_utf8_lossy(&fh.stdout);
+    assert!(fh_txt.contains("aice find"), "{fh_txt}");
+    assert!(fh_txt.contains("--depth") && fh_txt.contains("--search") && fh_txt.contains("--json"), "{fh_txt}");
+
+    // F-41: CLI read stderr always ends with `\n`
+    let bad_sym = run(&["read", "src/app.ts:NoSuchSymXYZ"]);
+    assert_eq!(bad_sym.status.code(), Some(1));
+    let bad_err = String::from_utf8_lossy(&bad_sym.stderr);
+    assert!(!bad_err.is_empty() && bad_err.ends_with('\n'), "missing \\n: {bad_err:?}");
+
+    // F-55: CLI search '^' matches YAML lines
+    let anchor = run(&["search", "^", "deploy.yaml"]);
+    assert_eq!(anchor.status.code(), Some(0));
+    let anchor_out = String::from_utf8_lossy(&anchor.stdout);
+    assert!(anchor_out.contains("apiVersion") && anchor_out.contains("Service"), "{anchor_out}");
+
+    // F-42: CLI read --outline tags `let` vs `const`
+    let outline = run(&["read", "--outline", "src/app.ts"]);
+    assert_eq!(outline.status.code(), Some(0));
+    let ol_out = String::from_utf8_lossy(&outline.stdout);
+    assert!(ol_out.contains("let count # [L1-L1]"), "{ol_out}");
+    assert!(ol_out.contains("const MAX # [L2-L2]"), "{ol_out}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

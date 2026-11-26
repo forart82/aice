@@ -188,6 +188,19 @@ pub fn has_redos_risk(pat: &str) -> bool {
     false
 }
 
+fn has_anchor_node(node: &RegexNode) -> bool {
+    match node {
+        RegexNode::AnchorStart
+        | RegexNode::AnchorEnd
+        | RegexNode::WordBoundary
+        | RegexNode::NonWordBoundary => true,
+        RegexNode::Seq(items) => items.iter().any(has_anchor_node),
+        RegexNode::Alt(branches) => branches.iter().any(has_anchor_node),
+        RegexNode::Repeat { node, .. } => has_anchor_node(node),
+        RegexNode::Atom(_) => false,
+    }
+}
+
 pub fn compile_search_pattern(raw: &str, case_insensitive: bool) -> CompiledPattern {
     let normalized = normalize_bre(raw);
     if has_redos_risk(&normalized) {
@@ -195,6 +208,7 @@ pub fn compile_search_pattern(raw: &str, case_insensitive: bool) -> CompiledPatt
     }
     match parse_regex(&normalized) {
         Ok(ast) => {
+            let anchored = has_anchor_node(&ast);
             let compiled = CompiledPattern {
                 raw: raw.to_string(),
                 case_insensitive,
@@ -202,7 +216,7 @@ pub fn compile_search_pattern(raw: &str, case_insensitive: bool) -> CompiledPatt
                 is_literal: false,
                 ast: Some(ast),
             };
-            if !raw.is_empty() && compiled.find_in_line("").is_some() {
+            if !raw.is_empty() && !anchored && compiled.find_in_line("").is_some() {
                 CompiledPattern::literal(raw, case_insensitive, false)
             } else {
                 compiled
@@ -214,6 +228,9 @@ pub fn compile_search_pattern(raw: &str, case_insensitive: bool) -> CompiledPatt
 
 pub fn compile_slash_regex(raw: &str) -> Result<CompiledPattern, String> {
     let (body, ci, ml) = parse_slash_regex(raw)?;
+    if body.is_empty() {
+        return Err("Empty regex pattern".to_string());
+    }
     if has_redos_risk(&body) {
         return Ok(CompiledPattern::literal(&body, ci, ml));
     }
@@ -225,7 +242,7 @@ pub fn compile_slash_regex(raw: &str) -> Result<CompiledPattern, String> {
             is_literal: false,
             ast: Some(ast),
         }),
-        Err(()) => Ok(CompiledPattern::literal(&body, ci, ml)),
+        Err(()) => Err(format!("Malformed regex '/{body}/'")),
     }
 }
 

@@ -9,6 +9,7 @@ use crate::discovery_format::{
 use crate::gitignore::{filter_walk_output, to_rel_posix};
 use crate::glob::glob_matches;
 use crate::regex_compile::compile_slash_regex;
+use crate::search_validate::{error_pack_with_mode, validate_explicit_targets};
 
 pub fn walk_to_entries(
     governed: &Governed,
@@ -153,6 +154,9 @@ pub fn format_find_pack(governed: &Governed, walk: WalkOutput, op: &FindOp) -> B
         query_opt.clone(),
     )
     .unwrap_or_else(|| (walk, op.targets.clone()));
+    if let Err(msg) = validate_explicit_targets(governed, &eff_targets) {
+        return error_pack_with_mode("<workspace-files>", msg, false, true);
+    }
     let query = query_opt.as_deref().filter(|s| !s.trim().is_empty());
     finish_discovery_pack(governed, eff_walk, query, &eff_targets, op.depth, op.max_tokens, op.json)
 }
@@ -167,6 +171,9 @@ pub fn execute_files_only(governed: &Governed, op: &ReadOp) -> Result<BatchReadP
     ) {
         pair
     } else {
+        if let Err(msg) = validate_explicit_targets(governed, &op.targets) {
+            return Ok(error_pack_with_mode("<workspace-files>", msg, false, true));
+        }
         let opts = FindWalkOpts {
             max_depth: op.depth,
             include_hidden: op.full,

@@ -4,8 +4,9 @@ use aice_governance::escape_json_str;
 use aice_lang_registry::LanguageId;
 
 use crate::budget::{count_cl100k_exact, truncate_to_token_budget};
+use crate::regex_compile::CompiledPattern;
 use crate::search::SearchParams;
-use crate::search_aice::render_search_hit_aice;
+use crate::search_aice::render_search_hit_aice_with_pattern;
 use crate::search_rank::SearchHit;
 
 pub(crate) struct SearchBundleOutcome {
@@ -19,6 +20,7 @@ pub(crate) fn build_budgeted_bundle(
     registry: &EngineRegistry,
     transpiler: &DefaultAiceTranspiler,
     params: &SearchParams<'_>,
+    compiled: &CompiledPattern,
     max_tokens: usize,
 ) -> SearchBundleOutcome {
     if hits.is_empty() {
@@ -40,13 +42,14 @@ pub(crate) fn build_budgeted_bundle(
     let mut included_indices = Vec::new();
     let max_files = if params.full { hits.len() } else { hits.len().min(20) };
     for (idx, (hit, src)) in hits.iter().zip(sources.iter()).take(max_files).enumerate() {
-        let chunk = render_search_hit_aice(
+        let chunk = render_search_hit_aice_with_pattern(
             hit,
             src,
             registry,
             transpiler,
             params.line_numbers,
             params.full,
+            Some(compiled),
         );
         if idx > 0 && count_cl100k_exact(&format!("{bundle}{chunk}")) > max_tokens {
             let rem = hits.len().saturating_sub(idx);

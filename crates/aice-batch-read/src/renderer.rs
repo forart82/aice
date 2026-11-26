@@ -182,7 +182,7 @@ pub fn render_pack(
     let stderr_output = if errors.is_empty() {
         String::new()
     } else {
-        errors.join("\n")
+        format!("{}\n", errors.join("\n"))
     };
 
     BatchReadPack {
@@ -250,7 +250,10 @@ fn expand_directory_targets(
     out
 }
 
-fn error_pack(file_label: String, stderr: String, wasted: Option<usize>) -> BatchReadPack {
+fn error_pack(file_label: String, mut stderr: String, wasted: Option<usize>) -> BatchReadPack {
+    if !stderr.is_empty() && !stderr.ends_with('\n') {
+        stderr.push('\n');
+    }
     BatchReadPack {
         raw_baseline: String::new(),
         emitted_output: String::new(),

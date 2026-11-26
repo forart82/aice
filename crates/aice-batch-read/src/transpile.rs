@@ -16,7 +16,7 @@ use crate::aice_project_util::{
 };
 pub use crate::intra_transpile::transpile_intra_block_aice;
 use crate::transpile_helpers::{
-    dedent_block, extract_raw_imports_for_rn, extract_ts_reexport_outline,
+    dedent_block, extract_raw_imports_for_rn, extract_ts_reexport_outline, js_ts_const_tag,
     normalize_fragment_comments, try_clean_aice,
 };
 
@@ -179,8 +179,14 @@ pub fn render_outline_aice_with_src(
         out.push_str(&format!("// (no AST symbols in {rel_path})\n"));
         return out;
     }
+    let src_lines: Vec<&str> = src.lines().collect();
     for e in &outline.entries {
-        let tag = outline_kind_tag(e.kind);
+        let tag = if e.kind == SymbolKind::Constant {
+            let line = src_lines.get(e.start_line.saturating_sub(1)).copied();
+            js_ts_const_tag(lang, e.signature.as_deref(), line)
+        } else {
+            outline_kind_tag(e.kind)
+        };
         let sig = e
             .signature
             .as_deref()

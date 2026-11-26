@@ -11,6 +11,11 @@ use crate::aice_project_util::{
     balance_closers_for_lang, compute_line_starts, contains_ident, normalize_comment_block,
     slice_lines_range, strip_comment_prefix,
 };
+use crate::regex_compile::CompiledPattern;
+use crate::search_aice_check::{
+    collect_multiline_literal_spans, is_type_header_aice, looks_like_type_header,
+    preserves_matched_lines, window_cuts_matched_multiline_literal,
+};
 use crate::search_rank::SearchHit;
 use crate::transpile_helpers::{dedent_block, try_clean_aice};
 
@@ -18,6 +23,7 @@ struct FullAiceCtx {
     module: AiceModule,
     syms: Vec<SymbolNode>,
     starts: Vec<usize>,
+    multiline_literals: Vec<(usize, usize)>,
 }
 
 pub fn render_search_hit_aice(
@@ -25,8 +31,20 @@ pub fn render_search_hit_aice(
     src: &str,
     registry: &EngineRegistry,
     transpiler: &DefaultAiceTranspiler,
+    line_numbers: bool,
+    full_mode: bool,
+) -> String {
+    render_search_hit_aice_with_pattern(hit, src, registry, transpiler, line_numbers, full_mode, None)
+}
+
+pub(crate) fn render_search_hit_aice_with_pattern(
+    hit: &SearchHit,
+    src: &str,
+    registry: &EngineRegistry,
+    transpiler: &DefaultAiceTranspiler,
     _line_numbers: bool,
     full_mode: bool,
+    compiled: Option<&CompiledPattern>,
 ) -> String {
     let lines: Vec<&str> = src.lines().collect();
     let mut out = format!("{}:\n", hit.rel_path);
@@ -66,7 +84,9 @@ pub fn render_search_hit_aice(
             && let Some(ctx) = &full_ctx
         {
             let printed = clean_search_aice(&print_aice_with_opts(&ctx.module, &opts), src, false);
-            if !printed.is_empty() {
+            if !printed.is_empty()
+                && preserves_matched_lines(hit, &lines, s, e, &printed, compiled)
+            {
                 push_window_aice(&mut out, s, e, &printed);
                 continue;
             }
@@ -76,6 +96,14 @@ pub fn render_search_hit_aice(
             .as_ref()
             .map(|c| slice_lines_range(src, &c.starts, s, e).to_string())
             .unwrap_or_else(|| lines[(s - 1)..e].join("\n"));
+
+        let cuts_lit = full_ctx.as_ref().is_some_and(|c| {
+            window_cuts_matched_multiline_literal(hit, &c.multiline_literals, s, e)
+        });
+        if cuts_lit {
+            emit_fallback_lines(&mut out, &lines, s, e, false);
+            continue;
+        }
 
         if normalize_comment_block(&win_src).is_some() {
             emit_comment_window(&mut out, &lines, s, e);
@@ -95,7 +123,9 @@ pub fn render_search_hit_aice(
             )
         {
             let printed = clean_search_aice(&print_aice_with_opts(&sub, &opts), &win_src, s == e);
-            if is_faithful_search_aice(&win_src, &printed, s == e, raw_lines) {
+            if is_faithful_search_aice(&win_src, &printed, s == e, raw_lines)
+                && preserves_matched_lines(hit, &lines, s, e, &printed, compiled)
+            {
                 push_window_aice(&mut out, s, e, &printed);
                 continue;
             }
@@ -108,14 +138,16 @@ pub fn render_search_hit_aice(
                 && aice.trim() != balanced.trim()
             {
                 let cleaned = clean_search_aice(&aice, &win_src, s == e);
-                if is_faithful_search_aice(&win_src, &cleaned, s == e, raw_lines) {
+                if is_faithful_search_aice(&win_src, &cleaned, s == e, raw_lines)
+                    && preserves_matched_lines(hit, &lines, s, e, &cleaned, compiled)
+                {
                     push_window_aice(&mut out, s, e, &cleaned);
                     continue;
                 }
             }
         }
 
-        emit_fallback_lines(&mut out, &lines, s, e);
+        emit_fallback_lines(&mut out, &lines, s, e, true);
     }
     out
 }
@@ -136,7 +168,13 @@ fn emit_comment_window(out: &mut String, lines: &[&str], s: usize, e: usize) {
     }
 }
 
-fn emit_fallback_lines(out: &mut String, lines: &[&str], s: usize, e: usize) {
+fn emit_fallback_lines(
+    out: &mut String,
+    lines: &[&str],
+    s: usize,
+    e: usize,
+    rewrite_comments: bool,
+) {
     let slice = &lines[(s - 1)..e.min(lines.len())];
     let min_indent = slice
         .iter()
@@ -147,7 +185,7 @@ fn emit_fallback_lines(out: &mut String, lines: &[&str], s: usize, e: usize) {
     for (idx, &text) in slice.iter().enumerate() {
         let orig_ln = s + idx;
         let ded = if text.trim().is_empty() { "" } else { &text[min_indent.min(text.len())..] };
-        if let Some(clean) = strip_comment_prefix(ded.trim()) {
+        if rewrite_comments && let Some(clean) = strip_comment_prefix(ded.trim()) {
             let indent = &ded[..ded.len() - ded.trim_start().len()];
             out.push_str(&format!("  L{orig_ln}: {indent}# {clean}\n"));
         } else {
@@ -221,27 +259,6 @@ fn is_faithful_search_aice(
     preserves_call_args_text(win_src, ct)
 }
 
-fn looks_like_type_header(win_src: &str) -> bool {
-    let t = win_src.trim();
-    [
-        "class ", "struct ", "impl ", "interface ", "trait ", "enum ", "type ", "model ",
-        "record ", "object ", "protocol ", "extension ",
-    ]
-    .iter()
-    .any(|kw| t.contains(kw))
-}
-
-fn is_type_header_aice(line: &str) -> bool {
-    let t = line.trim();
-    t.ends_with(':')
-        && [
-            "class ", "pub class ", "struct ", "pub struct ", "type ", "pub type ",
-            "interface ", "pub interface ",
-        ]
-        .iter()
-        .any(|p| t.starts_with(p))
-}
-
 fn push_window_aice(out: &mut String, s: usize, e: usize, cleaned: &str) {
     let lines: Vec<&str> = cleaned.lines().collect();
     if lines.is_empty() {
@@ -273,9 +290,10 @@ fn parse_full_ctx(
     let tree = adapter.parse_cst(src).ok()?;
     let syms = adapter.extract_symbols(&tree, src);
     let starts = compute_line_starts(src);
+    let multiline_literals = collect_multiline_literal_spans(&tree);
     match transpiler.to_aice(&tree, src, opts).ok()? {
         TranspileOutcome::Transpiled(module) if !module.items.is_empty() => {
-            Some(FullAiceCtx { module, syms, starts })
+            Some(FullAiceCtx { module, syms, starts, multiline_literals })
         }
         _ => None,
     }

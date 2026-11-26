@@ -241,3 +241,26 @@ pub(crate) fn extract_raw_imports_for_rn(src: &str, imports: &[AiceItem]) -> Opt
         .collect();
     (!lines.is_empty()).then(|| format!("{}\n", lines.join("\n")))
 }
+
+pub(crate) fn js_ts_const_tag(lang: LanguageId, sig: Option<&str>, line: Option<&str>) -> &'static str {
+    if !matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) {
+        return "const";
+    }
+    let Some(raw) = sig.or(line) else {
+        return "const";
+    };
+    let mut rest = raw.trim_start();
+    while let Some(after) = rest
+        .strip_prefix("export ")
+        .or_else(|| rest.strip_prefix("declare "))
+    {
+        rest = after.trim_start();
+    }
+    if rest.strip_prefix("let").is_some_and(|r| r.starts_with(char::is_whitespace)) {
+        "let"
+    } else if rest.strip_prefix("var").is_some_and(|r| r.starts_with(char::is_whitespace)) {
+        "var"
+    } else {
+        "const"
+    }
+}

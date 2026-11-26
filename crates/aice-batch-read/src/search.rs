@@ -9,10 +9,10 @@ use aice_lang_registry::{AdapterLookup, LanguageId, detect_language};
 
 use crate::budget::effective_token_budget;
 use crate::gitignore::{filter_walk_output, to_rel_posix};
-use crate::regex_compile::{compile_search_pattern, compile_slash_regex};
 use crate::render_json::{append_stats_footer_within_budget, resolve_stats_fill_budget};
 use crate::search_json::{budget_files_with_matches, build_budgeted_bundle, format_search_json};
 use crate::search_rank::{SearchHit, build_rg_baseline, build_windows, score_file_matches};
+use crate::search_validate::{compile_search_query, error_pack_with_mode, validate_explicit_targets};
 use crate::{BatchReadPack, verify_authorized_targets};
 
 pub struct SearchParams<'a> {
@@ -68,6 +68,13 @@ pub fn execute_read_search(governed: &Governed, op: &ReadOp) -> Result<BatchRead
 }
 
 fn run_search_core(governed: &Governed, params: &SearchParams<'_>) -> BatchReadPack {
+    let validated = match compile_search_query(params.pattern) {
+        Ok(v) => v,
+        Err(msg) => return error_pack_with_mode("<directory>", msg, true, false),
+    };
+    if let Err(msg) = validate_explicit_targets(governed, params.targets) {
+        return error_pack_with_mode("<directory>", msg, true, false);
+    }
     let walk_opts = FindWalkOpts {
         include_hidden: params.full,
         include_binary: false,
@@ -78,33 +85,13 @@ fn run_search_core(governed: &Governed, params: &SearchParams<'_>) -> BatchReadP
     };
     let mut walk = match walk_governed_with_opts(governed, &walk_opts) {
         Ok(w) => w,
-        Err(e) => {
-            return BatchReadPack {
-                raw_baseline: String::new(),
-                emitted_output: String::new(),
-                file_label: "<directory>".to_string(),
-                stderr_output: e.to_string(),
-                exit_code: 1,
-                realistic_native_payload: None,
-                multi_files: Vec::new(),
-                language: Some("Multi".to_string()),
-                is_search_mode: true,
-                is_files_mode: false,
-                has_expanded_context: true,
-                preserved_trivia_tokens: 0,
-                wasted_input_tokens: None,
-            };
-        }
+        Err(e) => return error_pack_with_mode("<directory>", e.to_string(), true, false),
     };
     filter_walk_output(governed, &mut walk, params.targets);
 
     let root = governed.project_root();
-    let compiled = if params.pattern.starts_with('/') && params.pattern[1..].contains('/') {
-        compile_slash_regex(params.pattern)
-            .unwrap_or_else(|_| compile_search_pattern(params.pattern, false))
-    } else {
-        compile_search_pattern(params.pattern, false)
-    };
+    let compiled = validated.compiled;
+    let stderr_output = validated.hint;
     let ctx = params.context_lines.unwrap_or(0);
     let registry = EngineRegistry::new();
     let transpiler = DefaultAiceTranspiler;
@@ -160,14 +147,6 @@ fn run_search_core(governed: &Governed, params: &SearchParams<'_>) -> BatchReadP
     let hits: Vec<SearchHit> = candidate_hits.iter().map(|(h, _)| h.clone()).collect();
     let sources: Vec<String> = candidate_hits.iter().map(|(_, s)| s.clone()).collect();
 
-    let mut stderr_output = String::new();
-    if params.pattern.starts_with('/') && !params.pattern[1..].contains('/') {
-        stderr_output = format!(
-            "Hint: unclosed '/' in search pattern '{}'; treated as literal.\n",
-            params.pattern
-        );
-    }
-
     let max_tokens = effective_token_budget(governed.surface(), params.max_tokens);
     let est_chars: usize = sources.iter().map(|s| s.chars().count()).sum();
     let (fill_budget, reserved_stats) = resolve_stats_fill_budget(
@@ -203,9 +182,13 @@ fn run_search_core(governed: &Governed, params: &SearchParams<'_>) -> BatchReadP
             .sum();
         (out, kept, baseline, inc_chars)
     } else {
-        let mut bo = build_budgeted_bundle(&hits, &sources, &registry, &transpiler, params, fill_budget);
+        let mut bo = build_budgeted_bundle(
+            &hits, &sources, &registry, &transpiler, params, &compiled, fill_budget,
+        );
         if reserved_stats && bo.included_indices.is_empty() {
-            bo = build_budgeted_bundle(&hits, &sources, &registry, &transpiler, params, max_tokens);
+            bo = build_budgeted_bundle(
+                &hits, &sources, &registry, &transpiler, params, &compiled, max_tokens,
+            );
         }
         let inc_hits: Vec<SearchHit> = bo.included_indices.iter().map(|&i| hits[i].clone()).collect();
         let inc_srcs: Vec<String> = bo.included_indices.iter().map(|&i| sources[i].clone()).collect();
