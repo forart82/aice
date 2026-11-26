@@ -1,18 +1,16 @@
 use aice_aice_ir::{AiceTranspiler, TranspileOutcome};
 use aice_aice_ir::ir::{AiceItem, AiceModule, Span, TranspileOpts, Trivia};
 use aice_aice_ir::ir_code::ClassDecl;
-use aice_aice_ir::ir_domain_db::{DbQueryDecl, DbSchemaDecl};
 use aice_ast_engine::EngineRegistry;
-use aice_lang_registry::{AdapterLookup, LanguageId, SymbolKind, SymbolNode};
+use aice_lang_registry::{AdapterLookup, LanguageId, SymbolNode};
 
 use crate::aice_project_domain::{project_db_migration, project_doc_section, project_shell_item};
 use crate::aice_project_slice::{
     MidSliceResult, project_fn_head, slice_fn_mid, slice_method_mid, trim_method_tail,
 };
-use crate::aice_project_sql::strip_sql_ident_quotes;
+use crate::aice_project_sql::{project_db_query, project_db_schema};
 use crate::aice_project_util::{
-    contains_ident, find_sym_span, find_text_span, item_line_range, parse_balanced_module,
-    slice_lines_range, span_lines,
+    contains_ident, item_line_range, parse_balanced_module, slice_lines_range, span_lines,
 };
 
 pub struct ProjectWindowArgs<'a> {
@@ -76,12 +74,12 @@ pub(crate) fn project_module_window_opts(
                     items.push(AiceItem::Class(c));
                 }
             }
-            AiceItem::Fn(fd) if is >= args.start_line => {
-                if let Some(f) = project_fn_head(fd, is, args) {
-                    items.push(AiceItem::Fn(f));
-                }
-            }
-            AiceItem::Fn(fd) if slice_mid_body => match slice_fn_mid(fd, ie, args) {
+            AiceItem::Fn(fd) if is >= args.start_line => match project_fn_head(fd, is, args) {
+                MidSliceResult::Sliced(f) => items.push(AiceItem::Fn(f)),
+                MidSliceResult::Trivial => {}
+                MidSliceResult::Unrepresentable => unrepresentable_mid = true,
+            },
+            AiceItem::Fn(fd) if slice_mid_body => match slice_fn_mid(fd, is, ie, args) {
                 MidSliceResult::Sliced(f) => items.push(AiceItem::Fn(f)),
                 MidSliceResult::Trivial => {}
                 MidSliceResult::Unrepresentable => unrepresentable_mid = true,
@@ -205,9 +203,13 @@ fn project_class(
         if hint_hit || (ms >= args.start_line && me <= args.end_line) {
             kept_methods.push(m.clone());
         } else if ms >= args.start_line && ms <= args.end_line {
-            kept_methods.push(trim_method_tail(m, ms, args));
+            match trim_method_tail(m, ms, args) {
+                MidSliceResult::Sliced(tm) => kept_methods.push(tm),
+                MidSliceResult::Trivial => {}
+                MidSliceResult::Unrepresentable => *unrepresentable_mid = true,
+            }
         } else if slice_mid_body && ms < args.start_line && me >= args.start_line {
-            match slice_method_mid(m, me, args) {
+            match slice_method_mid(m, ms, me, args) {
                 MidSliceResult::Sliced(sm) => kept_methods.push(sm),
                 MidSliceResult::Trivial => {}
                 MidSliceResult::Unrepresentable => *unrepresentable_mid = true,
@@ -222,76 +224,4 @@ fn project_class(
         return None;
     }
     Some(trimmed)
-}
-
-fn project_db_schema(ds: &DbSchemaDecl, win_src: &str) -> DbSchemaDecl {
-    match ds {
-        DbSchemaDecl::Table { name, if_not_exists, columns, constraints, options, trivia } => {
-            DbSchemaDecl::Table {
-                name: name.clone(),
-                if_not_exists: *if_not_exists,
-                columns: columns
-                    .iter()
-                    .filter(|c| {
-                        contains_ident(win_src, &c.name, false)
-                            || contains_ident(win_src, &strip_sql_ident_quotes(&c.name), false)
-                    })
-                    .cloned()
-                    .collect(),
-                constraints: constraints.iter().filter(|c| win_src.contains(c.as_str())).cloned().collect(),
-                options: options.iter().filter(|o| win_src.contains(o.as_str())).cloned().collect(),
-                trivia: trivia.clone(),
-            }
-        }
-        DbSchemaDecl::PrismaBlock { kind, name, fields, attrs, trivia } => DbSchemaDecl::PrismaBlock {
-            kind: kind.clone(),
-            name: name.clone(),
-            fields: fields.iter().filter(|f| contains_ident(win_src, &f.name, false)).cloned().collect(),
-            attrs: attrs.iter().filter(|a| win_src.contains(a.as_str())).cloned().collect(),
-            trivia: trivia.clone(),
-        },
-        DbSchemaDecl::GraphQlType { kind, name, implements, directives, fields, trivia } => {
-            DbSchemaDecl::GraphQlType {
-                kind: kind.clone(),
-                name: name.clone(),
-                implements: implements.clone(),
-                directives: directives.clone(),
-                fields: fields.iter().filter(|f| contains_ident(win_src, &f.name, false)).cloned().collect(),
-                trivia: trivia.clone(),
-            }
-        }
-        other => other.clone(),
-    }
-}
-
-fn project_db_query(
-    dq: &DbQueryDecl,
-    is: usize,
-    win_src: &str,
-    short_hint: Option<&str>,
-    args: &ProjectWindowArgs<'_>,
-) -> Option<DbQueryDecl> {
-    let mut q = dq.clone();
-    if !dq.ctes.is_empty() {
-        q.ctes.retain(|(cname, body)| {
-            short_hint.is_some_and(|h| h == cname)
-                || find_sym_span(cname, args.syms)
-                    .or_else(|| find_text_span(args.full_src, body))
-                    .is_some_and(|(s, e)| e >= args.start_line && s <= args.end_line)
-                || contains_ident(win_src, cname, false)
-        });
-        q.clauses.retain(|(_, v)| {
-            find_text_span(args.full_src, v)
-                .is_some_and(|(s, e)| e >= args.start_line && s <= args.end_line)
-        });
-        return (!q.ctes.is_empty() || !q.clauses.is_empty()).then_some(q);
-    }
-    let cte_hit = short_hint.and_then(|h| {
-        args.syms.iter().find(|s| s.kind == SymbolKind::Query && s.name == h)
-    });
-    if cte_hit.is_some() && !win_src.trim().is_empty() {
-        q.clauses = vec![("sql".into(), win_src.trim().to_string())];
-        return Some(q);
-    }
-    (is >= args.start_line || !win_src.trim().is_empty()).then_some(q)
 }

@@ -102,6 +102,8 @@ pub(crate) fn brace_net_depth(lang: LanguageId, s: &str) -> isize {
             lc = true; i += 2;
         } else if b[i] == b'/' && b.get(i + 1) == Some(&b'*') {
             bc = true; i += 2;
+        } else if crate::aice_project_mid::is_hash_comment_lang(lang) && b[i] == b'#' {
+            lc = true; i += 1;
         } else if lang == LanguageId::Rust && let Some(next_i) = skip_rust_raw_string(b, i) {
             i = next_i;
         } else if lang == LanguageId::Rust && b[i] == b'\'' {

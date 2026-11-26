@@ -1,5 +1,6 @@
 pub mod aice_project;
 pub(crate) mod aice_project_domain;
+pub(crate) mod aice_project_mid;
 pub(crate) mod aice_project_slice;
 pub(crate) mod aice_project_sql;
 pub mod aice_project_util;

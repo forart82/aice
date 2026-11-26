@@ -173,7 +173,12 @@ pub fn render_resolved_target(
     if !emitted.ends_with('\n') {
         emitted.push('\n');
     }
-    let realistic_native = if realistic_parts.is_empty() {
+    let has_full_or_outline = target
+        .spec
+        .selectors
+        .iter()
+        .any(|s| matches!(s, TargetSelector::Full | TargetSelector::Outline));
+    let realistic_native = if realistic_parts.is_empty() || has_full_or_outline {
         None
     } else {
         Some(realistic_parts.join("\n"))

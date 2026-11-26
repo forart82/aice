@@ -1,7 +1,8 @@
 use aice_aice_ir::ir_domain_db::{DbQueryDecl, DbSchemaDecl};
 use aice_lang_registry::{SymbolKind, SymbolNode};
 
-use crate::aice_project_util::{find_sym_span, find_text_span};
+use crate::aice_project::ProjectWindowArgs;
+use crate::aice_project_util::{contains_ident, find_sym_span, find_text_span};
 
 pub(crate) fn strip_sql_ident_quotes(name: &str) -> String {
     name.split('.')
@@ -196,4 +197,76 @@ fn scan_sql_stmt_end(lines: &[&str], start_idx: usize) -> usize {
         }
     }
     lines.len().saturating_sub(1)
+}
+
+pub(crate) fn project_db_schema(ds: &DbSchemaDecl, win_src: &str) -> DbSchemaDecl {
+    match ds {
+        DbSchemaDecl::Table { name, if_not_exists, columns, constraints, options, trivia } => {
+            DbSchemaDecl::Table {
+                name: name.clone(),
+                if_not_exists: *if_not_exists,
+                columns: columns
+                    .iter()
+                    .filter(|c| {
+                        contains_ident(win_src, &c.name, false)
+                            || contains_ident(win_src, &strip_sql_ident_quotes(&c.name), false)
+                    })
+                    .cloned()
+                    .collect(),
+                constraints: constraints.iter().filter(|c| win_src.contains(c.as_str())).cloned().collect(),
+                options: options.iter().filter(|o| win_src.contains(o.as_str())).cloned().collect(),
+                trivia: trivia.clone(),
+            }
+        }
+        DbSchemaDecl::PrismaBlock { kind, name, fields, attrs, trivia } => DbSchemaDecl::PrismaBlock {
+            kind: kind.clone(),
+            name: name.clone(),
+            fields: fields.iter().filter(|f| contains_ident(win_src, &f.name, false)).cloned().collect(),
+            attrs: attrs.iter().filter(|a| win_src.contains(a.as_str())).cloned().collect(),
+            trivia: trivia.clone(),
+        },
+        DbSchemaDecl::GraphQlType { kind, name, implements, directives, fields, trivia } => {
+            DbSchemaDecl::GraphQlType {
+                kind: kind.clone(),
+                name: name.clone(),
+                implements: implements.clone(),
+                directives: directives.clone(),
+                fields: fields.iter().filter(|f| contains_ident(win_src, &f.name, false)).cloned().collect(),
+                trivia: trivia.clone(),
+            }
+        }
+        other => other.clone(),
+    }
+}
+
+pub(crate) fn project_db_query(
+    dq: &DbQueryDecl,
+    is: usize,
+    win_src: &str,
+    short_hint: Option<&str>,
+    args: &ProjectWindowArgs<'_>,
+) -> Option<DbQueryDecl> {
+    let mut q = dq.clone();
+    if !dq.ctes.is_empty() {
+        q.ctes.retain(|(cname, body)| {
+            short_hint.is_some_and(|h| h == cname)
+                || find_sym_span(cname, args.syms)
+                    .or_else(|| find_text_span(args.full_src, body))
+                    .is_some_and(|(s, e)| e >= args.start_line && s <= args.end_line)
+                || contains_ident(win_src, cname, false)
+        });
+        q.clauses.retain(|(_, v)| {
+            find_text_span(args.full_src, v)
+                .is_some_and(|(s, e)| e >= args.start_line && s <= args.end_line)
+        });
+        return (!q.ctes.is_empty() || !q.clauses.is_empty()).then_some(q);
+    }
+    let cte_hit = short_hint.and_then(|h| {
+        args.syms.iter().find(|s| s.kind == SymbolKind::Query && s.name == h)
+    });
+    if cte_hit.is_some() && !win_src.trim().is_empty() {
+        q.clauses = vec![("sql".into(), win_src.trim().to_string())];
+        return Some(q);
+    }
+    (is >= args.start_line || !win_src.trim().is_empty()).then_some(q)
 }

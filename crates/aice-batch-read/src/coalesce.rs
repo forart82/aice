@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use aice_ast_engine::EngineRegistry;
 use aice_find_engine::SymbolResolution;
 use aice_governance::binary_probe::DEFAULT_MAX_TEXT_FILE_BYTES;
-use aice_lang_registry::{AdapterLookup, SymbolSelector};
+use aice_lang_registry::{AdapterLookup, LanguageId, SymbolSelector, detect_language};
 
 use crate::matcher::{ResolvedTarget, resolve_symbol_fuzzy};
 use crate::selector::TargetSelector;
@@ -104,6 +104,7 @@ fn coalesce_target_selectors(
     let mut line_ranges: Vec<(usize, usize, usize)> = Vec::new();
     let mut kept_other: Vec<(usize, TargetSelector)> = Vec::new();
     let mut seen_outline = false;
+    let mut saw_bare_full = false;
     let mut seen_imports = false;
     let mut seen_regex = HashSet::new();
     let mut seen_inv = HashSet::new();
@@ -150,7 +151,9 @@ fn coalesce_target_selectors(
                     kept_other.push((idx, TargetSelector::IntraBlock(b)));
                 }
             }
-            TargetSelector::Full => {}
+            TargetSelector::Full => {
+                saw_bare_full = true;
+            }
         }
     }
 
@@ -160,7 +163,19 @@ fn coalesce_target_selectors(
         combined.push((first_idx, TargetSelector::LineRange { start, end }));
     }
     combined.sort_by_key(|(idx, _)| *idx);
-    target.spec.selectors = combined.into_iter().map(|(_, s)| s).collect();
+    let mut final_selectors: Vec<TargetSelector> = combined.into_iter().map(|(_, s)| s).collect();
+    if saw_bare_full && !seen_outline && is_outlineable_target(target, registry) {
+        final_selectors.insert(0, TargetSelector::Outline);
+    }
+    target.spec.selectors = final_selectors;
+}
+
+fn is_outlineable_target(target: &ResolvedTarget, registry: &EngineRegistry) -> bool {
+    if target.is_dir || target.is_binary {
+        return false;
+    }
+    let lang = detect_language(&target.canonical, "");
+    lang != LanguageId::PlainText && registry.slicer(lang).is_some()
 }
 
 fn collect_symbol_contained_drops(

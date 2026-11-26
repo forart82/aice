@@ -6,7 +6,7 @@ use aice_ast_engine::EngineRegistry;
 use aice_lang_registry::{AdapterLookup, LanguageId, SymbolNode};
 
 use crate::aice_project::{ProjectWindowArgs, project_module_window_opts};
-use crate::aice_project_slice::has_unclosed_paren_or_bracket;
+use crate::aice_project_mid::{has_unclosed_paren_or_bracket, preserves_call_args_text};
 use crate::aice_project_util::{
     balance_closers_for_lang, compute_line_starts, contains_ident, normalize_comment_block,
     slice_lines_range, strip_comment_prefix,
@@ -45,7 +45,10 @@ pub fn render_search_hit_aice(
         return out;
     }
 
-    let opts = TranspileOpts::default();
+    let opts = TranspileOpts {
+        preserve_docs: false,
+        ..TranspileOpts::default()
+    };
     let full_ctx = parse_full_ctx(hit.lang, src, registry, transpiler, &opts);
     let mut prev_window: Option<(usize, usize)> = None;
 
@@ -78,8 +81,11 @@ pub fn render_search_hit_aice(
             emit_comment_window(&mut out, &lines, s, e);
             continue;
         }
+        let raw_lines = (e - s) + 1;
+        let matched_comment = s < e && window_has_matched_comment(hit, &lines, s, e);
 
-        if let Some(ctx) = &full_ctx
+        if !matched_comment
+            && let Some(ctx) = &full_ctx
             && let Some(sub) = project_module_window_opts(
                 &ProjectWindowArgs {
                     module: &ctx.module, full_src: src, starts: &ctx.starts, syms: &ctx.syms,
@@ -89,20 +95,20 @@ pub fn render_search_hit_aice(
             )
         {
             let printed = clean_search_aice(&print_aice_with_opts(&sub, &opts), &win_src, s == e);
-            if is_faithful_search_aice(&win_src, &printed, s == e) {
+            if is_faithful_search_aice(&win_src, &printed, s == e, raw_lines) {
                 push_window_aice(&mut out, s, e, &printed);
                 continue;
             }
         }
 
         let dedented = dedent_block(&win_src);
-        if !has_unclosed_paren_or_bracket(hit.lang, &dedented) {
+        if !matched_comment && !has_unclosed_paren_or_bracket(hit.lang, &dedented) {
             let balanced = balance_closers_for_lang(hit.lang, &dedented);
             if let Some(aice) = try_clean_aice(hit.lang, &balanced, registry, transpiler, &opts)
                 && aice.trim() != balanced.trim()
             {
                 let cleaned = clean_search_aice(&aice, &win_src, s == e);
-                if is_faithful_search_aice(&win_src, &cleaned, s == e) {
+                if is_faithful_search_aice(&win_src, &cleaned, s == e, raw_lines) {
                     push_window_aice(&mut out, s, e, &cleaned);
                     continue;
                 }
@@ -174,18 +180,45 @@ fn clean_search_aice(printed: &str, win_src: &str, single_line: bool) -> String 
     lines.join("\n")
 }
 
-fn is_faithful_search_aice(win_src: &str, cleaned: &str, single_line: bool) -> bool {
-    if cleaned.trim().is_empty() {
+fn window_has_matched_comment(hit: &SearchHit, lines: &[&str], s: usize, e: usize) -> bool {
+    hit.matched_lines.iter().copied().any(|ln| {
+        ln >= s
+            && ln <= e
+            && lines
+                .get(ln.saturating_sub(1))
+                .is_some_and(|l| strip_comment_prefix(l.trim()).is_some())
+    })
+}
+
+fn is_faithful_search_aice(
+    win_src: &str,
+    cleaned: &str,
+    single_line: bool,
+    raw_lines: usize,
+) -> bool {
+    let ct = cleaned.trim();
+    if ct.is_empty() {
+        return false;
+    }
+    if ct.starts_with("directive ") && !win_src.trim_start().starts_with("directive") {
+        return false;
+    }
+    let line_cap = (raw_lines * 3 / 2) + 3;
+    if ct.lines().count() > line_cap {
+        return false;
+    }
+    let raw_len = win_src.trim().len();
+    if ct.len() > (raw_len * 3 / 2) + 24 {
         return false;
     }
     if single_line
-        && cleaned.lines().count() == 1
-        && is_type_header_aice(cleaned)
+        && ct.lines().count() == 1
+        && is_type_header_aice(ct)
         && !looks_like_type_header(win_src)
     {
         return false;
     }
-    preserves_call_args(win_src, cleaned)
+    preserves_call_args_text(win_src, ct)
 }
 
 fn looks_like_type_header(win_src: &str) -> bool {
@@ -201,31 +234,12 @@ fn looks_like_type_header(win_src: &str) -> bool {
 fn is_type_header_aice(line: &str) -> bool {
     let t = line.trim();
     t.ends_with(':')
-        && ["class ", "pub class ", "struct ", "pub struct ", "type ", "pub type "]
-            .iter()
-            .any(|p| t.starts_with(p))
-}
-
-fn preserves_call_args(raw: &str, aice: &str) -> bool {
-    let bytes = raw.as_bytes();
-    for i in 1..bytes.len() {
-        if bytes[i] != b'(' {
-            continue;
-        }
-        let mut s = i;
-        while s > 0 && (bytes[s - 1].is_ascii_alphanumeric() || bytes[s - 1] == b'_') {
-            s -= 1;
-        }
-        let ident = &raw[s..i];
-        if !ident.is_empty()
-            && !matches!(ident, "if" | "for" | "while" | "match" | "switch")
-            && !raw[i + 1..].trim_start().starts_with(')')
-            && aice.contains(&format!("{ident}()"))
-        {
-            return false;
-        }
-    }
-    true
+        && [
+            "class ", "pub class ", "struct ", "pub struct ", "type ", "pub type ",
+            "interface ", "pub interface ",
+        ]
+        .iter()
+        .any(|p| t.starts_with(p))
 }
 
 fn push_window_aice(out: &mut String, s: usize, e: usize, cleaned: &str) {

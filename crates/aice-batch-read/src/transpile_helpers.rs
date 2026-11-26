@@ -4,7 +4,9 @@ use aice_aice_ir::{AiceTranspiler, DefaultAiceTranspiler, TranspileOutcome};
 use aice_ast_engine::EngineRegistry;
 use aice_lang_registry::{AdapterLookup, LanguageId, ParsedTree};
 
-use crate::aice_project_util::strip_comment_prefix;
+use crate::aice_project_util::{
+    compute_line_starts, slice_lines_range, span_lines, strip_comment_prefix,
+};
 
 pub fn normalize_fragment_comments(src: &str) -> String {
     if src.is_empty() {
@@ -190,4 +192,52 @@ fn collapse_ws(s: &str) -> String {
         }
     }
     out
+}
+
+pub(crate) fn extract_raw_imports_for_rn(src: &str, imports: &[AiceItem]) -> Option<String> {
+    if imports.is_empty() {
+        return None;
+    }
+    let starts = compute_line_starts(src);
+    let mut ranges: Vec<(usize, usize)> = Vec::new();
+    for item in imports {
+        if let AiceItem::Import(imp) = item
+            && let Some((s, e)) = span_lines(imp.span, &starts)
+        {
+            ranges.push((s, e));
+        }
+    }
+    if !ranges.is_empty() {
+        ranges.sort_unstable();
+        let mut merged: Vec<(usize, usize)> = Vec::new();
+        for (s, e) in ranges {
+            if let Some(last) = merged.last_mut()
+                && s <= last.1.saturating_add(1)
+            {
+                last.1 = last.1.max(e);
+            } else {
+                merged.push((s, e));
+            }
+        }
+        let mut out = String::new();
+        for (s, e) in merged {
+            out.push_str(slice_lines_range(src, &starts, s, e));
+        }
+        if !out.trim().is_empty() {
+            return Some(out);
+        }
+    }
+    let lines: Vec<&str> = src
+        .lines()
+        .filter(|l| {
+            let t = l.trim_start();
+            [
+                "import ", "import{", "import*", "from ", "use ", "#include", "using ",
+                "require(", "require ", "require_relative ", "@import ",
+            ]
+            .iter()
+            .any(|p| t.starts_with(p))
+        })
+        .collect();
+    (!lines.is_empty()).then(|| format!("{}\n", lines.join("\n")))
 }

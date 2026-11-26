@@ -81,6 +81,11 @@ pub fn balance_closers_for_lang(lang: LanguageId, snippet: &str) -> String {
             i += 2;
             continue;
         }
+        if crate::aice_project_mid::is_hash_comment_lang(lang) && b == b'#' {
+            in_line_cmt = true;
+            i += 1;
+            continue;
+        }
         if lang == LanguageId::Rust
             && let Some(next_i) = crate::intra_wrap::skip_rust_raw_string(bytes, i)
         {

@@ -12,7 +12,7 @@ use crate::regex_compile::compile_slash_regex;
 use crate::search_rank::build_windows;
 use crate::selector::TargetSelector;
 use crate::transpile::{
-    SliceTranspileReq, render_imports_aice, render_outline_aice_with_src, sibling_hints,
+    SliceTranspileReq, render_imports_aice_with_raw, render_outline_aice_with_src, sibling_hints,
     transpile_full_aice, transpile_intra_block_aice, transpile_slice_aice,
 };
 
@@ -65,13 +65,17 @@ pub fn render_selector_part(
             }
         }
         TargetSelector::Imports => {
-            emitted.push_str(&render_imports_aice(
+            let (body, raw_imports) = render_imports_aice_with_raw(
                 ctx.transpiler,
                 ctx.tree,
                 ctx.lang,
                 ctx.src,
                 ctx.opts,
-            ));
+            );
+            emitted.push_str(&body);
+            if let Some(raw) = raw_imports {
+                realistic_parts.push(raw);
+            }
         }
         TargetSelector::InvertedLineRange { start, end } => {
             return Err(format!(

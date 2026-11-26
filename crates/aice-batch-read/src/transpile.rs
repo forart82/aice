@@ -10,12 +10,14 @@ use aice_lang_registry::{
 };
 
 use crate::aice_project::{ProjectWindowArgs, project_module_window};
+use crate::aice_project_mid::{ends_with_unfilled_call, preserves_call_args_text};
 use crate::aice_project_util::{
     balance_closers_for_lang, compute_line_starts, wrap_method_for_lang,
 };
 pub use crate::intra_transpile::transpile_intra_block_aice;
 use crate::transpile_helpers::{
-    dedent_block, extract_ts_reexport_outline, normalize_fragment_comments, try_clean_aice,
+    dedent_block, extract_raw_imports_for_rn, extract_ts_reexport_outline,
+    normalize_fragment_comments, try_clean_aice,
 };
 
 pub fn parse_for_read(
@@ -120,7 +122,8 @@ pub fn transpile_slice_aice(req: &SliceTranspileReq<'_>) -> String {
         }
     }
     let dedented = dedent_block(&req.slice.content);
-    let slice_src = if req.sym_hint.is_none() {
+    let can_balance = req.sym_hint.is_none() && !ends_with_unfilled_call(&dedented);
+    let slice_src = if can_balance {
         balance_closers_for_lang(req.lang, &dedented)
     } else {
         dedented.clone()
@@ -133,6 +136,7 @@ pub fn transpile_slice_aice(req: &SliceTranspileReq<'_>) -> String {
     for cand in candidates {
         if let Some(printed) =
             try_clean_aice(req.lang, &cand, req.registry, req.transpiler, req.opts)
+            && preserves_call_args_text(&req.slice.content, &printed)
         {
             return printed;
         }
@@ -192,6 +196,8 @@ pub fn render_outline_aice_with_src(
     out
 }
 
+const MAX_SIBLING_HINTS: usize = 8;
+
 pub fn render_imports_aice(
     transpiler: &DefaultAiceTranspiler,
     tree: Option<&ParsedTree>,
@@ -199,6 +205,16 @@ pub fn render_imports_aice(
     src: &str,
     opts: &TranspileOpts,
 ) -> String {
+    render_imports_aice_with_raw(transpiler, tree, lang, src, opts).0
+}
+
+pub(crate) fn render_imports_aice_with_raw(
+    transpiler: &DefaultAiceTranspiler,
+    tree: Option<&ParsedTree>,
+    lang: LanguageId,
+    src: &str,
+    opts: &TranspileOpts,
+) -> (String, Option<String>) {
     if let Some(t) = tree
         && let Ok(TranspileOutcome::Transpiled(module)) = transpiler.to_aice(t, src, opts)
     {
@@ -208,31 +224,51 @@ pub fn render_imports_aice(
             .filter(|it| matches!(it, AiceItem::Import(_)))
             .collect();
         if !imports.is_empty() {
+            let raw = extract_raw_imports_for_rn(src, &imports);
             let mut sub = AiceModule::new(lang, lang.canonical_name());
             sub.items = imports;
-            return print_aice_with_opts(&sub, opts);
+            return (print_aice_with_opts(&sub, opts), raw);
         }
     }
-    "// (no imports)\n".to_string()
+    ("// (no imports)\n".to_string(), None)
 }
 
 pub fn sibling_hints(syms: &[SymbolNode], matched_name: &str) -> Option<String> {
     let norm = matched_name.replace('.', "::");
     let container = norm.rsplit_once("::").map(|(c, _)| c)?;
     let short = norm.rsplit("::").next().unwrap_or(&norm);
-    let siblings: Vec<&str> = syms
-        .iter()
-        .filter(|s| {
-            let sq = s.qualified_name.replace('.', "::");
-            sq.starts_with(&format!("{container}::")) && s.name != short
-        })
-        .map(|s| s.name.as_str())
-        .collect();
-    if siblings.is_empty() {
-        None
-    } else {
-        Some(format!("// siblings in {container}: {}\n", siblings.join(", ")))
+    let prefix = format!("{container}::");
+    let mut siblings: Vec<&str> = Vec::new();
+    let mut match_pos: Option<usize> = None;
+    for s in syms {
+        let sq = s.qualified_name.replace('.', "::");
+        if !sq.starts_with(&prefix) {
+            continue;
+        }
+        if s.name == short {
+            if match_pos.is_none() {
+                match_pos = Some(siblings.len());
+            }
+            continue;
+        }
+        let name = s.name.as_str();
+        if !siblings.contains(&name) {
+            siblings.push(name);
+        }
     }
+    if siblings.is_empty() {
+        return None;
+    }
+    if siblings.len() <= MAX_SIBLING_HINTS {
+        return Some(format!("// siblings in {container}: {}\n", siblings.join(", ")));
+    }
+    let anchor = match_pos.unwrap_or(0);
+    let start = anchor
+        .saturating_sub(MAX_SIBLING_HINTS / 2)
+        .min(siblings.len() - MAX_SIBLING_HINTS);
+    let shown = &siblings[start..start + MAX_SIBLING_HINTS];
+    let rem = siblings.len() - MAX_SIBLING_HINTS;
+    Some(format!("// siblings in {container}: {} (+{rem} more)\n", shown.join(", ")))
 }
 
 fn outline_kind_tag(kind: SymbolKind) -> &'static str {
