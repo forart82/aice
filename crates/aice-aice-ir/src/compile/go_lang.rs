@@ -57,6 +57,13 @@ fn emit_go_type(ec: &mut EmitCtx, td: &TypeDecl) {
     if td.kind == TypeKind::Interface {
         ec.line(&format!("type {}{tps} interface {{", td.name));
         ec.push();
+        for f in &td.fields {
+            if f.name.is_empty() {
+                if let Some(ref ty) = f.ty { ec.line(&emit_type(ty, LanguageId::Go)); }
+            } else if f.ty.is_none() {
+                ec.line(&f.name);
+            }
+        }
         for m in &td.methods {
             let ps = emit_go_params(&m.params);
             let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::Go)).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default();

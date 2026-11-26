@@ -190,6 +190,15 @@ pub(crate) fn map_ts_type_node(n: Node<'_>, src: &str, lang: LanguageId) -> Aice
     map_type_str(node_text(n, src).trim().trim_start_matches(':').trim(), lang)
 }
 
+pub(crate) fn ts_has_hdr_tok(node: Node<'_>, hdr_end: usize, tok: &str, src: &str) -> bool {
+    let mut cur = node.walk();
+    node.children(&mut cur).any(|c| {
+        c.start_byte() < hdr_end
+            && !crate::decompile::trivia::is_comment_kind(c.kind())
+            && (c.kind() == tok || node_text(c, src).trim() == tok)
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn try_extract_jsx_component(
     fn_node: Node<'_>,

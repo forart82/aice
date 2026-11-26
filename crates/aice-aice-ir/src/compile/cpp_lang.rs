@@ -4,9 +4,9 @@ use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl};
-use crate::ir_types::{ParamDecl, TypeParam};
+use crate::ir_types::{EnumDecl, ParamDecl, TypeParam};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     if module.items.is_empty() && !module.raw_fallback.is_empty() {
@@ -34,6 +34,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     for item in &module.items {
         match item {
             AiceItem::Class(cd) => emit_cpp_class(&mut ec, cd, &ectx),
+            AiceItem::Enum(ed) => emit_cpp_enum(&mut ec, ed, &ectx),
             AiceItem::Fn(fd) => emit_cpp_fn(&mut ec, fd, &ectx),
             AiceItem::Directive { text, .. } => {
                 let t = text.trim();
@@ -55,11 +56,36 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
+fn emit_cpp_enum(ec: &mut EmitCtx, ed: &EnumDecl, ectx: &ExprEmitCtx) {
+    ec.blank();
+    ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
+    ec.line(&format!("enum {} {{", ed.name));
+    ec.push();
+    for (i, v) in ed.variants.iter().enumerate() {
+        ec.emit_trivia(&v.trivia, CommentStyle::Slash);
+        let comma = if i + 1 < ed.variants.len() { "," } else { "" };
+        match &v.discriminant {
+            Some(d) => ec.line(&format!("{} = {}{comma}", v.name, emit_expr(d, LanguageId::Cpp, ectx))),
+            None => ec.line(&format!("{}{comma}", v.name)),
+        }
+    }
+    ec.pop();
+    ec.line("};");
+}
+
+fn cpp_has_attr(tr: &Trivia, name: &str) -> bool {
+    tr.leading.iter().any(|c| c.kind == TriviaKind::Attribute && c.text.trim().trim_start_matches('@') == name)
+}
+
 fn emit_cpp_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
     emit_cpp_template_hdr(ec, &cd.type_params);
-    ec.line(&format!("class {} {{", cd.name));
+    let mut bases = Vec::new();
+    if let Some(ref ext) = cd.extends { bases.push(format!("public {ext}")); }
+    for imp in &cd.implements { bases.push(format!("public {imp}")); }
+    let base_clause = if bases.is_empty() { String::new() } else { format!(" : {}", bases.join(", ")) };
+    ec.line(&format!("class {}{base_clause} {{", cd.name));
     let mut cur_vis = Visibility::Private;
     let switch_vis = |ec: &mut EmitCtx, cur: &mut Visibility, target: Visibility| {
         if *cur != target {
@@ -94,13 +120,32 @@ fn emit_cpp_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &Expr
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     emit_cpp_template_hdr(ec, &m.type_params);
     let ps = emit_cpp_params(&m.params);
-    if m.accessor == AccessorKind::Constructor {
-        ec.line(&format!("explicit {cls_name}({ps}) {{"));
+    let is_virtual = cpp_has_attr(&m.trivia, "virtual");
+    let is_pure = cpp_has_attr(&m.trivia, "pure");
+    let is_override = cpp_has_attr(&m.trivia, "override");
+    let is_final = cpp_has_attr(&m.trivia, "final");
+    let st = if m.is_static { "static " } else { "" };
+    let virt = if is_virtual || is_pure { "virtual " } else { "" };
+    let ovr = if is_override { " override" } else { "" };
+    let fin = if is_final { " final" } else { "" };
+    let sig = if m.accessor == AccessorKind::Constructor {
+        format!("explicit {cls_name}({ps})")
+    } else if m.name.starts_with('~') {
+        format!("{virt}{}({ps}){ovr}{fin}", m.name)
     } else {
         let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::Cpp)).unwrap_or_else(|| "void".into());
         let cst = if m.is_const { " const" } else { "" };
-        ec.line(&format!("{rt} {}({ps}){cst} {{", m.name));
+        format!("{st}{virt}{rt} {}({ps}){cst}{ovr}{fin}", m.name)
+    };
+    if m.body == FnBody::SignatureOnly {
+        if is_pure {
+            ec.line(&format!("{sig} = 0;"));
+        } else {
+            ec.line(&format!("{sig};"));
+        }
+        return;
     }
+    ec.line(&format!("{sig} {{"));
     ec.push();
     match &m.body {
         FnBody::SignatureOnly => {}

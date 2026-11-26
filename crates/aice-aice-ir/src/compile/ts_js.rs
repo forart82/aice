@@ -136,7 +136,7 @@ fn emit_class_decl(ec: &mut EmitCtx, cd: &ClassDecl, target: LanguageId, ectx: &
     ec.push();
     for p in &cd.props {
         ec.emit_trivia(&p.trivia, CommentStyle::Slash);
-        let pv = if is_js { "" } else { ts_vis(p.vis) };
+        let pv = if is_js || p.name.starts_with('#') { "" } else { ts_vis(p.vis) };
         let st = if p.is_static { "static " } else { "" };
         let ro = if p.is_readonly && !is_js { "readonly " } else { "" };
         let ty = if !is_js { p.ty.as_ref().map(|t| format!(": {}", emit_type(t, target))).unwrap_or_default() } else { String::new() };
@@ -157,15 +157,21 @@ fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, target: LanguageId, ectx: &Expr
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let is_js = target == LanguageId::JavaScript;
     if !is_js { ec.emit_attrs(&m.trivia); }
-    let vis = if is_js || m.accessor == AccessorKind::Constructor { "" } else { ts_vis(m.vis) };
+    let is_hash_priv = m.name.starts_with('#') || m.name.starts_with("*#");
+    let vis = if is_js || m.accessor == AccessorKind::Constructor || is_hash_priv { "" } else { ts_vis(m.vis) };
     let st = if m.is_static { "static " } else { "" };
-    let asy = if m.is_async { "async " } else { "" };
-    let mtps = if !is_js && m.accessor != AccessorKind::Constructor { emit_ts_type_params(&m.type_params, target) } else { String::new() };
+    let (asy, acc) = match m.accessor {
+        AccessorKind::Get => ("", "get "),
+        AccessorKind::Set => ("", "set "),
+        AccessorKind::Constructor => ("", ""),
+        AccessorKind::Normal => (if m.is_async { "async " } else { "" }, ""),
+    };
+    let mtps = if !is_js && m.accessor == AccessorKind::Normal { emit_ts_type_params(&m.type_params, target) } else { String::new() };
     let ps = emit_ts_params(&m.params, target, !is_js);
-    let rt = if !is_js && m.accessor != AccessorKind::Constructor {
+    let rt = if !is_js && !matches!(m.accessor, AccessorKind::Constructor | AccessorKind::Set) {
         m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, target))).unwrap_or_default()
     } else { String::new() };
-    ec.line(&format!("{vis}{st}{asy}{}{mtps}({ps}){rt} {{", m.name));
+    ec.line(&format!("{vis}{st}{asy}{acc}{}{mtps}({ps}){rt} {{", m.name));
     ec.push();
     emit_fn_body(ec, &m.body, target, ectx);
     ec.pop();
@@ -178,10 +184,13 @@ fn emit_fn_decl(ec: &mut EmitCtx, f: &FnDecl, target: LanguageId, ectx: &ExprEmi
     let is_js = target == LanguageId::JavaScript;
     let exp = if f.vis == Visibility::Public { "export " } else { "" };
     let asy = if f.is_async { "async " } else { "" };
+    let is_gen = f.decorators.iter().any(|d| d == "generator") || f.name.starts_with('*');
+    let star = if is_gen { "*" } else { "" };
+    let nm = f.name.strip_prefix('*').unwrap_or(&f.name);
     let tps = if is_js { String::new() } else { emit_ts_type_params(&f.type_params, target) };
     let ps = emit_ts_params(&f.params, target, !is_js);
     let rt = if !is_js { f.return_type.as_ref().map(|t| format!(": {}", emit_type(t, target))).unwrap_or_default() } else { String::new() };
-    ec.line(&format!("{exp}{asy}function {}{tps}({ps}){rt} {{", f.name));
+    ec.line(&format!("{exp}{asy}function{star} {nm}{tps}({ps}){rt} {{"));
     ec.push();
     emit_fn_body(ec, &f.body, target, ectx);
     ec.pop();

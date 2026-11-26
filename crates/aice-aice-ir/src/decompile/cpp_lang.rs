@@ -5,6 +5,7 @@ use crate::decompile::c_lang::unwrap_c_declarator;
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::{ParamDecl, TypeParam};
@@ -73,6 +74,7 @@ fn collect_cpp_items(root: Node<'_>, src: &str, opts: &TranspileOpts, m: &mut Ai
 
 fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
+    let (extends, implements) = extract_cpp_bases(node, src);
     let mut cur_vis = if node.kind() == "class_specifier" { Visibility::Private } else { Visibility::Public };
     let mut props = Vec::new();
     let mut methods = Vec::new();
@@ -86,36 +88,30 @@ fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                     else if s.contains("protected") { Visibility::Protected }
                     else { Visibility::Private };
                 }
-                "field_declaration" => {
-                    let fnm = field_text(ch, "declarator", src).unwrap_or("f").trim().to_string();
-                    let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Cpp));
-                    props.push(PropDecl {
-                        name: fnm, aliases: Vec::new(), vis: cur_vis, is_static: false, is_readonly: false,
-                        is_mut: true, is_optional: false, ty, init: None, trivia: collect_trivia(ch, src, opts),
-                    });
+                "field_declaration" | "declaration" => {
+                    if let Some((fn_decl, ret_quals)) = find_cpp_method_fn_decl(ch) {
+                        methods.push(decompile_cpp_method_proto(ch, &name, cur_vis, fn_decl, &ret_quals, Vec::new(), src, opts));
+                    } else if ch.kind() == "field_declaration" {
+                        let fnm = field_text(ch, "declarator", src).unwrap_or("f").trim().to_string();
+                        let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Cpp));
+                        props.push(PropDecl {
+                            name: fnm, aliases: Vec::new(), vis: cur_vis, is_static: false, is_readonly: false,
+                            is_mut: true, is_optional: false, ty, init: None, trivia: collect_trivia(ch, src, opts),
+                        });
+                    }
                 }
                 "function_definition" => {
-                    let f = decompile_cpp_fn(ch, src, opts, collect_trivia(ch, src, opts));
-                    let accessor = if f.name == name { AccessorKind::Constructor } else { AccessorKind::Normal };
-                    let is_const = node_text(ch, src).contains(") const");
-                    methods.push(MethodDecl {
-                        vis: cur_vis, is_static: false, is_async: false, is_const, accessor,
-                        name: f.name, type_params: Vec::new(), params: f.params,
-                        return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
-                    });
+                    methods.push(decompile_cpp_method_def(ch, &name, cur_vis, Vec::new(), src, opts));
                 }
                 "template_declaration" => {
                     let tps = extract_cpp_type_params(ch, src);
                     for sub in named_children(ch) {
                         if sub.kind() == "function_definition" {
-                            let f = decompile_cpp_fn(sub, src, opts, collect_trivia(sub, src, opts));
-                            let accessor = if f.name == name { AccessorKind::Constructor } else { AccessorKind::Normal };
-                            let is_const = node_text(sub, src).contains(") const");
-                            methods.push(MethodDecl {
-                                vis: cur_vis, is_static: false, is_async: false, is_const, accessor,
-                                name: f.name, type_params: tps.clone(), params: f.params,
-                                return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
-                            });
+                            methods.push(decompile_cpp_method_def(sub, &name, cur_vis, tps.clone(), src, opts));
+                        } else if matches!(sub.kind(), "field_declaration" | "declaration")
+                            && let Some((fn_decl, ret_quals)) = find_cpp_method_fn_decl(sub)
+                        {
+                            methods.push(decompile_cpp_method_proto(sub, &name, cur_vis, fn_decl, &ret_quals, tps.clone(), src, opts));
                         }
                     }
                 }
@@ -125,34 +121,141 @@ fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
     }
     ClassDecl {
         vis: Visibility::Public, is_abstract: false, decorators: Vec::new(), name,
-        type_params: Vec::new(), primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
+        type_params: Vec::new(), primary_ctor: Vec::new(), extends, implements,
         props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }
 }
 
-fn decompile_cpp_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
-    let return_type = field_text(node, "type", src).map(|t| map_type_str(t, LanguageId::Cpp));
-    let decl = node.child_by_field_name("declarator");
-    let fn_decl = decl.and_then(|d| if d.kind() == "function_declarator" { Some(d) } else { child_by_kind(d, "function_declarator") });
-    let name = fn_decl.and_then(|d| field_text(d, "declarator", src)).unwrap_or("fn_anon").trim().to_string();
-    let mut params = Vec::new();
-    if let Some(pl) = fn_decl.and_then(|d| d.child_by_field_name("parameters")) {
-        for pd in named_children(pl) {
-            if matches!(pd.kind(), "parameter_declaration" | "optional_parameter_declaration") {
-                let raw_ty = field_text(pd, "type", src).unwrap_or("auto").trim();
-                let (pnm, ptrs) = pd.child_by_field_name("declarator")
-                    .map(|d| unwrap_c_declarator(d, src))
-                    .unwrap_or_else(|| ("p".into(), String::new()));
-                let pty = Some(map_type_str(&format!("{raw_ty}{ptrs}"), LanguageId::Cpp));
-                let default = pd.child_by_field_name("default_value")
-                    .map(|dv| crate::decompile::expr_common::decompile_expr(dv, src, LanguageId::Cpp));
-                params.push(ParamDecl {
-                    name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
-                    is_optional: false, is_rest: false, ty: pty, default, trivia: Trivia::default(),
-                });
+fn extract_cpp_bases(node: Node<'_>, src: &str) -> (Option<String>, Vec<String>) {
+    let Some(clause) = child_by_kind(node, "base_class_clause") else { return (None, Vec::new()); };
+    let mut bases = Vec::new();
+    for ch in named_children(clause) {
+        if matches!(ch.kind(), "access_specifier" | "virtual") || is_comment_kind(ch.kind()) { continue; }
+        let txt = node_text(ch, src).trim();
+        if !txt.is_empty() && !matches!(txt, "public" | "protected" | "private" | "virtual") {
+            bases.push(txt.to_string());
+        }
+    }
+    if bases.is_empty() { (None, Vec::new()) } else { let first = bases.remove(0); (Some(first), bases) }
+}
+
+fn find_cpp_method_fn_decl(node: Node<'_>) -> Option<(Node<'_>, String)> {
+    let mut cur = node.child_by_field_name("declarator")?;
+    let mut quals = String::new();
+    while matches!(cur.kind(), "pointer_declarator" | "reference_declarator") {
+        quals.push(if cur.kind() == "reference_declarator" { '&' } else { '*' });
+        cur = cur.child_by_field_name("declarator")
+            .or_else(|| named_children(cur).into_iter().find(|c| {
+                matches!(c.kind(), "function_declarator" | "pointer_declarator" | "reference_declarator")
+            }))?;
+    }
+    if cur.kind() != "function_declarator"
+        || cur.child_by_field_name("declarator").is_some_and(|d| d.kind() == "parenthesized_declarator")
+    {
+        return None;
+    }
+    Some((cur, quals))
+}
+
+fn collect_cpp_method_attrs(node: Node<'_>, fn_decl: Option<Node<'_>>, is_proto: bool, src: &str) -> (Vec<String>, bool) {
+    let mut attrs = Vec::new();
+    let decl_start = node.child_by_field_name("declarator").map(|n| n.start_byte()).unwrap_or(node.end_byte());
+    let mut is_virtual = false;
+    let mut is_static = false;
+    let mut cur = node.walk();
+    for c in node.children(&mut cur) {
+        if c.start_byte() >= decl_start { break; }
+        let t = node_text(c, src).trim();
+        if c.kind() == "virtual" || c.kind() == "virtual_function_specifier" || t == "virtual" { is_virtual = true; }
+        if c.kind() == "storage_class_specifier" && t == "static" { is_static = true; }
+    }
+    if is_virtual { attrs.push("@virtual".into()); }
+    if is_proto {
+        let pure_via_field = node.child_by_field_name("default_value").is_some_and(|v| node_text(v, src).trim() == "0");
+        let pure_via_tail = fn_decl.and_then(|fd| src.get(fd.end_byte()..node.end_byte())).is_some_and(|tail| {
+            tail.trim().trim_end_matches(';').trim().strip_prefix('=').is_some_and(|rhs| rhs.trim() == "0")
+        });
+        if pure_via_field || pure_via_tail { attrs.push("@pure".into()); }
+    }
+    if let Some(fd) = fn_decl {
+        let mut fcur = fd.walk();
+        for c in fd.children(&mut fcur) {
+            if c.kind() == "virtual_specifier" {
+                match node_text(c, src).trim() {
+                    "override" => attrs.push("@override".into()),
+                    "final" => attrs.push("@final".into()),
+                    _ => {}
+                }
             }
         }
     }
+    (attrs, is_static)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn decompile_cpp_method_proto(
+    ch: Node<'_>, cls_name: &str, vis: Visibility, fn_decl: Node<'_>, ret_quals: &str,
+    type_params: Vec<TypeParam>, src: &str, opts: &TranspileOpts,
+) -> MethodDecl {
+    let mut tr = collect_trivia(ch, src, opts);
+    let (attrs, is_static) = collect_cpp_method_attrs(ch, Some(fn_decl), true, src);
+    push_attrs_to_trivia(&mut tr, attrs);
+    let mname = field_text(fn_decl, "declarator", src).unwrap_or("method").trim().to_string();
+    let accessor = if mname == cls_name { AccessorKind::Constructor } else { AccessorKind::Normal };
+    let params = fn_decl.child_by_field_name("parameters").map(|pl| extract_cpp_params(pl, src)).unwrap_or_default();
+    let return_type = field_text(ch, "type", src).map(|t| map_type_str(&format!("{}{ret_quals}", t.trim()), LanguageId::Cpp));
+    let is_const = node_text(fn_decl, src).contains(") const");
+    MethodDecl {
+        vis, is_static, is_async: false, is_const, accessor, name: mname,
+        type_params, params, return_type, body: FnBody::SignatureOnly, trivia: tr, span: node_span(ch),
+    }
+}
+
+fn decompile_cpp_method_def(
+    ch: Node<'_>, cls_name: &str, vis: Visibility, type_params: Vec<TypeParam>, src: &str, opts: &TranspileOpts,
+) -> MethodDecl {
+    let mut f = decompile_cpp_fn(ch, src, opts, collect_trivia(ch, src, opts));
+    let fn_decl = find_cpp_method_fn_decl(ch).map(|(fd, _)| fd);
+    let (attrs, is_static) = collect_cpp_method_attrs(ch, fn_decl, false, src);
+    push_attrs_to_trivia(&mut f.trivia, attrs);
+    let accessor = if f.name == cls_name { AccessorKind::Constructor } else { AccessorKind::Normal };
+    let is_const = fn_decl.map(|fd| node_text(fd, src)).unwrap_or_else(|| node_text(ch, src)).contains(") const");
+    MethodDecl {
+        vis, is_static, is_async: false, is_const, accessor, name: f.name,
+        type_params, params: f.params, return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
+    }
+}
+
+fn extract_cpp_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
+    let mut params = Vec::new();
+    for pd in named_children(pl) {
+        if matches!(pd.kind(), "parameter_declaration" | "optional_parameter_declaration") {
+            let raw_ty = field_text(pd, "type", src).unwrap_or("auto").trim();
+            let (pnm, ptrs) = pd.child_by_field_name("declarator")
+                .map(|d| unwrap_c_declarator(d, src))
+                .unwrap_or_else(|| ("p".into(), String::new()));
+            let pty = Some(map_type_str(&format!("{raw_ty}{ptrs}"), LanguageId::Cpp));
+            let default = pd.child_by_field_name("default_value")
+                .map(|dv| crate::decompile::expr_common::decompile_expr(dv, src, LanguageId::Cpp));
+            params.push(ParamDecl {
+                name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
+                is_optional: false, is_rest: false, ty: pty, default, trivia: Trivia::default(),
+            });
+        }
+    }
+    params
+}
+
+fn decompile_cpp_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
+    let found = find_cpp_method_fn_decl(node);
+    let ret_quals = found.as_ref().map(|(_, q)| q.as_str()).unwrap_or("");
+    let return_type = field_text(node, "type", src).map(|t| map_type_str(&format!("{}{ret_quals}", t.trim()), LanguageId::Cpp));
+    let fn_decl = found.map(|(fd, _)| fd).or_else(|| {
+        node.child_by_field_name("declarator")
+            .and_then(|d| if d.kind() == "function_declarator" { Some(d) } else { child_by_kind(d, "function_declarator") })
+    });
+    let name = fn_decl.and_then(|d| field_text(d, "declarator", src)).unwrap_or("fn_anon").trim().to_string();
+    let params = fn_decl.and_then(|d| d.child_by_field_name("parameters")).map(|pl| extract_cpp_params(pl, src)).unwrap_or_default();
     let mut stmts = node.child_by_field_name("body").map(|b| decompile_block(b, src, LanguageId::Cpp, opts)).unwrap_or_default();
     if let Some(inits) = child_by_kind(node, "field_initializer_list") {
         let mut init_stmts = Vec::new();

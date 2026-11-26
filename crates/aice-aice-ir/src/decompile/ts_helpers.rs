@@ -59,10 +59,12 @@ pub(crate) fn is_ts_readonly_prefix(node: Node<'_>, target_field: &str, src: &st
 pub(crate) fn is_ts_prop_optional(node: Node<'_>, src: &str) -> bool {
     let start = node
         .child_by_field_name("name")
+        .or_else(|| node.child_by_field_name("property"))
         .map(|n| n.end_byte())
         .unwrap_or(node.start_byte());
     let end = node
         .child_by_field_name("type")
+        .or_else(|| node.child_by_field_name("value"))
         .map(|n| n.start_byte())
         .unwrap_or(node.end_byte());
     src.get(start..end).is_some_and(|s| s.contains('?'))

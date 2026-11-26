@@ -6,7 +6,7 @@ use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
 use crate::ir_code::{FnBody, FnDecl};
-use crate::ir_types::{ParamDecl, TypeDecl};
+use crate::ir_types::{EnumDecl, ParamDecl, TypeDecl};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     if module.items.is_empty() && !module.raw_fallback.is_empty() {
@@ -27,12 +27,34 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                 ec.line(&format!("#include {inc}"));
             }
             AiceItem::Type(td) => emit_c_struct(&mut ec, td),
+            AiceItem::Enum(ed) => emit_c_enum(&mut ec, ed, &ectx),
             AiceItem::Fn(fd) => emit_c_fn(&mut ec, fd, &ectx),
             AiceItem::Directive { text, .. } => ec.line(text),
             _ => {}
         }
     }
     Ok(ec.out)
+}
+
+fn emit_c_enum(ec: &mut EmitCtx, ed: &EnumDecl, ectx: &ExprEmitCtx) {
+    ec.blank();
+    ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
+    ec.line("typedef enum {");
+    ec.push();
+    if ed.variants.is_empty() {
+        ec.line(&format!("{}_EMPTY = 0", ed.name));
+    } else {
+        for (i, v) in ed.variants.iter().enumerate() {
+            ec.emit_trivia(&v.trivia, CommentStyle::Slash);
+            let comma = if i + 1 < ed.variants.len() { "," } else { "" };
+            match &v.discriminant {
+                Some(d) => ec.line(&format!("{} = {}{comma}", v.name, emit_expr(d, LanguageId::C, ectx))),
+                None => ec.line(&format!("{}{comma}", v.name)),
+            }
+        }
+    }
+    ec.pop();
+    ec.line(&format!("}} {};", ed.name));
 }
 
 fn emit_c_struct(ec: &mut EmitCtx, td: &TypeDecl) {

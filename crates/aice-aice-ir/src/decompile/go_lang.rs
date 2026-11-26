@@ -182,6 +182,16 @@ fn decompile_type_spec(node: Node<'_>, src: &str, _opts: &TranspileOpts, tr: Tri
                         accessor: Default::default(), name: mnm, type_params: Vec::new(), params,
                         return_type: ret, body: FnBody::SignatureOnly, trivia: Trivia::default(), span: node_span(me),
                     });
+                } else if !is_comment_kind(me.kind()) {
+                    let raw = node_text(me, src).trim();
+                    if !raw.is_empty() {
+                        fields.push(FieldDecl {
+                            vis: Visibility::Default, name: String::new(), is_readonly: false,
+                            is_optional: false, sigil: FieldSigil::None,
+                            ty: Some(crate::ir_types::AiceType::Raw(raw.to_string())),
+                            default: None, trivia: Trivia::default(),
+                        });
+                    }
                 }
             }
         }

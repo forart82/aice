@@ -11,7 +11,9 @@ use crate::decompile::ts_helpers::{
     extract_ts_class_heritage, extract_ts_decorators, extract_ts_destructured_param_stmts,
     format_ts_decorator_attr, is_ts_prop_optional, is_ts_readonly_prefix, push_attrs_to_trivia,
 };
-use crate::decompile::tsx_jsx::{extract_ts_params, extract_ts_type_params, map_ts_type_node, try_extract_jsx_component};
+use crate::decompile::tsx_jsx::{
+    extract_ts_params, extract_ts_type_params, map_ts_type_node, try_extract_jsx_component, ts_has_hdr_tok,
+};
 use crate::ir::{
     AiceItem, AiceModule, ImportDecl, ImportSpec, TranspileError, TranspileOpts, Trivia, Visibility,
 };
@@ -68,34 +70,29 @@ fn decompile_top_item(
         "class_declaration" | "abstract_class_declaration" => {
             m.items.push(AiceItem::Class(decompile_class(node, vis, decorators, src, lang, opts, tr)));
         }
-        "function_declaration" => {
+        "function_declaration" | "generator_function_declaration" => {
+            let is_gen = node.kind() == "generator_function_declaration";
+            if is_gen && !decorators.iter().any(|d| d == "generator") { decorators.push("generator".to_string()); }
             let name = field_text(node, "name", src).unwrap_or("fn_anon").to_string();
             let type_params = extract_ts_type_params(node, src, lang);
             let param_node = node.child_by_field_name("parameters");
             let params = param_node.map(|p| extract_ts_params(p, src, lang)).unwrap_or_default();
             let mut destruct = param_node.map(|p| extract_ts_destructured_param_stmts(p, src, lang)).unwrap_or_default();
-            if lang == LanguageId::Tsx
+            if !is_gen && lang == LanguageId::Tsx
                 && let Some(mut comp) = try_extract_jsx_component(node, vis, &name, type_params.clone(), params.clone(), src, lang, opts, tr.clone())
             {
-                if !destruct.is_empty() {
-                    destruct.append(&mut comp.body_stmts);
-                    comp.body_stmts = destruct;
-                }
+                if !destruct.is_empty() { destruct.append(&mut comp.body_stmts); comp.body_stmts = destruct; }
                 m.items.push(AiceItem::Component(comp));
                 return;
             }
             let ret = node.child_by_field_name("return_type").map(|r| map_ts_type_node(r, src, lang));
             let body = node.child_by_field_name("body").map(|b| {
                 let mut stmts = decompile_block(b, src, lang, opts);
-                if !destruct.is_empty() {
-                    destruct.append(&mut stmts);
-                    FnBody::Block(destruct)
-                } else {
-                    FnBody::Block(stmts)
-                }
+                if !destruct.is_empty() { destruct.append(&mut stmts); FnBody::Block(destruct) } else { FnBody::Block(stmts) }
             }).unwrap_or(FnBody::SignatureOnly);
+            let hdr_end = node.child_by_field_name("name").or(param_node).map(|n| n.start_byte()).unwrap_or(node.start_byte());
             m.items.push(AiceItem::Fn(FnDecl {
-                vis, is_async: node_text(node, src).trim_start().starts_with("async "), is_static: false,
+                vis, is_async: ts_has_hdr_tok(node, hdr_end, "async", src), is_static: false,
                 decorators, name, type_params, params, return_type: ret, body, trivia: tr, span: node_span(node),
             }));
         }
@@ -223,27 +220,33 @@ fn decompile_class(node: Node<'_>, vis: Visibility, mut decorators: Vec<String>,
             let mut mtr = collect_trivia(ch, src, opts);
             let mvis = extract_ts_vis(ch, src);
             let hdr_end = ch.child_by_field_name("name")
+                .or_else(|| ch.child_by_field_name("property"))
                 .or_else(|| ch.child_by_field_name("parameters"))
                 .map(|n| n.start_byte())
                 .unwrap_or(ch.start_byte());
-            let hdr = &src[ch.start_byte()..hdr_end];
+            let is_static = ts_has_hdr_tok(ch, hdr_end, "static", src);
             match ch.kind() {
                 "public_field_definition" | "field_definition" => {
                     push_attrs_to_trivia(&mut mtr, std::mem::take(&mut pending_decs));
                     let pname = field_text(ch, "name", src).or_else(|| field_text(ch, "property", src)).unwrap_or("field").to_string();
                     let ty = ch.child_by_field_name("type").map(|t| map_ts_type_node(t, src, lang));
                     let init = ch.child_by_field_name("value").map(|v| decompile_expr(v, src, lang));
+                    let pvis = if pname.starts_with('#') { Visibility::Default } else { mvis };
                     props.push(PropDecl {
-                        name: pname.trim_start_matches('#').to_string(), aliases: Vec::new(),
-                        vis: if pname.starts_with('#') { Visibility::Private } else { mvis },
-                        is_static: hdr.contains("static "), is_readonly: hdr.contains("readonly "),
+                        name: pname, aliases: Vec::new(), vis: pvis,
+                        is_static, is_readonly: ts_has_hdr_tok(ch, hdr_end, "readonly", src),
                         is_mut: false, is_optional: is_ts_prop_optional(ch, src), ty, init, trivia: mtr,
                     });
                 }
                 "method_definition" | "abstract_method_signature" => {
                     push_attrs_to_trivia(&mut mtr, std::mem::take(&mut pending_decs));
-                    let mname = field_text(ch, "name", src).unwrap_or("method").to_string();
-                    let accessor = if mname == "constructor" { AccessorKind::Constructor } else { AccessorKind::Normal };
+                    let raw_name = field_text(ch, "name", src).unwrap_or("method").to_string();
+                    let accessor = if ts_has_hdr_tok(ch, hdr_end, "get", src) { AccessorKind::Get }
+                        else if ts_has_hdr_tok(ch, hdr_end, "set", src) { AccessorKind::Set }
+                        else if raw_name == "constructor" { AccessorKind::Constructor }
+                        else { AccessorKind::Normal };
+                    let is_gen = accessor == AccessorKind::Normal && ts_has_hdr_tok(ch, hdr_end, "*", src);
+                    let mname = if is_gen { format!("*{raw_name}") } else { raw_name };
                     let mtps = extract_ts_type_params(ch, src, lang);
                     let pnode = ch.child_by_field_name("parameters");
                     let params = pnode.map(|p| extract_ts_params(p, src, lang)).unwrap_or_default();
@@ -253,8 +256,9 @@ fn decompile_class(node: Node<'_>, vis: Visibility, mut decorators: Vec<String>,
                         let mut stmts = decompile_block(b, src, lang, opts);
                         if !mdest.is_empty() { mdest.append(&mut stmts); FnBody::Block(mdest) } else { FnBody::Block(stmts) }
                     }).unwrap_or(FnBody::SignatureOnly);
+                    let eff_vis = if mname.starts_with('#') || mname.starts_with("*#") { Visibility::Default } else { mvis };
                     methods.push(MethodDecl {
-                        vis: mvis, is_static: hdr.contains("static "), is_async: hdr.contains("async "), is_const: false,
+                        vis: eff_vis, is_static, is_async: ts_has_hdr_tok(ch, hdr_end, "async", src), is_const: false,
                         accessor, name: mname, type_params: mtps, params, return_type: ret,
                         body: mbody, trivia: mtr, span: node_span(ch),
                     });
@@ -271,23 +275,15 @@ fn decompile_class(node: Node<'_>, vis: Visibility, mut decorators: Vec<String>,
 }
 
 fn extract_ts_vis(node: Node<'_>, src: &str) -> Visibility {
-    for ch in named_children(node) {
-        if ch.kind() == "accessibility_modifier" {
-            return match node_text(ch, src).trim() {
-                "public" => Visibility::Public,
-                "private" => Visibility::Private,
-                "protected" => Visibility::Protected,
-                _ => Visibility::Default,
-            };
-        }
+    if let Some(ch) = child_by_kind(node, "accessibility_modifier") {
+        return match node_text(ch, src).trim() {
+            "public" => Visibility::Public, "private" => Visibility::Private,
+            "protected" => Visibility::Protected, _ => Visibility::Default,
+        };
     }
-    let header_end = node
-        .child_by_field_name("name")
-        .or_else(|| node.child_by_field_name("property"))
-        .or_else(|| node.child_by_field_name("parameters"))
-        .or_else(|| node.child_by_field_name("body"))
-        .map(|n| n.start_byte())
-        .unwrap_or(node.start_byte());
+    let header_end = node.child_by_field_name("name").or_else(|| node.child_by_field_name("property"))
+        .or_else(|| node.child_by_field_name("parameters")).or_else(|| node.child_by_field_name("body"))
+        .map(|n| n.start_byte()).unwrap_or(node.start_byte());
     let hdr = &src[node.start_byte()..header_end];
     if hdr.split_whitespace().any(|w| w == "private") { Visibility::Private }
     else if hdr.split_whitespace().any(|w| w == "protected") { Visibility::Protected }

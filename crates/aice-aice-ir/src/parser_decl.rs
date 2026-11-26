@@ -74,6 +74,8 @@ pub(crate) fn parse_type_decl(p: &mut Parser<'_>, vis: Visibility, default_kind:
                     let mvis = p.parse_visibility();
                     if p.peek_kind() == TokenKind::Fn || p.peek_kind() == TokenKind::Async {
                         methods.push(parse_method_decl(p, mvis, false, mtr)?);
+                    } else if kind == TypeKind::Interface && mvis == Visibility::Default && is_interface_constraint(p, false) {
+                        fields.push(parse_interface_constraint(p, false, mtr));
                     } else {
                         let mut fld = parse_field_decl(p, mtr)?;
                         if fld.vis == Visibility::Default { fld.vis = mvis; }
@@ -84,7 +86,14 @@ pub(crate) fn parse_type_decl(p: &mut Parser<'_>, vis: Visibility, default_kind:
                 p.eat(TokenKind::Dedent);
             }
         } else {
-            loop { fields.push(parse_field_decl(p, Trivia::default())?); if !p.eat(TokenKind::Comma) { break; } }
+            loop {
+                if kind == TypeKind::Interface && is_interface_constraint(p, true) {
+                    fields.push(parse_interface_constraint(p, true, Trivia::default()));
+                } else {
+                    fields.push(parse_field_decl(p, Trivia::default())?);
+                }
+                if !p.eat(TokenKind::Comma) { break; }
+            }
         }
     }
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
@@ -148,6 +157,7 @@ fn parse_enum_variant(p: &mut Parser<'_>, trivia: Trivia) -> Result<EnumVariant,
 pub(crate) fn parse_fn_decl(p: &mut Parser<'_>, vis: Visibility, is_async: bool, is_static: bool, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let sp = p.peek().span;
     p.expect(TokenKind::Fn, "Expected 'fn'")?;
+    let is_gen = p.eat(TokenKind::Star);
     let name = p.expect_ident_or_kw("Expected function name")?.lexeme;
     let type_params = parse_type_params(p)?;
     p.expect(TokenKind::LParen, "Expected '('")?;
@@ -155,7 +165,8 @@ pub(crate) fn parse_fn_decl(p: &mut Parser<'_>, vis: Visibility, is_async: bool,
     let return_type = if p.eat(TokenKind::Arrow) { Some(parse_type_expr(p)?) } else { None };
     let mut tr = trivia;
     let body = parse_optional_body_with_trivia(p, &mut tr)?;
-    Ok(AiceItem::Fn(FnDecl { vis, is_async, is_static, decorators: Vec::new(), name, type_params, params, return_type, body, trivia: tr, span: sp }))
+    let decorators = if is_gen { vec!["generator".to_string()] } else { Vec::new() };
+    Ok(AiceItem::Fn(FnDecl { vis, is_async, is_static, decorators, name, type_params, params, return_type, body, trivia: tr, span: sp }))
 }
 
 pub(crate) fn parse_const_or_var(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) -> Result<AiceItem, TranspileError> {
@@ -224,4 +235,52 @@ fn parse_field_decl(p: &mut Parser<'_>, trivia: Trivia) -> Result<FieldDecl, Tra
     let mut tr = trivia;
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
     Ok(FieldDecl { name, vis, is_readonly, is_optional, sigil, ty, default, trivia: tr })
+}
+
+fn is_interface_constraint(p: &Parser<'_>, inline: bool) -> bool {
+    if matches!(p.peek_kind(), TokenKind::Tilde | TokenKind::LBracket | TokenKind::Star) {
+        return true;
+    }
+    if p.peek().lexeme == "readonly" { return false; }
+    let (mut i, mut depth) = (0usize, 0usize);
+    loop {
+        let k = p.peek_n(i).kind;
+        if matches!(k, TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment)
+            || (inline && depth == 0 && k == TokenKind::Comma)
+        {
+            return false;
+        }
+        match k {
+            TokenKind::LParen | TokenKind::LBrace => depth += 1,
+            TokenKind::LBracket => { if depth == 0 { return true; } depth += 1; }
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth = depth.saturating_sub(1),
+            TokenKind::Colon | TokenKind::Equal | TokenKind::Question | TokenKind::Bang | TokenKind::Sigil if depth == 0 => return false,
+            TokenKind::Pipe | TokenKind::Dot | TokenKind::Tilde if depth == 0 => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+}
+
+fn parse_interface_constraint(p: &mut Parser<'_>, inline: bool, mut trivia: Trivia) -> FieldDecl {
+    let (mut start, mut end, mut depth) = (None, 0usize, 0usize);
+    while !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) {
+        if inline && depth == 0 && p.peek_kind() == TokenKind::Comma { break; }
+        let tok = p.advance();
+        match tok.kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => depth = depth.saturating_sub(1),
+            _ => {}
+        }
+        if tok.span.end_byte > tok.span.start_byte {
+            if start.is_none() { start = Some(tok.span.start_byte); }
+            end = tok.span.end_byte;
+        }
+    }
+    let raw = start.map(|s| p.src[s..end].trim().to_string()).unwrap_or_default();
+    if trivia.trailing.is_none() { trivia.trailing = p.take_trailing_comment(); }
+    FieldDecl {
+        name: String::new(), vis: Visibility::Default, is_readonly: false, is_optional: false,
+        sigil: FieldSigil::None, ty: Some(crate::ir_types::AiceType::Raw(raw)), default: None, trivia,
+    }
 }

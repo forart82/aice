@@ -36,6 +36,12 @@ pub(crate) fn print_type_decl(c: &mut PrintCtx<'_>, td: &TypeDecl, d: usize) {
 }
 
 fn format_field(c: &PrintCtx<'_>, f: &FieldDecl) -> String {
+    if f.name.is_empty() && let Some(ref ty) = f.ty {
+        return match ty {
+            crate::ir_types::AiceType::Raw(s) => s.clone(),
+            other => print_type(other),
+        };
+    }
     let mut s = String::new();
     s.push_str(f.vis.aice_prefix());
     if f.is_readonly { s.push_str("readonly "); }
@@ -125,30 +131,43 @@ fn print_method_decl(c: &mut PrintCtx<'_>, m: &MethodDecl, d: usize) {
     let vis = if m.vis == Visibility::Default { "" } else { m.vis.aice_prefix() };
     let st = if m.is_static { "static " } else { "" };
     let asy = if m.is_async { "async " } else { "" };
+    let is_gen = m.accessor == AccessorKind::Normal && m.name.starts_with('*');
     let kw = match m.accessor {
-        AccessorKind::Normal => "fn ", AccessorKind::Get => "get ",
-        AccessorKind::Set => "set ", AccessorKind::Constructor => "",
+        AccessorKind::Normal => if is_gen { "fn* " } else { "fn " },
+        AccessorKind::Get => "get ",
+        AccessorKind::Set => "set ",
+        AccessorKind::Constructor => "",
     };
     let cst = if m.is_const { " const" } else { "" };
     let ret = if c.opts.include_types {
         m.return_type.as_ref().map(|t| format!(" -> {}", print_type(t))).unwrap_or_default()
     } else { String::new() };
-    let nm = if m.accessor == AccessorKind::Constructor { "constructor" } else { m.name.as_str() };
-    let hdr = format!("{vis}{st}{asy}{kw}{}{}({}){cst}{ret}", nm, format_type_params(&m.type_params), format_params(c, &m.params));
+    let nm = if m.accessor == AccessorKind::Constructor {
+        "constructor"
+    } else if is_gen {
+        m.name.strip_prefix('*').unwrap_or(&m.name)
+    } else {
+        m.name.as_str()
+    };
+    let hdr = format!("{vis}{st}{asy}{kw}{nm}{}({}){cst}{ret}", format_type_params(&m.type_params), format_params(c, &m.params));
     print_fn_body(c, &hdr, &m.body, &m.trivia, d);
 }
 
 pub(crate) fn print_fn_decl(c: &mut PrintCtx<'_>, f: &FnDecl, d: usize) {
     c.emit_trivia(&f.trivia, d);
+    let is_gen = f.decorators.iter().any(|d| d == "generator") || f.name.starts_with('*');
     for dec in &f.decorators {
+        if dec == "generator" { continue; }
         if dec.starts_with("#[") || dec.starts_with('@') { c.line(d, dec); }
         else { c.line(d, &format!("@{dec}")); }
     }
     let asy = if f.is_async { "async " } else { "" };
+    let fn_kw = if is_gen { "fn* " } else { "fn " };
+    let nm = f.name.strip_prefix('*').unwrap_or(&f.name);
     let ret = if c.opts.include_types {
         f.return_type.as_ref().map(|t| format!(" -> {}", print_type(t))).unwrap_or_default()
     } else { String::new() };
-    let hdr = format!("{}{asy}fn {}{}({}){ret}", f.vis.aice_prefix(), f.name, format_type_params(&f.type_params), format_params(c, &f.params));
+    let hdr = format!("{}{asy}{fn_kw}{nm}{}({}){ret}", f.vis.aice_prefix(), format_type_params(&f.type_params), format_params(c, &f.params));
     print_fn_body(c, &hdr, &f.body, &f.trivia, d);
 }
 
