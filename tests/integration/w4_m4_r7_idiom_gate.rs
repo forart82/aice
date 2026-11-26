@@ -223,18 +223,19 @@ fn r7_report_schema_and_exact_bpe_verification() {
         let actual_no = count_both(&stdout);
         // Wave 1 (F-01..F-04), Wave 2 (F-17, F-18, F-24) fidelity fixes, Wave 3 (F-33, F-36,
         // F-47, F-50) IR compactness wins (-1925 cl100k / -1905 o200k vs v3 across C-01..C-12),
-        // & Wave 5 fidelity fixes (F-56 Rust `^=` in C-02 [0 BPE], Go short_var AST decompile
-        // removing redundant left-assoc parens in C-04 [-2 cl100k / -2 o200k], F-59 PHP leading
-        // `\` on `new \InvalidArgumentException` in C-08 [+5 cl100k / +5 o200k]). Keep
-        // docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-5 counts.
+        // Wave 5 fidelity fixes (F-56, F-59, Go short_var: +3/+3), & Wave 6 fidelity fixes
+        // (F-67 TSX destructured props in C-01 [+19/+21], F-69 Rust trait implements in C-02
+        // [+10/+10], F-68 Go struct tags in C-04 [+114/+113], F-65 Kotlin sealed subtypes /
+        // @interface / state field in C-07 [+273/+274], F-72 Twig attr expr in C-08 [+3/+3]).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-6 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
-            "C-01" => (2134, 2170),
-            "C-02" => (1701, 1674),
-            "C-04" => (1489, 1503),
+            "C-01" => (2153, 2191),
+            "C-02" => (1711, 1684),
+            "C-04" => (1603, 1616),
             "C-05" => (1563, 1584),
             "C-06" => (1470, 1477),
-            "C-07" => (1217, 1234),
-            "C-08" => (1429, 1438),
+            "C-07" => (1490, 1508),
+            "C-08" => (1432, 1441),
             "C-09" => (1262, 1264),
             "C-10" => (1415, 1432),
             "C-11" => (1480, 1499),
