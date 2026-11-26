@@ -26,11 +26,28 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                         is_type_only: false, trivia: tr, span: node_span(ch),
                     }));
                 }
+                "import_list" => {
+                    for ich in named_children(ch) {
+                        if matches!(ich.kind(), "import" | "import_header") {
+                            let itr = collect_trivia(ich, src, opts);
+                            let imp = node_text(ich, src).trim().trim_start_matches("import ").trim().to_string();
+                            m.items.push(AiceItem::Import(ImportDecl {
+                                vis: Visibility::Default, source: imp, specifiers: Vec::new(),
+                                is_type_only: false, trivia: itr, span: node_span(ich),
+                            }));
+                        }
+                    }
+                }
                 "class_declaration" | "object_declaration" => {
                     m.items.push(AiceItem::Class(decompile_kt_class(ch, src, opts, tr)));
                 }
                 "function_declaration" => m.items.push(AiceItem::Fn(decompile_kt_fn(ch, src, opts, tr))),
-                _ => {}
+                _ => {
+                    let txt = node_text(ch, src).trim();
+                    if !txt.is_empty() {
+                        m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(ch) });
+                    }
+                }
             }
         }
         Ok(m)
@@ -62,15 +79,17 @@ fn decompile_kt_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                     .unwrap_or_else(|| "p".into());
                 let ty = child_by_kind(cp, "type")
                     .or_else(|| child_by_kind(cp, "user_type"))
+                    .or_else(|| child_by_kind(cp, "nullable_type"))
                     .map(|t| map_type_str(node_text(t, src), LanguageId::Kotlin));
+                let default = kt_default_expr(cp, src);
                 primary_ctor.push(ParamDecl {
                     name: pnm.clone(), vis: pvis, is_readonly: is_ro, is_mut: !is_ro,
-                    is_optional: false, is_rest: false, ty: ty.clone(), default: None, trivia: Trivia::default(),
+                    is_optional: false, is_rest: false, ty: ty.clone(), default: default.clone(), trivia: Trivia::default(),
                 });
                 if c_raw.contains("val ") || c_raw.contains("var ") {
                     props.push(PropDecl {
                         name: pnm, aliases: Vec::new(), vis: pvis, is_static: false, is_readonly: is_ro,
-                        is_mut: !is_ro, is_optional: false, ty, init: None, trivia: Trivia::default(),
+                        is_mut: !is_ro, is_optional: false, ty, init: default, trivia: Trivia::default(),
                     });
                 }
             }
@@ -106,20 +125,48 @@ fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) 
         .to_string();
     let mut params = Vec::new();
     if let Some(pl) = child_by_kind(node, "function_value_parameters") {
-        for p in named_children(pl) {
-            if p.kind() == "parameter" {
-                let pnm = child_by_kind(p, "identifier")
-                    .or_else(|| child_by_kind(p, "simple_identifier"))
-                    .map(|n| node_text(n, src).trim().to_string())
-                    .unwrap_or_else(|| "p".into());
-                let ty = child_by_kind(p, "type")
-                    .or_else(|| child_by_kind(p, "user_type"))
-                    .map(|t| map_type_str(node_text(t, src), LanguageId::Kotlin));
-                params.push(ParamDecl {
-                    name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
-                    is_optional: false, is_rest: false, ty, default: None, trivia: Trivia::default(),
-                });
+        let n = pl.child_count();
+        let mut i = 0;
+        while i < n {
+            let Some(raw_p) = pl.child(i) else { i += 1; continue };
+            if !raw_p.is_named() { i += 1; continue; }
+            let (p, mut default) = if raw_p.kind() == "function_value_parameter" {
+                let inner = child_by_kind(raw_p, "parameter").unwrap_or(raw_p);
+                let def = kt_default_expr(raw_p, src).or_else(|| kt_default_expr(inner, src));
+                (inner, def)
+            } else if raw_p.kind() == "parameter" {
+                (raw_p, kt_default_expr(raw_p, src))
+            } else {
+                i += 1;
+                continue;
+            };
+            if default.is_none()
+                && let Some(eq_tok) = pl.child(i + 1)
+                && (eq_tok.kind() == "=" || node_text(eq_tok, src).trim() == "=")
+            {
+                let mut j = i + 2;
+                while j < n {
+                    if let Some(val_n) = pl.child(j) && val_n.is_named() {
+                        default = Some(crate::decompile::expr_common::decompile_expr(val_n, src, LanguageId::Kotlin));
+                        i = j;
+                        break;
+                    }
+                    j += 1;
+                }
             }
+            let pnm = child_by_kind(p, "identifier")
+                .or_else(|| child_by_kind(p, "simple_identifier"))
+                .map(|n| node_text(n, src).trim().to_string())
+                .unwrap_or_else(|| "p".into());
+            let ty = child_by_kind(p, "type")
+                .or_else(|| child_by_kind(p, "user_type"))
+                .or_else(|| child_by_kind(p, "nullable_type"))
+                .map(|t| map_type_str(node_text(t, src), LanguageId::Kotlin));
+            params.push(ParamDecl {
+                name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
+                is_optional: false, is_rest: false, ty, default, trivia: Trivia::default(),
+            });
+            i += 1;
         }
     }
     let return_type = child_by_kind(node, "type")
@@ -142,6 +189,19 @@ fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) 
         vis: kt_vis(node, src), is_async: node_text(node, src).contains("suspend "), is_static: false,
         decorators: Vec::new(), name, type_params: Vec::new(), params, return_type, body, trivia: tr, span: node_span(node),
     }
+}
+
+fn kt_default_expr(node: Node<'_>, src: &str) -> Option<crate::ir_code::Expr> {
+    let mut seen_eq = false;
+    for i in 0..node.child_count() {
+        let Some(ch) = node.child(i) else { continue };
+        if !seen_eq {
+            if ch.kind() == "=" || node_text(ch, src).trim() == "=" { seen_eq = true; }
+        } else if ch.is_named() {
+            return Some(crate::decompile::expr_common::decompile_expr(ch, src, LanguageId::Kotlin));
+        }
+    }
+    None
 }
 
 fn kt_vis(node: Node<'_>, src: &str) -> Visibility {

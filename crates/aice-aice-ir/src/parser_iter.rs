@@ -21,7 +21,7 @@ pub(crate) enum ParseCont {
     ExprDblRef { inner_op: crate::ir_code::UnaryOp },
     ExprAwait,
     ExprParenClose,
-    ExprCallArg { callee: Expr, args: Vec<Expr>, is_optional: bool },
+    ExprCallArg { callee: Expr, args: Vec<Expr>, is_optional: bool, is_new: bool },
     ExprIndex { object: Expr, is_optional: bool },
     ExprTernaryThen { cond: Expr, next_prec: u8 },
     ExprTernaryElse { cond: Expr, then_expr: Expr },

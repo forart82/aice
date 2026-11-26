@@ -70,6 +70,10 @@ pub(crate) fn format_closure_param(p: &ParamDecl, def: Option<&str>, lang: Langu
             let nm = if p.name.starts_with('$') { p.name.clone() } else { format!("${}", p.name) };
             format!("{ty}{nm}{d}")
         }
+        LanguageId::CSharp => {
+            let ty = p.ty.as_ref().map(|t| format!("{} ", emit_type(t, lang))).unwrap_or_default();
+            format!("{ty}{}{d}", p.name)
+        }
         LanguageId::Dart => {
             let ty = p.ty.as_ref().map(|t| format!("{} ", emit_type(t, lang))).unwrap_or_default();
             format!("{ty}{}{d}", p.name)

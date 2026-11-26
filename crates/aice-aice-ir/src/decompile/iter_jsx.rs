@@ -166,13 +166,13 @@ pub(crate) fn finish_layout_to_expr(env: &mut DecompEnv<'_>, mut ln: LayoutNode,
         env.exprs.push(Expr::Call {
             callee: Box::new(Expr::Ident("__jsx".into())),
             args: vec![Expr::Literal(LiteralVal::Str { value: eff_tag, multiline: false }), Expr::Record(rec_entries), Expr::Literal(LiteralVal::Str { value: t, multiline: false })],
-            is_optional: false, is_tagged: false,
+            is_optional: false, is_tagged: false, is_new: false,
         });
     } else if let Some(ex) = child_expr {
         env.exprs.push(Expr::Call {
             callee: Box::new(Expr::Ident("__jsx".into())),
             args: vec![Expr::Literal(LiteralVal::Str { value: eff_tag, multiline: false }), Expr::Record(rec_entries), ex],
-            is_optional: false, is_tagged: false,
+            is_optional: false, is_tagged: false, is_new: false,
         });
     } else {
         env.tasks.push(DTask::FinishLayoutToExpr { eff_tag, rec_entries, len: children.len() });

@@ -94,6 +94,7 @@ impl<'a> DecompEnv<'a> {
                         args,
                         is_optional: false,
                         is_tagged: false,
+                        is_new: false,
                     });
                 }
                 DTask::StartMatchArms { node, is_expr, hdr_tr } => {

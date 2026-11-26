@@ -228,7 +228,17 @@ impl<'a> Parser<'a> {
             | "migration" => parse_db_item(self, trivia),
             "directive" => {
                 self.advance();
-                let text = self.line_rest_raw();
+                let text = if self.peek_kind() == TokenKind::TripleString
+                    || (self.peek_kind() == TokenKind::String
+                        && matches!(
+                            self.peek_n(1).kind,
+                            TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment
+                        ))
+                {
+                    self.advance().lexeme
+                } else {
+                    self.line_rest_raw()
+                };
                 let mut tr = trivia;
                 tr.trailing = self.take_trailing_comment();
                 Ok(AiceItem::Directive { text, trivia: tr, span: sp })

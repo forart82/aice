@@ -114,13 +114,22 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                 "field_declaration" => {
                     if let Some(vd) = named_children(ch).into_iter().find(|c| c.kind() == "variable_declaration") {
                         let ty = field_text(vd, "type", src).map(|t| map_type_str(t, LanguageId::CSharp));
+                        let mods = named_children(ch);
+                        let is_readonly = mods.iter().any(|c| c.kind() == "modifier" && matches!(node_text(*c, src).trim(), "readonly" | "const"))
+                            || node_text(ch, src).contains("readonly ");
+                        let is_static = mods.iter().any(|c| c.kind() == "modifier" && node_text(*c, src).trim() == "static");
                         for dec in named_children(vd) {
                             if dec.kind() == "variable_declarator" {
-                                let fnm = field_text(dec, "name", src).unwrap_or("f").to_string();
+                                let fnm = field_text(dec, "name", src)
+                                    .or_else(|| child_by_kind(dec, "identifier").map(|n| node_text(n, src)))
+                                    .unwrap_or("f")
+                                    .trim()
+                                    .to_string();
+                                let init = cs_init_expr(dec, src);
                                 props.push(PropDecl {
-                                    name: fnm, aliases: Vec::new(), vis: mvis, is_static: false,
-                                    is_readonly: node_text(ch, src).contains("readonly "), is_mut: true,
-                                    is_optional: false, ty: ty.clone(), init: None, trivia: mtr.clone(),
+                                    name: fnm, aliases: Vec::new(), vis: mvis, is_static,
+                                    is_readonly, is_mut: !is_readonly,
+                                    is_optional: false, ty: ty.clone(), init, trivia: mtr.clone(),
                                 });
                             }
                         }
@@ -161,15 +170,40 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
     }
 }
 
+fn cs_init_expr(node: Node<'_>, src: &str) -> Option<crate::ir_code::Expr> {
+    let raw = node.child_by_field_name("initializer")
+        .or_else(|| node.child_by_field_name("value"))
+        .or_else(|| child_by_kind(node, "equals_value_clause"))
+        .or_else(|| {
+            let mut seen_eq = false;
+            for i in 0..node.child_count() {
+                let Some(ch) = node.child(i) else { continue };
+                if !seen_eq {
+                    if ch.kind() == "=" || node_text(ch, src).trim() == "=" { seen_eq = true; }
+                } else if ch.is_named() {
+                    return Some(ch);
+                }
+            }
+            None
+        })?;
+    let inner = if raw.kind() == "equals_value_clause" {
+        named_children(raw).into_iter().next().unwrap_or(raw)
+    } else {
+        raw
+    };
+    Some(decompile_expr(inner, src, LanguageId::CSharp))
+}
+
 fn cs_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
     let mut out = Vec::new();
     for ch in named_children(pl) {
         if ch.kind() == "parameter" {
             let name = field_text(ch, "name", src).unwrap_or("p").to_string();
             let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::CSharp));
+            let default = cs_init_expr(ch, src);
             out.push(ParamDecl {
                 name, vis: Visibility::Default, is_readonly: false, is_mut: false,
-                is_optional: false, is_rest: false, ty, default: None, trivia: Trivia::default(),
+                is_optional: false, is_rest: false, ty, default, trivia: Trivia::default(),
             });
         }
     }

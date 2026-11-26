@@ -34,6 +34,10 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                 let ty = vd.ty.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Python))).unwrap_or_default();
                 ec.line(&format!("{}{ty} = {}", vd.name, emit_expr(&vd.value, LanguageId::Python, &ectx)));
             }
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.emit_trivia(trivia, CommentStyle::Hash);
+                for line in text.lines() { ec.line(line); }
+            }
             _ => {}
         }
     }

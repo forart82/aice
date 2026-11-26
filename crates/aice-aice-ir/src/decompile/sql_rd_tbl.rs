@@ -27,12 +27,7 @@ pub(crate) fn parse_create_table_text(
     let (mut columns, mut constraints) = (Vec::new(), Vec::new());
     for (p, ctr) in split_table_entries_with_trivia(body, lang, opts) {
         let pup = p.to_ascii_uppercase();
-        if pup.starts_with("PRIMARY KEY")
-            || pup.starts_with("FOREIGN KEY")
-            || pup.starts_with("CONSTRAINT ")
-            || pup.starts_with("UNIQUE ")
-            || pup.starts_with("CHECK ")
-        {
+        if is_table_constraint_entry(&pup) {
             constraints.push(p);
         } else {
             let mut toks = p.split_whitespace();
@@ -44,6 +39,44 @@ pub(crate) fn parse_create_table_text(
         }
     }
     DbSchemaDecl::Table { name, if_not_exists, columns, constraints, options, trivia }
+}
+
+fn is_table_constraint_entry(pup: &str) -> bool {
+    if pup.starts_with("PRIMARY KEY")
+        || pup.starts_with("FOREIGN KEY")
+        || pup.starts_with("CONSTRAINT ")
+        || pup.starts_with("UNIQUE ")
+        || pup.starts_with("UNIQUE(")
+        || pup.starts_with("CHECK ")
+        || pup.starts_with("CHECK(")
+        || pup.starts_with("FULLTEXT KEY ")
+        || pup.starts_with("FULLTEXT KEY(")
+        || pup.starts_with("FULLTEXT INDEX ")
+        || pup.starts_with("FULLTEXT INDEX(")
+        || pup.starts_with("FULLTEXT ")
+        || pup.starts_with("FULLTEXT(")
+        || pup.starts_with("SPATIAL KEY ")
+        || pup.starts_with("SPATIAL KEY(")
+        || pup.starts_with("SPATIAL INDEX ")
+        || pup.starts_with("SPATIAL INDEX(")
+        || pup.starts_with("SPATIAL ")
+        || pup.starts_with("SPATIAL(")
+        || pup.starts_with("KEY(")
+        || pup.starts_with("INDEX(")
+    {
+        return true;
+    }
+    if let Some(rest) = pup.strip_prefix("KEY ").or_else(|| pup.strip_prefix("INDEX ")) {
+        let mut toks = rest.split_whitespace();
+        let Some(t1) = toks.next() else { return false; };
+        if t1.starts_with('(') {
+            return true;
+        }
+        if let Some(t2) = toks.next() {
+            return t2.starts_with('(') || t2 == "USING";
+        }
+    }
+    false
 }
 
 fn find_matching_rparen(s: &str, lp: usize) -> Option<usize> {

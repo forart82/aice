@@ -25,6 +25,11 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
         match item {
             AiceItem::Class(cd) => emit_kt_class(&mut ec, cd, &ectx),
             AiceItem::Fn(fd) => emit_kt_fn(&mut ec, fd, &ectx),
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.blank();
+                ec.emit_trivia(trivia, CommentStyle::Slash);
+                for line in text.lines() { ec.line(line); }
+            }
             _ => {}
         }
     }
@@ -42,7 +47,8 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
             let v = kt_vis(p.vis);
             let kw = if p.is_readonly { "val " } else { "var " };
             let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin)).unwrap_or_else(|| "Any".into());
-            format!("{v}{kw}{}: {t}", p.name)
+            let d = p.default.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Kotlin, ectx))).unwrap_or_default();
+            format!("{v}{kw}{}: {t}{d}", p.name)
         }).collect();
         format!("({})", ps.join(", "))
     };
@@ -59,7 +65,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 
 fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
-    let ps = emit_kt_params(&m.params);
+    let ps = emit_kt_params(&m.params, ectx);
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Kotlin))).unwrap_or_default();
     ec.line(&format!("{}fun {}({ps}){rt} {{", kt_vis(m.vis), m.name));
     ec.push();
@@ -75,7 +81,7 @@ fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
 fn emit_kt_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
-    let ps = emit_kt_params(&f.params);
+    let ps = emit_kt_params(&f.params, ectx);
     let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Kotlin))).unwrap_or_default();
     ec.line(&format!("{}fun {}({ps}){rt} {{", kt_vis(f.vis), f.name));
     ec.push();
@@ -88,10 +94,11 @@ fn emit_kt_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.line("}");
 }
 
-fn emit_kt_params(params: &[ParamDecl]) -> String {
+fn emit_kt_params(params: &[ParamDecl], ectx: &ExprEmitCtx) -> String {
     params.iter().map(|p| {
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin)).unwrap_or_else(|| "Any".into());
-        format!("{}: {t}", p.name)
+        let d = p.default.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Kotlin, ectx))).unwrap_or_default();
+        format!("{}: {t}{d}", p.name)
     }).collect::<Vec<_>>().join(", ")
 }
 

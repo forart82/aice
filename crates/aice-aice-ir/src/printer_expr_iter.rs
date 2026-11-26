@@ -100,7 +100,7 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             tasks.push(PTask::Expr(e));
             if wrap { out.push('('); }
         }
-        Expr::Call { callee, args, is_optional, .. } => {
+        Expr::Call { callee, args, is_optional, is_new, .. } => {
             tasks.push(PTask::Lit(")"));
             for (i, a) in args.iter().enumerate().rev() {
                 tasks.push(PTask::Expr(a));
@@ -108,6 +108,7 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             }
             tasks.push(PTask::Lit(if *is_optional { "?.(" } else { "(" }));
             tasks.push(PTask::Expr(callee));
+            if *is_new { out.push_str("new "); }
         }
         Expr::Member { object, property, kind } => {
             let op = match kind { MemberKind::Dot => ".", MemberKind::SafeNav => "?.", MemberKind::Scope => "::" };

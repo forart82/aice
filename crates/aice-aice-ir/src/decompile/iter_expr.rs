@@ -4,8 +4,9 @@ use tree_sitter::Node;
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
 use crate::decompile::expr_lit::{parse_dollar_interp, parse_interp_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
+use crate::decompile::iter_expr_call::{push_call_task, push_php_array_task};
 use crate::decompile::iter_expr_fin::{
-    push_binary_task, push_call_task, push_lambda_task, push_unary_task,
+    push_binary_task, push_lambda_task, push_unary_task,
 };
 use crate::decompile::iter_match::push_match_task;
 use crate::ir_code::{AssignOp, Expr, LiteralVal, MemberKind, UnaryOp};
@@ -21,7 +22,7 @@ pub(crate) enum ExprFin {
     Conditional,
     Member { property: String, kind: MemberKind },
     Index { is_optional: bool },
-    Call { has_callee_expr: bool, callee_name: String, recv_prop: Option<String>, argc: usize, has_ruby_blk: bool, is_optional: bool },
+    Call { has_callee_expr: bool, callee_name: String, recv_prop: Option<String>, argc: usize, has_ruby_blk: bool, is_optional: bool, is_new: bool },
     RubyNilCheck,
     Binary(crate::ir_code::BinaryOp),
     Unary { op: UnaryOp, is_postfix: bool },
@@ -158,7 +159,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         }
         "call_expression" | "call" | "invocation_expression" | "method_invocation"
         | "function_call_expression" | "member_call_expression" | "object_creation_expression"
-        | "new_expression" => push_call_task(env, node, raw),
+        | "implicit_object_creation_expression" | "new_expression" => push_call_task(env, node, raw),
         "binary_expression" | "binary_operator" | "boolean_operator" | "comparison_operator" | "binary" => {
             push_binary_task(env, node, raw);
         }
@@ -248,6 +249,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }
             }
         }
+        "array_creation_expression" => push_php_array_task(env, node),
         "array" | "array_expression" | "list" | "array_literal" | "list_literal" => {
             let xs: Vec<_> = named_children(node).into_iter()
                 .filter(|c| !matches!(c.kind(), "type_arguments" | "type_argument_list")).collect();

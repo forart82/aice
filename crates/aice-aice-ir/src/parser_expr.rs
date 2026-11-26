@@ -1,5 +1,5 @@
 use crate::ir::TranspileError;
-use crate::ir_code::{AssignOp, BinaryOp, Expr};
+use crate::ir_code::{AssignOp, BinaryOp, Expr, MemberKind};
 use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
 use crate::parser_iter::{ParseCont, ParseVal, run_parse_loop};
@@ -9,6 +9,58 @@ pub(crate) fn parse_expr(p: &mut Parser<'_>) -> Result<Expr, TranspileError> {
         ParseVal::Expr(e) => Ok(e),
         _ => unreachable!(),
     }
+}
+
+pub(crate) fn parse_new_prefix(
+    p: &mut Parser<'_>,
+    stack: &mut Vec<ParseCont>,
+    vals: &mut Vec<ParseVal>,
+) -> Result<(), TranspileError> {
+    p.advance(); // "new"
+    let mut ctor = Expr::Ident(p.advance().lexeme);
+    while matches!(p.peek_kind(), TokenKind::Dot | TokenKind::ColonColon) {
+        let mk = if p.advance().kind == TokenKind::ColonColon { MemberKind::Scope } else { MemberKind::Dot };
+        let prop = p.expect_ident_or_kw("Expected member name")?.lexeme;
+        ctor = Expr::Member { object: Box::new(ctor), property: prop, kind: mk };
+    }
+    if p.peek_kind() == TokenKind::Lt {
+        let start = p.peek().span.start_byte;
+        let (mut depth, mut end) = (0usize, start);
+        while !p.at_eof() {
+            let t = p.advance();
+            end = t.span.end_byte;
+            if t.kind == TokenKind::Lt { depth += 1; }
+            else if t.kind == TokenKind::Gt {
+                depth = depth.saturating_sub(1);
+                if depth == 0 { break; }
+            } else if t.kind == TokenKind::Shr {
+                depth = depth.saturating_sub(2);
+                if depth == 0 { break; }
+            }
+        }
+        let gargs = &p.src[start..end];
+        match &mut ctor {
+            Expr::Ident(s) => s.push_str(gargs),
+            Expr::Member { property, .. } => property.push_str(gargs),
+            _ => {}
+        }
+    }
+    if p.eat(TokenKind::LParen) {
+        if p.peek_kind() == TokenKind::RParen || p.at_eof() {
+            p.expect(TokenKind::RParen, "Expected ')'")?;
+            vals.push(ParseVal::Expr(Expr::Call {
+                callee: Box::new(ctor), args: Vec::new(), is_optional: false, is_tagged: false, is_new: true,
+            }));
+        } else {
+            stack.push(ParseCont::ExprCallArg { callee: ctor, args: Vec::new(), is_optional: false, is_new: true });
+            stack.push(ParseCont::Expr(1));
+        }
+    } else {
+        vals.push(ParseVal::Expr(Expr::Call {
+            callee: Box::new(ctor), args: Vec::new(), is_optional: false, is_tagged: false, is_new: true,
+        }));
+    }
+    Ok(())
 }
 
 pub(crate) fn infix_prec(kind: TokenKind) -> Option<(u8, bool)> {

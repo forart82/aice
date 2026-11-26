@@ -24,7 +24,10 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
 
     for item in &module.items {
         match item {
-            AiceItem::Directive { text, .. } => ec.line(text),
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.emit_trivia(trivia, CommentStyle::Slash);
+                for line in text.lines() { ec.line(line); }
+            }
             AiceItem::Import(imp) => ec.line(&format!("use {};", imp.source)),
             AiceItem::Class(cd) => emit_php_class(&mut ec, cd, &ectx),
             AiceItem::Fn(fd) => emit_php_fn(&mut ec, fd, &ectx),
@@ -59,7 +62,7 @@ fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 fn emit_php_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     ec.emit_attrs(&m.trivia);
-    let ps = emit_php_params(&m.params);
+    let ps = emit_php_params(&m.params, ectx);
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Php))).unwrap_or_default();
     ec.line(&format!("{}function {}({ps}){rt} {{", php_vis(m.vis), m.name));
     ec.push();
@@ -78,7 +81,7 @@ fn emit_php_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     for dec in &f.decorators {
         if dec.starts_with("#[") { ec.line(dec); }
     }
-    let ps = emit_php_params(&f.params);
+    let ps = emit_php_params(&f.params, ectx);
     let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Php))).unwrap_or_default();
     ec.line(&format!("function {}({ps}){rt} {{", f.name));
     ec.push();
@@ -91,13 +94,17 @@ fn emit_php_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.line("}");
 }
 
-fn emit_php_params(params: &[ParamDecl]) -> String {
+fn emit_php_params(params: &[ParamDecl], ectx: &ExprEmitCtx) -> String {
     params.iter().map(|p| {
         let nm = if p.name.starts_with('$') { p.name.clone() } else { format!("${}", p.name) };
-        match &p.ty {
+        let mut s = match &p.ty {
             Some(t) => format!("{} {nm}", emit_type(t, LanguageId::Php)),
             None => nm,
+        };
+        if let Some(ref def) = p.default {
+            s.push_str(&format!(" = {}", emit_expr(def, LanguageId::Php, ectx)));
         }
+        s
     }).collect::<Vec<_>>().join(", ")
 }
 

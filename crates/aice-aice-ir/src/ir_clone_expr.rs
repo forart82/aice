@@ -31,9 +31,9 @@ impl<'a> CloneEnv<'a> {
                 self.tasks.push(CloneTask::FinishExpr(ExprFinish::PostfixTry));
                 self.tasks.push(CloneTask::Expr(op));
             }
-            Expr::Call { callee, args, is_optional, is_tagged } => {
+            Expr::Call { callee, args, is_optional, is_tagged, is_new } => {
                 self.tasks.push(CloneTask::FinishExpr(ExprFinish::Call {
-                    argc: args.len(), is_optional: *is_optional, is_tagged: *is_tagged,
+                    argc: args.len(), is_optional: *is_optional, is_tagged: *is_tagged, is_new: *is_new,
                 }));
                 for a in args.iter().rev() { self.tasks.push(CloneTask::Expr(a)); }
                 self.tasks.push(CloneTask::Expr(callee));
@@ -101,10 +101,10 @@ impl<'a> CloneEnv<'a> {
                 Expr::Conditional { cond, then_expr, else_expr }
             }
             ExprFinish::PostfixTry => Expr::PostfixTry(Box::new(self.exprs.pop().expect("try"))),
-            ExprFinish::Call { argc, is_optional, is_tagged } => {
+            ExprFinish::Call { argc, is_optional, is_tagged, is_new } => {
                 let args = self.exprs.split_off(self.exprs.len() - argc);
                 let callee = Box::new(self.exprs.pop().expect("callee"));
-                Expr::Call { callee, args, is_optional, is_tagged }
+                Expr::Call { callee, args, is_optional, is_tagged, is_new }
             }
             ExprFinish::Member { property, kind } => {
                 Expr::Member { object: Box::new(self.exprs.pop().expect("mem")), property, kind }

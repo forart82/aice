@@ -41,7 +41,7 @@ pub fn compile(module: &AiceModule, target: LanguageId) -> Result<String, Transp
             AiceItem::Component(comp) => emit_component(&mut ec, comp, target, &ectx),
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                ec.line(text);
+                for line in text.lines() { ec.line(line); }
             }
             _ => {}
         }

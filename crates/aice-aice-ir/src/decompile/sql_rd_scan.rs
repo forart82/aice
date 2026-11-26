@@ -1,8 +1,8 @@
 use aice_lang_registry::{LanguageId, RdNode};
 
+use crate::decompile::sql_rd_proc::try_parse_create_routine;
 use crate::decompile::sql_rd_tbl::{
-    extract_keyword_val, extract_paren_list, parse_create_index_text, parse_create_table_text,
-    push_utf8_char,
+    parse_create_index_text, parse_create_table_text, push_utf8_char,
 };
 use crate::decompile::trivia::clean_comment;
 use crate::ir::{AiceItem, TranspileOpts, Trivia, TriviaComment, TriviaKind};
@@ -275,19 +275,8 @@ fn parse_sql_stmt_to_item(
     if up.starts_with("CREATE ") && (up.contains(" TRIGGER ") || up.contains(" VIEW ")) {
         return AiceItem::DbSchema(DbSchemaDecl::RawDdl { text: trimmed.into(), trivia });
     }
-    if up.starts_with("CREATE ") && (up.contains(" FUNCTION ") || up.contains(" PROCEDURE ")) {
-        let is_fn = up.contains(" FUNCTION ");
-        let kw = if is_fn { "FUNCTION" } else { "PROCEDURE" };
-        let after = up.find(kw).map(|idx| stmt[idx + kw.len()..].trim()).unwrap_or(stmt);
-        let name = after.split(|c: char| c == '(' || c.is_whitespace()).next().unwrap_or("routine").to_string();
-        let after_name = after.get(name.len()..).unwrap_or("").trim_start();
-        let params = if after_name.starts_with('(') { extract_paren_list(after_name) } else { Vec::new() };
-        let returns = extract_keyword_val(stmt, "RETURNS");
-        let lang_tag = extract_keyword_val(stmt, "LANGUAGE");
-        return AiceItem::DbSchema(DbSchemaDecl::Procedure {
-            dialect: lang, is_fn, name, params, returns, lang_tag,
-            declares: Vec::new(), body_lines: vec![trimmed.into()], trivia,
-        });
+    if let Some(proc_decl) = try_parse_create_routine(lang, stmt, trimmed, trivia.clone()) {
+        return AiceItem::DbSchema(proc_decl);
     }
     AiceItem::DbSchema(DbSchemaDecl::RawDdl { text: trimmed.into(), trivia })
 }

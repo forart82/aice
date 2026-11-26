@@ -36,7 +36,7 @@ pub(crate) enum CTask<'a> {
     MakeMember { property: &'a str, kind: MemberKind },
     MakeAssign(AssignOp),
     MakeAwait,
-    MakeCall { callee_lit: Option<String>, class_new: Option<String>, n_args: usize, is_optional: bool },
+    MakeCall { callee_lit: Option<String>, class_new: Option<String>, n_args: usize, is_optional: bool, is_new: bool },
     MakeRustStructCall,
     MakeRubyBlock { params: &'a [ParamDecl], body_kind: u8, n_prefix: usize },
     MakeClosure { is_async: bool, params: &'a [ParamDecl], ret: Option<&'a AiceType>, body_kind: u8 },

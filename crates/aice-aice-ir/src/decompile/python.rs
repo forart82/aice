@@ -104,15 +104,27 @@ fn decompile_py_item(
             m.items.push(AiceItem::Fn(fd));
         }
         "expression_statement" => {
-            if let Some(asn) = named_children(node).into_iter().find(|c| c.kind() == "assignment") {
+            if let Some(asn) = named_children(node).into_iter().find(|c| c.kind() == "assignment")
+                && asn.child_by_field_name("left").is_some_and(|l| l.kind() == "identifier")
+            {
                 let name = field_text(asn, "left", src).unwrap_or("x").to_string();
                 let ty = field_text(asn, "type", src).map(|t| map_type_str(t, LanguageId::Python));
                 let value = asn.child_by_field_name("right").map(|v| decompile_expr(v, src, LanguageId::Python))
                     .unwrap_or(crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Nil));
                 m.items.push(AiceItem::Var(VarDecl { vis: py_vis(&name), is_mut: true, name, ty, value, trivia: tr, span: node_span(node) }));
+            } else {
+                let txt = node_text(node, src).trim();
+                if !txt.is_empty() {
+                    m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(node) });
+                }
             }
         }
-        _ => {}
+        _ => {
+            let txt = node_text(node, src).trim();
+            if !txt.is_empty() {
+                m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(node) });
+            }
+        }
         }
     }
 }

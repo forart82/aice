@@ -16,7 +16,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
             if is_comment_kind(ch.kind()) { continue; }
             let tr = collect_trivia(ch, src, opts);
             match ch.kind() {
-                "php_tag" => {}
+                "php_tag" | "php_end_tag" => {}
                 "declare_statement" => {
                     m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: tr, span: node_span(ch) });
                 }
@@ -36,7 +36,12 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     m.items.push(AiceItem::Class(decompile_php_class(ch, src, opts, tr)));
                 }
                 "function_definition" => m.items.push(AiceItem::Fn(decompile_php_fn(ch, src, opts, tr))),
-                _ => {}
+                _ => {
+                    let txt = node_text(ch, src).trim();
+                    if !txt.is_empty() {
+                        m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(ch) });
+                    }
+                }
             }
         }
         Ok(m)
@@ -107,12 +112,15 @@ fn decompile_php_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia)
     let mut params = Vec::new();
     if let Some(pl) = node.child_by_field_name("parameters") {
         for ch in named_children(pl) {
-            if ch.kind() == "simple_parameter" {
+            if matches!(ch.kind(), "simple_parameter" | "property_promotion_parameter") {
                 let pnm = field_text(ch, "name", src).unwrap_or("$p").trim().trim_start_matches('$').to_string();
                 let ty = ch.child_by_field_name("type").map(|t| map_type_str(node_text(t, src), LanguageId::Php));
+                let default = php_param_default(ch, src);
+                let is_ro = child_by_kind(ch, "readonly_modifier").is_some();
+                let vis = if ch.kind() == "property_promotion_parameter" { php_vis(ch, src) } else { Visibility::Default };
                 params.push(ParamDecl {
-                    name: pnm, vis: Visibility::Default, is_readonly: false, is_mut: false,
-                    is_optional: false, is_rest: false, ty, default: None, trivia: Trivia::default(),
+                    name: pnm, vis, is_readonly: is_ro, is_mut: false,
+                    is_optional: false, is_rest: false, ty, default, trivia: Trivia::default(),
                 });
             }
         }
@@ -139,6 +147,22 @@ fn extract_php_attrs(node: Node<'_>, src: &str) -> Vec<String> {
         }
     }
     out
+}
+
+fn php_param_default(ch: Node<'_>, src: &str) -> Option<crate::ir_code::Expr> {
+    let val = ch.child_by_field_name("default_value").or_else(|| {
+        let mut seen_eq = false;
+        for i in 0..ch.child_count() {
+            let Some(c) = ch.child(i) else { continue };
+            if !seen_eq {
+                if c.kind() == "=" || node_text(c, src).trim() == "=" { seen_eq = true; }
+            } else if c.is_named() {
+                return Some(c);
+            }
+        }
+        None
+    })?;
+    Some(crate::decompile::expr_common::decompile_expr(val, src, LanguageId::Php))
 }
 
 fn php_vis(node: Node<'_>, src: &str) -> Visibility {

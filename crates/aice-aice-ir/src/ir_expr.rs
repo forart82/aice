@@ -71,6 +71,7 @@ pub enum Expr {
         args: Vec<Expr>,
         is_optional: bool,
         is_tagged: bool,
+        is_new: bool,
     },
     Member {
         object: Box<Expr>,

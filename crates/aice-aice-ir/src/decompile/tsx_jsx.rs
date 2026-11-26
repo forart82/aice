@@ -91,6 +91,9 @@ pub(crate) fn extract_lambda_params<'a>(
     src: &'a str,
     lang: LanguageId,
 ) -> (Vec<ParamDecl>, Vec<Option<Node<'a>>>) {
+    if lang == LanguageId::CSharp {
+        return extract_cs_lambda_params(node, src);
+    }
     let mut params = Vec::new();
     let mut def_nodes = Vec::new();
     if let Some(pn) = node.child_by_field_name("parameters").or_else(|| node.child_by_field_name("parameter")) {
@@ -110,6 +113,52 @@ pub(crate) fn extract_lambda_params<'a>(
                     def_nodes.push(None);
                 }
             }
+        }
+    }
+    (params, def_nodes)
+}
+
+fn extract_cs_lambda_params<'a>(node: Node<'a>, src: &'a str) -> (Vec<ParamDecl>, Vec<Option<Node<'a>>>) {
+    let mut params = Vec::new();
+    let mut def_nodes = Vec::new();
+    let body_id = node.child_by_field_name("body").map(|b| b.id());
+    let pn = node.child_by_field_name("parameters")
+        .or_else(|| node.child_by_field_name("parameter"))
+        .or_else(|| crate::decompile::cst_util::child_by_kind(node, "parameter_list"))
+        .or_else(|| crate::decompile::cst_util::child_by_kind(node, "implicit_parameter"))
+        .or_else(|| {
+            named_children(node).into_iter().find(|c| {
+                Some(c.id()) != body_id
+                    && matches!(c.kind(), "identifier" | "implicit_parameter" | "parameter_list")
+            })
+        });
+    let Some(pn) = pn else { return (params, def_nodes); };
+    if pn.kind() == "parameter_list" {
+        for c in named_children(pn) {
+            if c.kind() == "parameter" {
+                let name = field_text(c, "name", src)
+                    .or_else(|| crate::decompile::cst_util::child_by_kind(c, "identifier").map(|n| node_text(n, src)))
+                    .unwrap_or_else(|| node_text(c, src))
+                    .trim().to_string();
+                if name.is_empty() { continue; }
+                let ty = field_text(c, "type", src).map(|t| map_type_str(t, LanguageId::CSharp));
+                let def = crate::decompile::cst_util::child_by_kind(c, "equals_value_clause")
+                    .and_then(|eq| named_children(eq).into_iter().next());
+                params.push(ParamDecl { name, vis: Default::default(), is_readonly: false, is_mut: false, is_optional: false, is_rest: false, ty, default: None, trivia: Trivia::default() });
+                def_nodes.push(def);
+            } else {
+                let nm = node_text(c, src).trim().to_string();
+                if !nm.is_empty() {
+                    params.push(ParamDecl { name: nm, vis: Default::default(), is_readonly: false, is_mut: false, is_optional: false, is_rest: false, ty: None, default: None, trivia: Trivia::default() });
+                    def_nodes.push(None);
+                }
+            }
+        }
+    } else {
+        let nm = node_text(pn, src).trim().to_string();
+        if !nm.is_empty() {
+            params.push(ParamDecl { name: nm, vis: Default::default(), is_readonly: false, is_mut: false, is_optional: false, is_rest: false, ty: None, default: None, trivia: Trivia::default() });
+            def_nodes.push(None);
         }
     }
     (params, def_nodes)

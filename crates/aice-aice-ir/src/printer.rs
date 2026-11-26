@@ -141,11 +141,47 @@ pub(crate) fn print_item(c: &mut PrintCtx<'_>, item: &AiceItem, d: usize) {
         AiceItem::DbMigration(dm) => print_db_migration(c, dm, d),
         AiceItem::Doc(doc) => print_doc(c, doc, d),
         AiceItem::Shell(sh) => print_sh(c, sh, d),
-        AiceItem::Directive { text, trivia, .. } => {
-            c.emit_trivia(trivia, d);
-            c.line_tr(d, &format!("directive {text}"), trivia);
+        AiceItem::Directive { text, trivia, .. } => print_directive(c, text, trivia, d),
+    }
+}
+
+fn print_directive(c: &mut PrintCtx<'_>, text: &str, trivia: &Trivia, d: usize) {
+    c.emit_trivia(trivia, d);
+    if text.contains('\n') || text.contains('\r') {
+        if !text.contains("\"\"\"") {
+            c.line_tr(d, &format!("directive \"\"\"\n{text}\n\"\"\""), trivia);
+        } else if !text.contains("'''") {
+            c.line_tr(d, &format!("directive '''\n{text}\n'''"), trivia);
+        } else {
+            c.line_tr(d, &format!("directive \"{}\"", escape_str(text)), trivia);
+        }
+    } else if is_safe_raw_directive(text) {
+        c.line_tr(d, &format!("directive {text}"), trivia);
+    } else {
+        c.line_tr(d, &format!("directive \"{}\"", escape_str(text)), trivia);
+    }
+}
+
+fn is_safe_raw_directive(text: &str) -> bool {
+    if text.is_empty() || text.starts_with('"') || text.starts_with('\'') {
+        return false;
+    }
+    let Ok(toks) = crate::lexer::lex_with_trivia(text) else { return false };
+    let (mut p, mut b, mut c) = (0isize, 0isize, 0isize);
+    for t in &toks {
+        use crate::lexer_tokens::TokenKind;
+        match t.kind {
+            TokenKind::Comment | TokenKind::Indent | TokenKind::Dedent => return false,
+            TokenKind::LParen => p += 1,
+            TokenKind::RParen => { p -= 1; if p < 0 { return false; } }
+            TokenKind::LBracket => b += 1,
+            TokenKind::RBracket => { b -= 1; if b < 0 { return false; } }
+            TokenKind::LBrace => c += 1,
+            TokenKind::RBrace => { c -= 1; if c < 0 { return false; } }
+            _ => {}
         }
     }
+    p == 0 && b == 0 && c == 0
 }
 
 fn print_import(c: &mut PrintCtx<'_>, imp: &ImportDecl, d: usize) {

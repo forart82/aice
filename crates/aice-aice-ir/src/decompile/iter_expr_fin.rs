@@ -1,71 +1,10 @@
 use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text};
+use crate::decompile::cst_util::{child_by_kind, named_children, node_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::{ExprFin, ObjSlot};
-use crate::ir::Trivia;
 use crate::ir_code::{BinaryOp, Expr, FnBody, LiteralVal, MemberKind, RecordEntry, UnaryOp};
-use crate::ir_types::ParamDecl;
-
-pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
-    if matches!(node.kind(), "new_expression" | "object_creation_expression") {
-        let cls = field_text(node, "constructor", env.src).or_else(|| field_text(node, "type", env.src))
-            .or_else(|| named_children(node).first().map(|c| node_text(*c, env.src))).unwrap_or("Object").trim().to_string();
-        let arg_nodes = node.child_by_field_name("arguments").map(named_children).unwrap_or_default();
-        env.tasks.push(DTask::FinishExpr(ExprFin::Call {
-            has_callee_expr: false, callee_name: cls, recv_prop: None, argc: arg_nodes.len(),
-            has_ruby_blk: false, is_optional: false,
-        }));
-        for a in arg_nodes.into_iter().rev() { env.tasks.push(DTask::Expr(a)); }
-        return;
-    }
-    let callee_node = node.child_by_field_name("function").or_else(|| node.child_by_field_name("method"))
-        .or_else(|| node.child_by_field_name("name")).or_else(|| named_children(node).into_iter().next());
-    let args_node = node.child_by_field_name("arguments")
-        .or_else(|| named_children(node).into_iter().find(|c| c.kind().contains("argument")));
-    let Some(cn) = callee_node else { env.exprs.push(Expr::Ident(raw.to_string())); return; };
-    let obj = node.child_by_field_name("object").or_else(|| node.child_by_field_name("receiver"));
-    let prop = node_text(cn, env.src).trim().to_string();
-    if let Some(o) = obj && env.lang == LanguageId::Ruby && prop == "nil?" && args_node.is_none() {
-        env.tasks.push(DTask::FinishExpr(ExprFin::RubyNilCheck));
-        env.tasks.push(DTask::Expr(o));
-        return;
-    }
-    let arg_nodes = args_node.map(named_children).unwrap_or_default();
-    let ruby_blk = (env.lang == LanguageId::Ruby).then(|| {
-        node.child_by_field_name("block").or_else(|| child_by_kind(node, "block")).or_else(|| child_by_kind(node, "do_block"))
-    }).flatten();
-    let is_optional = child_by_kind(node, "optional_chain").is_some()
-        || args_node.is_some_and(|an| {
-            env.src.get(cn.end_byte()..an.start_byte()).is_some_and(|g| g.contains("?."))
-        });
-    env.tasks.push(DTask::FinishExpr(ExprFin::Call {
-        has_callee_expr: true, callee_name: String::new(), recv_prop: obj.map(|_| prop),
-        argc: arg_nodes.len(), has_ruby_blk: ruby_blk.is_some(), is_optional,
-    }));
-    if let Some(blk) = ruby_blk { push_ruby_block_task(env, blk); }
-    for a in arg_nodes.into_iter().rev() { env.tasks.push(DTask::Expr(a)); }
-    if let Some(o) = obj { env.tasks.push(DTask::Expr(o)); } else { env.tasks.push(DTask::Expr(cn)); }
-}
-
-fn push_ruby_block_task<'a>(env: &mut DecompEnv<'a>, blk: Node<'a>) {
-    let mut params = Vec::new();
-    if let Some(pn) = blk.child_by_field_name("parameters").or_else(|| child_by_kind(blk, "block_parameters")) {
-        for c in named_children(pn) {
-            let nm = node_text(c, env.src).trim().to_string();
-            if !nm.is_empty() {
-                params.push(ParamDecl {
-                    name: nm, vis: Default::default(), is_readonly: false, is_mut: false,
-                    is_optional: false, is_rest: false, ty: None, default: None, trivia: Trivia::default(),
-                });
-            }
-        }
-    }
-    let body_node = blk.child_by_field_name("body").or_else(|| child_by_kind(blk, "block_body")).or_else(|| child_by_kind(blk, "body_statement"));
-    env.tasks.push(DTask::FinishExpr(ExprFin::RubyBlock { params, has_body: body_node.is_some() }));
-    if let Some(b) = body_node { env.tasks.push(DTask::Block(b)); }
-}
 
 pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     let (params, default_nodes) = crate::decompile::tsx_jsx::extract_lambda_params(node, env.src, env.lang);
@@ -199,7 +138,7 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             Expr::Index { object, index, is_optional }
         }
         ExprFin::RubyNilCheck => Expr::Binary { op: BinaryOp::Eq, left: Box::new(env.exprs.pop().expect("nilchk")), right: Box::new(Expr::Literal(LiteralVal::Nil)) },
-        ExprFin::Call { has_callee_expr, callee_name, recv_prop, argc, has_ruby_blk, is_optional } => {
+        ExprFin::Call { has_callee_expr, callee_name, recv_prop, argc, has_ruby_blk, is_optional, is_new } => {
             let blk_expr = has_ruby_blk.then(|| env.exprs.pop().expect("rb blk"));
             let mut args = env.exprs.split_off(env.exprs.len() - argc);
             if let Some(b) = blk_expr { args.push(b); }
@@ -208,7 +147,7 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
                 let c = env.exprs.pop().expect("callee");
                 if let Some(prop) = recv_prop { Expr::Member { object: Box::new(c), property: prop, kind: MemberKind::Dot } } else { c }
             };
-            Expr::Call { callee: Box::new(callee), args, is_optional, is_tagged: false }
+            Expr::Call { callee: Box::new(callee), args, is_optional, is_tagged: false, is_new }
         }
         ExprFin::Binary(op) => {
             let right = Box::new(env.exprs.pop().expect("bin r"));
@@ -224,7 +163,7 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
         ExprFin::StructExpr { sname, slots } => {
             let vals = env.exprs.split_off(env.exprs.len() - slots.len());
             let recs = build_record_entries(slots, vals);
-            Expr::Call { callee: Box::new(Expr::Ident(sname)), args: vec![Expr::Record(recs)], is_optional: false, is_tagged: false }
+            Expr::Call { callee: Box::new(Expr::Ident(sname)), args: vec![Expr::Record(recs)], is_optional: false, is_tagged: false, is_new: false }
         }
         ExprFin::Object(slots) => {
             let vals = env.exprs.split_off(env.exprs.len() - slots.len());

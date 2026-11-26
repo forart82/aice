@@ -33,7 +33,7 @@ pub(crate) enum ExprFinish {
     Unary { op: UnaryOp, is_postfix: bool },
     Conditional,
     PostfixTry,
-    Call { argc: usize, is_optional: bool, is_tagged: bool },
+    Call { argc: usize, is_optional: bool, is_tagged: bool, is_new: bool },
     Member { property: String, kind: MemberKind },
     Index { is_optional: bool },
     Array(usize),

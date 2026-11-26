@@ -73,7 +73,7 @@ fn emit_cs_type(ec: &mut EmitCtx, td: &TypeDecl, _ectx: &ExprEmitCtx) {
         ec.line(&format!("{t} {} {{ get; set; }}", f.name));
     }
     for m in &td.methods {
-        let ps = emit_cs_params(&m.params);
+        let ps = emit_cs_params(&m.params, _ectx);
         let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::CSharp)).unwrap_or_else(|| "void".into());
         ec.line(&format!("{rt} {}({ps});", m.name));
     }
@@ -87,7 +87,7 @@ fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     let kw = if cd.decorators.iter().any(|d| d == "record") { "record" }
     else if cd.decorators.iter().any(|d| d == "struct") { "struct" }
     else { "class" };
-    let ctor = if cd.primary_ctor.is_empty() { String::new() } else { format!("({})", emit_cs_params(&cd.primary_ctor)) };
+    let ctor = if cd.primary_ctor.is_empty() { String::new() } else { format!("({})", emit_cs_params(&cd.primary_ctor, ectx)) };
     if kw == "record" && cd.props.is_empty() && cd.methods.is_empty() {
         ec.line(&format!("{}{kw} {}{ctor};", cs_vis(cd.vis), cd.name));
         return;
@@ -116,7 +116,7 @@ fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 fn emit_cs_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
-    let ps = emit_cs_params(&m.params);
+    let ps = emit_cs_params(&m.params, ectx);
     let st = if m.is_static { "static " } else { "" };
     let asy = if m.is_async { "async " } else { "" };
     let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::CSharp)).unwrap_or_else(|| "void".into());
@@ -149,7 +149,7 @@ fn emit_cs_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &ExprE
 fn emit_cs_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
-    let ps = emit_cs_params(&f.params);
+    let ps = emit_cs_params(&f.params, ectx);
     let asy = if f.is_async { "async " } else { "" };
     let rt = f.return_type.as_ref().map(|t| emit_type(t, LanguageId::CSharp)).unwrap_or_else(|| "void".into());
     if let FnBody::Expr(e) = &f.body && rt == "void" {
@@ -167,10 +167,11 @@ fn emit_cs_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.line("}");
 }
 
-fn emit_cs_params(params: &[ParamDecl]) -> String {
+fn emit_cs_params(params: &[ParamDecl], ectx: &ExprEmitCtx) -> String {
     params.iter().map(|p| {
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "object".into());
-        format!("{t} {}", p.name)
+        let d = p.default.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::CSharp, ectx))).unwrap_or_default();
+        format!("{t} {}{d}", p.name)
     }).collect::<Vec<_>>().join(", ")
 }
 

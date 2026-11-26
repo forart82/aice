@@ -2,7 +2,7 @@ use crate::ir::TranspileError;
 use crate::ir_code::{Expr, LiteralVal, MemberKind, Stmt, UnaryOp};
 use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
-use crate::parser_expr::{assign_op_from_tok, binary_op_from_tok, infix_prec, looks_like_ternary};
+use crate::parser_expr::{assign_op_from_tok, binary_op_from_tok, infix_prec, looks_like_ternary, parse_new_prefix};
 use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_lit::{looks_like_closure_after_fn, start_record_entry, step_closure_params, step_lit_cont};
 use crate::parser_iter_match::start_match;
@@ -58,15 +58,15 @@ pub(crate) fn step_expr_cont(
         ParseCont::ExprParenClose => {
             p.expect(TokenKind::RParen, "Expected ')'")?;
         }
-        ParseCont::ExprCallArg { callee, mut args, is_optional } => {
+        ParseCont::ExprCallArg { callee, mut args, is_optional, is_new } => {
             args.push(pop_expr(vals));
             if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RParen && !p.at_eof() {
-                stack.push(ParseCont::ExprCallArg { callee, args, is_optional });
+                stack.push(ParseCont::ExprCallArg { callee, args, is_optional, is_new });
                 stack.push(ParseCont::Expr(1));
             } else {
                 p.expect(TokenKind::RParen, "Expected ')'")?;
                 vals.push(ParseVal::Expr(Expr::Call {
-                    callee: Box::new(callee), args, is_optional, is_tagged: false,
+                    callee: Box::new(callee), args, is_optional, is_tagged: false, is_new,
                 }));
             }
         }
@@ -193,6 +193,9 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             let name = p.expect_ident_or_kw("Expected identifier after '$'")?.lexeme;
             vals.push(ParseVal::Expr(Expr::Ident(format!("${name}"))));
         }
+        TokenKind::Ident if tok.lexeme == "new" && p.peek_n(1).kind == TokenKind::Ident => {
+            parse_new_prefix(p, stack, vals)?;
+        }
         TokenKind::Ident => { p.advance(); vals.push(ParseVal::Expr(Expr::Ident(tok.lexeme))); }
         _ if tok.is_keyword() => { p.advance(); vals.push(ParseVal::Expr(Expr::Ident(tok.lexeme))); }
         _ => return Err(TranspileError::at(format!("Unexpected token {:?} '{}' in expression", tok.kind, tok.lexeme), tok.span)),
@@ -216,10 +219,10 @@ fn step_infix(
             if p.peek_kind() == TokenKind::RParen || p.at_eof() {
                 p.expect(TokenKind::RParen, "Expected ')'")?;
                 vals.push(ParseVal::Expr(Expr::Call {
-                    callee: Box::new(lhs), args: Vec::new(), is_optional: false, is_tagged: false,
+                    callee: Box::new(lhs), args: Vec::new(), is_optional: false, is_tagged: false, is_new: false,
                 }));
             } else {
-                stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new(), is_optional: false });
+                stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new(), is_optional: false, is_new: false });
                 stack.push(ParseCont::Expr(1));
             }
         }
@@ -234,10 +237,10 @@ fn step_infix(
                 if p.peek_kind() == TokenKind::RParen || p.at_eof() {
                     p.expect(TokenKind::RParen, "Expected ')'")?;
                     vals.push(ParseVal::Expr(Expr::Call {
-                        callee: Box::new(lhs), args: Vec::new(), is_optional: true, is_tagged: false,
+                        callee: Box::new(lhs), args: Vec::new(), is_optional: true, is_tagged: false, is_new: false,
                     }));
                 } else {
-                    stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new(), is_optional: true });
+                    stack.push(ParseCont::ExprCallArg { callee: lhs, args: Vec::new(), is_optional: true, is_new: false });
                     stack.push(ParseCont::Expr(1));
                 }
                 return Ok(());
