@@ -163,19 +163,31 @@ fn py_method(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> Met
 fn py_params(pnode: Node<'_>, src: &str) -> Vec<ParamDecl> {
     let mut out = Vec::new();
     for ch in named_children(pnode) {
+        if matches!(ch.kind(), "positional_separator" | "keyword_separator") {
+            continue;
+        }
         let raw = node_text(ch, src).trim();
-        if raw.is_empty() { continue; }
+        if raw.is_empty() || raw == "/" || raw == "*" { continue; }
         let name = match ch.kind() {
             "identifier" => raw.to_string(),
-            "typed_parameter" => named_children(ch).first().map(|c| node_text(*c, src).trim().to_string()).unwrap_or_else(|| raw.into()),
+            "typed_parameter" => named_children(ch)
+                .first()
+                .map(|c| node_text(*c, src).trim().trim_start_matches('*').trim().to_string())
+                .unwrap_or_else(|| raw.trim_start_matches('*').trim().into()),
             "default_parameter" | "typed_default_parameter" => field_text(ch, "name", src).unwrap_or("p").trim().to_string(),
             _ => raw.trim_start_matches('*').split([':', '=']).next().unwrap_or("p").trim().to_string(),
         };
+        let is_rest = raw.starts_with('*')
+            || matches!(ch.kind(), "list_splat_pattern" | "dictionary_splat_pattern")
+            || (ch.kind() == "typed_parameter"
+                && named_children(ch).first().is_some_and(|c| {
+                    matches!(c.kind(), "list_splat_pattern" | "dictionary_splat_pattern")
+                }));
         let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Python));
         let default = ch.child_by_field_name("value").map(|v| decompile_expr(v, src, LanguageId::Python));
         out.push(ParamDecl {
             name, vis: Visibility::Default, is_readonly: false, is_mut: false,
-            is_optional: false, is_rest: raw.starts_with('*'), ty, default, trivia: Trivia::default(),
+            is_optional: false, is_rest, ty, default, trivia: Trivia::default(),
         });
     }
     out

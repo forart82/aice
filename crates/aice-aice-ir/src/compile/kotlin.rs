@@ -1,11 +1,13 @@
+use std::collections::HashMap;
+
 use aice_lang_registry::LanguageId;
 
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
+use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::ParamDecl;
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -21,9 +23,27 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     for item in &module.items {
         if let AiceItem::Import(imp) = item { ec.line(&format!("import {}", imp.source)); }
     }
+    let mut nested_map: HashMap<String, Vec<&ClassDecl>> = HashMap::new();
+    let mut top_names: Vec<String> = Vec::new();
+    for item in &module.items {
+        if let AiceItem::Class(cd) = item {
+            if let Some(parent) = nested_parent(cd) {
+                nested_map.entry(parent.to_string()).or_default().push(cd);
+            } else {
+                top_names.push(cd.name.clone());
+            }
+        }
+    }
     for item in &module.items {
         match item {
-            AiceItem::Class(cd) => emit_kt_class(&mut ec, cd, &ectx),
+            AiceItem::Class(cd) => {
+                if let Some(parent) = nested_parent(cd) {
+                    let root = parent.split('.').next().unwrap_or(parent);
+                    if top_names.iter().any(|n| n == root) { continue; }
+                }
+                ec.blank();
+                emit_kt_class(&mut ec, cd, &cd.name, &nested_map, &ectx);
+            }
             AiceItem::Fn(fd) => emit_kt_fn(&mut ec, fd, &ectx),
             AiceItem::Directive { text, trivia, .. } => {
                 ec.blank();
@@ -36,31 +56,110 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
-fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
-    ec.blank();
+fn nested_parent(cd: &ClassDecl) -> Option<&str> {
+    cd.decorators.iter().find_map(|d| {
+        let s = d.trim_start_matches('@');
+        s.strip_prefix("nested(").and_then(|r| r.strip_suffix(')'))
+    })
+}
+
+fn has_attr(tr: &Trivia, needle: &str) -> bool {
+    tr.leading.iter().any(|c| c.kind == TriviaKind::Attribute && c.text.trim_start_matches('@') == needle)
+}
+
+fn companion_tag(tr: &Trivia) -> Option<Option<&str>> {
+    tr.leading.iter().find_map(|c| {
+        if c.kind != TriviaKind::Attribute { return None; }
+        let s = c.text.trim_start_matches('@');
+        if s == "companion" { Some(None) }
+        else { s.strip_prefix("companion(").and_then(|r| r.strip_suffix(')')).map(Some) }
+    })
+}
+
+fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<String, Vec<&ClassDecl>>, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
-    let data = if cd.decorators.iter().any(|d| d == "data") { "data " } else { "" };
-    let ctor = if cd.primary_ctor.is_empty() {
-        String::new()
-    } else {
+    let has_dec = |k: &str| cd.decorators.iter().any(|d| d.trim_start_matches('@') == k);
+    let mut hdr = String::new();
+    hdr.push_str(kt_vis(cd.vis));
+    if cd.is_abstract { hdr.push_str("abstract "); }
+    for m in ["sealed", "data", "inner", "enum", "value", "annotation"] {
+        if has_dec(m) { hdr.push_str(m); hdr.push(' '); }
+    }
+    if has_dec("object") { hdr.push_str("object "); }
+    else if has_dec("interface") { hdr.push_str("interface "); }
+    else { hdr.push_str("class "); }
+    hdr.push_str(&cd.name);
+    if !cd.primary_ctor.is_empty() {
         let ps: Vec<String> = cd.primary_ctor.iter().map(|p| {
             let v = kt_vis(p.vis);
             let kw = if p.is_mut { "var " } else { "val " };
             let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin)).unwrap_or_else(|| "Any".into());
-            let d = p.default.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Kotlin, ectx))).unwrap_or_default();
+            let d = p.default.as_ref().map(|e| format!(" = {}", emit_kt_typed_expr(e, &t, ectx))).unwrap_or_default();
             format!("{v}{kw}{}: {t}{d}", p.name)
         }).collect();
-        format!("({})", ps.join(", "))
-    };
-    if cd.methods.is_empty() && !ctor.is_empty() {
-        ec.line(&format!("{data}class {}{ctor}", cd.name));
+        hdr.push_str(&format!("({})", ps.join(", ")));
+    }
+    let mut supers: Vec<String> = Vec::new();
+    if let Some(ref ext) = cd.extends { supers.push(ext.replace("::", ".")); }
+    for imp in &cd.implements { supers.push(imp.replace("::", ".")); }
+    if !supers.is_empty() { hdr.push_str(&format!(" : {}", supers.join(", "))); }
+
+    let own_props: Vec<&PropDecl> = cd.props.iter()
+        .filter(|p| !has_attr(&p.trivia, "nested_type") && companion_tag(&p.trivia).is_none())
+        .collect();
+    let own_methods: Vec<&MethodDecl> = cd.methods.iter()
+        .filter(|m| companion_tag(&m.trivia).is_none())
+        .collect();
+    let comp_props: Vec<&PropDecl> = cd.props.iter().filter(|p| companion_tag(&p.trivia).is_some()).collect();
+    let comp_methods: Vec<&MethodDecl> = cd.methods.iter().filter(|m| companion_tag(&m.trivia).is_some()).collect();
+    let kids = nested.get(path).map(Vec::as_slice).unwrap_or(&[]);
+
+    let body_empty = own_props.is_empty() && own_methods.is_empty() && comp_props.is_empty()
+        && comp_methods.is_empty() && kids.is_empty();
+    if body_empty && (!cd.primary_ctor.is_empty() || has_dec("object")) {
+        ec.line(&hdr);
         return;
     }
-    ec.line(&format!("{data}class {}{ctor} {{", cd.name));
+    ec.line(&format!("{hdr} {{"));
     ec.push();
-    for m in &cd.methods { emit_kt_method(ec, m, ectx); }
+    for p in own_props { emit_kt_prop(ec, p, ectx); }
+    for m in own_methods { emit_kt_method(ec, m, ectx); }
+    for kid in kids {
+        let kid_path = format!("{path}.{}", kid.name);
+        emit_kt_class(ec, kid, &kid_path, nested, ectx);
+    }
+    if !comp_props.is_empty() || !comp_methods.is_empty() {
+        let cname = comp_props.iter().find_map(|p| companion_tag(&p.trivia).flatten())
+            .or_else(|| comp_methods.iter().find_map(|m| companion_tag(&m.trivia).flatten()));
+        match cname {
+            Some(nm) => ec.line(&format!("companion object {nm} {{")),
+            None => ec.line("companion object {"),
+        }
+        ec.push();
+        for p in comp_props { emit_kt_prop(ec, p, ectx); }
+        for m in comp_methods { emit_kt_method(ec, m, ectx); }
+        ec.pop();
+        ec.line("}");
+    }
     ec.pop();
     ec.line("}");
+}
+
+fn emit_kt_prop(ec: &mut EmitCtx, p: &PropDecl, ectx: &ExprEmitCtx) {
+    ec.emit_trivia(&p.trivia, CommentStyle::Slash);
+    let cst = if has_attr(&p.trivia, "const") { "const " } else { "" };
+    let kw = if p.is_mut { "var " } else { "val " };
+    let t_str = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin));
+    let t = t_str.as_deref().map(|s| format!(": {s}")).unwrap_or_default();
+    let init = p.init.as_ref().map(|e| format!(" = {}", emit_kt_typed_expr(e, t_str.as_deref().unwrap_or(""), ectx))).unwrap_or_default();
+    ec.line(&format!("{}{cst}{kw}{}{t}{init}", kt_vis(p.vis), p.name));
+}
+
+fn emit_kt_typed_expr(e: &crate::ir_code::Expr, ty: &str, ectx: &ExprEmitCtx) -> String {
+    if ty == "Long" && let crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Int(n)) = e {
+        return format!("{n}L");
+    }
+    emit_expr(e, LanguageId::Kotlin, ectx)
 }
 
 fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {

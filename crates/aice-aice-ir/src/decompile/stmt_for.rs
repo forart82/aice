@@ -155,6 +155,54 @@ pub(crate) fn extract_kotlin_for_parts<'a>(
     (binding, iter_n)
 }
 
+pub(crate) fn extract_go_range_binding(rc: Node<'_>, src: &str) -> String {
+    let Some(left) = rc.child_by_field_name("left") else {
+        return "_".to_string();
+    };
+    let parts: Vec<String> = node_text(left, src)
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    match parts.as_slice() {
+        [] => "item".to_string(),
+        [only] => only.clone(),
+        [first, second] if first == "_" => second.clone(),
+        many => format!("({})", many.join(", ")),
+    }
+}
+
+pub(crate) fn extract_php_foreach_binding(raw_bind: &str) -> String {
+    let parts: Vec<String> = raw_bind
+        .split("=>")
+        .map(|s| s.trim().trim_start_matches(['&', '$']).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    match parts.as_slice() {
+        [] => "item".to_string(),
+        [only] => only.clone(),
+        many => format!("({})", many.join(", ")),
+    }
+}
+
+pub(crate) fn normalize_for_binding(raw: &str) -> String {
+    let cleaned = raw.trim().trim_start_matches(['&', '*', '$']).trim();
+    if cleaned.is_empty() {
+        return "item".to_string();
+    }
+    if cleaned.contains(',') && !(cleaned.starts_with('(') && cleaned.ends_with(')')) {
+        let parts: Vec<&str> = cleaned
+            .split(',')
+            .map(|s| s.trim().trim_start_matches(['&', '*', '$']).trim())
+            .filter(|s| !s.is_empty())
+            .collect();
+        if parts.len() > 1 {
+            return format!("({})", parts.join(", "));
+        }
+    }
+    cleaned.to_string()
+}
+
 pub(crate) fn is_single_stmt_node(kind: &str) -> bool {
     matches!(
         kind,

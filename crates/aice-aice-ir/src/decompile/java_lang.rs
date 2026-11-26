@@ -26,29 +26,8 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                         is_type_only: false, trivia: tr, span: node_span(ch),
                     }));
                 }
-                "interface_declaration" => {
-                    let cd = decompile_java_class(ch, src, opts, tr.clone());
-                    m.items.push(AiceItem::Type(TypeDecl {
-                        vis: cd.vis, kind: TypeKind::Interface, name: cd.name, type_params: cd.type_params,
-                        extends: Vec::new(), fields: Vec::new(), methods: cd.methods,
-                        alias_target: None, trivia: tr, span: cd.span,
-                    }));
-                }
-                "class_declaration" | "record_declaration" => {
-                    m.items.push(AiceItem::Class(decompile_java_class(ch, src, opts, tr)));
-                }
-                "enum_declaration" => {
-                    let name = field_text(ch, "name", src).unwrap_or("Enum").to_string();
-                    let mut variants = Vec::new();
-                    if let Some(body) = ch.child_by_field_name("body") {
-                        for c in named_children(body) {
-                            if c.kind() == "enum_constant" {
-                                let vn = field_text(c, "name", src).unwrap_or("V").to_string();
-                                variants.push(EnumVariant { name: vn, payload: VariantPayload::Unit, discriminant: None, trivia: Trivia::default() });
-                            }
-                        }
-                    }
-                    m.items.push(AiceItem::Enum(EnumDecl { vis: java_vis(ch, src), name, type_params: Vec::new(), variants, trivia: tr, span: node_span(ch) }));
+                "interface_declaration" | "class_declaration" | "record_declaration" | "enum_declaration" => {
+                    decompile_java_type_item(ch, src, opts, tr, None, &mut m.items);
                 }
                 _ => {}
             }
@@ -57,9 +36,75 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
     })
 }
 
-fn decompile_java_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
+fn decompile_java_type_item(
+    node: Node<'_>,
+    src: &str,
+    opts: &TranspileOpts,
+    tr: Trivia,
+    parent: Option<&str>,
+    out: &mut Vec<AiceItem>,
+) {
+    match node.kind() {
+        "interface_declaration" => {
+            let mut nested = Vec::new();
+            let cd = decompile_java_class(node, src, opts, tr.clone(), parent, &mut nested);
+            out.push(AiceItem::Type(TypeDecl {
+                vis: cd.vis, kind: TypeKind::Interface, name: cd.name, type_params: cd.type_params,
+                extends: Vec::new(), fields: Vec::new(), methods: cd.methods,
+                alias_target: None, trivia: tr, span: cd.span,
+            }));
+            out.extend(nested);
+        }
+        "class_declaration" | "record_declaration" => {
+            let mut nested = Vec::new();
+            let cd = decompile_java_class(node, src, opts, tr, parent, &mut nested);
+            out.push(AiceItem::Class(cd));
+            out.extend(nested);
+        }
+        "enum_declaration" => {
+            let name = field_text(node, "name", src).unwrap_or("Enum").to_string();
+            let mut variants = Vec::new();
+            let mut nested = Vec::new();
+            let cur_path = match parent {
+                Some(p) => format!("{p}.{name}"),
+                None => name.clone(),
+            };
+            if let Some(body) = node.child_by_field_name("body") {
+                for c in named_children(body) {
+                    if c.kind() == "enum_constant" {
+                        let vn = field_text(c, "name", src).unwrap_or("V").to_string();
+                        variants.push(EnumVariant { name: vn, payload: VariantPayload::Unit, discriminant: None, trivia: Trivia::default() });
+                    } else if c.kind() == "enum_body_declarations" {
+                        for d in named_children(c) {
+                            if matches!(d.kind(), "record_declaration" | "class_declaration" | "interface_declaration" | "enum_declaration") {
+                                let ntr = collect_trivia(d, src, opts);
+                                decompile_java_type_item(d, src, opts, ntr, Some(&cur_path), &mut nested);
+                            }
+                        }
+                    }
+                }
+            }
+            out.push(AiceItem::Enum(EnumDecl { vis: java_vis(node, src), name, type_params: Vec::new(), variants, trivia: tr, span: node_span(node) }));
+            out.extend(nested);
+        }
+        _ => {}
+    }
+}
+
+fn decompile_java_class(
+    node: Node<'_>,
+    src: &str,
+    opts: &TranspileOpts,
+    tr: Trivia,
+    parent: Option<&str>,
+    nested_out: &mut Vec<AiceItem>,
+) -> ClassDecl {
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
     let vis = java_vis(node, src);
+    let cur_path = match parent {
+        Some(p) => format!("{p}.{name}"),
+        None => name.clone(),
+    };
     let mut props = Vec::new();
     let mut methods = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
@@ -96,11 +141,16 @@ fn decompile_java_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Tri
                         type_params: Vec::new(), params, return_type: ret, body: mbody, trivia: mtr, span: node_span(ch),
                     });
                 }
+                "record_declaration" | "class_declaration" | "interface_declaration" | "enum_declaration" => {
+                    decompile_java_type_item(ch, src, opts, mtr, Some(&cur_path), nested_out);
+                }
                 _ => {}
             }
         }
     }
-    let decorators = if node.kind() == "record_declaration" { vec!["record".into()] } else { Vec::new() };
+    let mut decorators = Vec::new();
+    if let Some(p) = parent { decorators.push(format!("nested({p})")); }
+    if node.kind() == "record_declaration" { decorators.push("record".into()); }
     let primary_ctor = node.child_by_field_name("parameters")
         .or_else(|| child_by_kind(node, "formal_parameters"))
         .map(|p| java_params(p, src))

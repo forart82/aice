@@ -7,7 +7,10 @@ use crate::decompile::iter_match::finish_kotlin_arm_conds;
 use crate::decompile::iter_stmt::StmtFin;
 use crate::decompile::stmt_cf_util::insert_updates_before_continue;
 use crate::decompile::stmt_common::find_body_node;
-use crate::decompile::stmt_for::{extract_c_for_parts, extract_kotlin_for_parts};
+use crate::decompile::stmt_for::{
+    extract_c_for_parts, extract_go_range_binding, extract_kotlin_for_parts,
+    extract_php_foreach_binding, normalize_for_binding,
+};
 use crate::decompile::trivia::collect_header_trailing;
 use crate::ir::Trivia;
 use crate::ir_code::{CatchClause, Expr, MatchCase, RecordEntry, Stmt, UnaryOp};
@@ -18,8 +21,7 @@ pub(crate) fn push_for_stmt<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     let hdr_tr = bn.and_then(|b| collect_header_trailing(b, env.src, env.opts));
     let tr = Trivia { trailing: hdr_tr, ..Trivia::default() };
     if let Some(rc) = child_by_kind(node, "range_clause") {
-        let left_raw = field_text(rc, "left", env.src).unwrap_or("item").trim();
-        let binding = left_raw.split(',').next_back().unwrap_or("item").trim().to_string();
+        let binding = extract_go_range_binding(rc, env.src);
         let iter_n = rc.child_by_field_name("right");
         env.tasks.push(DTask::FinishStmt(StmtFin::For {
             binding, has_body: bn.is_some(), has_iter: iter_n.is_some(), fallback_iter: "items".into(), trivia: tr,
@@ -57,7 +59,7 @@ pub(crate) fn push_for_stmt<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         let kids: Vec<_> = named_children(node).into_iter().filter(|k| Some(*k) != body_n).collect();
         let iter_n = kids.first().copied();
         let raw_bind = kids.get(1).map(|c| node_text(*c, env.src)).unwrap_or("item");
-        let binding = raw_bind.split("=>").last().unwrap_or("item").trim().trim_start_matches(['&', '$']).to_string();
+        let binding = extract_php_foreach_binding(raw_bind);
         env.tasks.push(DTask::FinishStmt(StmtFin::For {
             binding, has_body: bn.is_some(), has_iter: iter_n.is_some(), fallback_iter: "items".into(), trivia: tr,
         }));
@@ -70,7 +72,7 @@ pub(crate) fn push_for_stmt<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         .or_else(|| field_text(node, "declarator", env.src)).or_else(|| field_text(node, "name", env.src))
         .or(id_fb)
         .unwrap_or("item");
-    let binding = raw_b.trim().trim_start_matches(['&', '*', '$']).trim().to_string();
+    let binding = normalize_for_binding(raw_b);
     let iter_n = node.child_by_field_name("right").or_else(|| node.child_by_field_name("value"))
         .or_else(|| node.child_by_field_name("collection")).map(|c| {
             if env.lang == LanguageId::Ruby && c.kind() == "in" {

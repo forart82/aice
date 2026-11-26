@@ -5,9 +5,10 @@ use crate::decompile::cst_util::{field_text, map_type_str, named_children, node_
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{ClassDecl, ConstDecl, FnBody, FnDecl, MethodDecl, PropDecl};
-use crate::ir_types::{FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind};
+use crate::ir_types::{FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind, TypeParam};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     with_ts_root(tree, |root| {
@@ -51,12 +52,16 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                 }
                 "function_declaration" => m.items.push(AiceItem::Fn(decompile_go_fn(ch, src, opts, tr))),
                 "method_declaration" => {
-                    let recv = field_text(ch, "receiver", src).unwrap_or("").trim().to_string();
-                    let recv_ty = recv.split_whitespace().last().unwrap_or("Recv").trim_matches(|c| c == ')' || c == '*').to_string();
+                    let recv_ty = ch.child_by_field_name("receiver")
+                        .and_then(|r| named_children(r).into_iter().find(|c| c.kind() == "parameter_declaration"))
+                        .and_then(|pd| field_text(pd, "type", src))
+                        .map(|t| t.trim().trim_start_matches('*').split('[').next().unwrap_or("Recv").trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .unwrap_or_else(|| "Recv".to_string());
                     let f = decompile_go_fn(ch, src, opts, tr);
                     methods.push((recv_ty, MethodDecl {
                         vis: f.vis, is_static: false, is_async: false, is_const: false,
-                        accessor: Default::default(), name: f.name, type_params: Vec::new(),
+                        accessor: Default::default(), name: f.name, type_params: f.type_params,
                         params: f.params, return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
                     }));
                 }
@@ -72,7 +77,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     }).collect();
                     m.items.insert(idx, AiceItem::Class(ClassDecl {
                         vis: td.vis, is_abstract: false, decorators: Vec::new(), name: td.name,
-                        type_params: Vec::new(), primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
+                        type_params: td.type_params, primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
                         props, methods: vec![md], static_blocks: Vec::new(), trivia: td.trivia, span: td.span,
                     }));
                 }
@@ -101,9 +106,38 @@ fn collect_import_specs(node: Node<'_>) -> Vec<Node<'_>> {
     out
 }
 
+fn extract_go_type_params(node: Node<'_>, src: &str) -> Vec<TypeParam> {
+    let Some(tpl) = node.child_by_field_name("type_parameters") else { return Vec::new(); };
+    let mut out = Vec::new();
+    for tpd in named_children(tpl) {
+        if tpd.kind() != "type_parameter_declaration" { continue; }
+        let constraint = field_text(tpd, "type", src).map(|t| map_type_str(t, LanguageId::Go));
+        let mut cur = tpd.walk();
+        let names: Vec<String> = tpd
+            .children_by_field_name("name", &mut cur)
+            .map(|n| node_text(n, src).trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+        for name in names {
+            out.push(TypeParam { name, bounds: constraint.clone().into_iter().collect(), default: None });
+        }
+    }
+    out
+}
+
+fn format_go_tag_attr(tag_raw: &str) -> String {
+    let t = tag_raw.trim();
+    if t.starts_with('`') && t.ends_with('`') && !t.contains("${") {
+        format!("@tag({t})")
+    } else {
+        format!("@tag(\"{}\")", t.replace('\\', "\\\\").replace('"', "\\\""))
+    }
+}
+
 fn decompile_type_spec(node: Node<'_>, src: &str, _opts: &TranspileOpts, tr: Trivia) -> AiceItem {
     let name = field_text(node, "name", src).unwrap_or("Type").to_string();
     let vis = go_vis(&name);
+    let type_params = extract_go_type_params(node, src);
     let mut kind = TypeKind::Struct;
     let mut fields = Vec::new();
     let mut methods = Vec::new();
@@ -114,6 +148,7 @@ fn decompile_type_spec(node: Node<'_>, src: &str, _opts: &TranspileOpts, tr: Tri
             for fd in named_children(fl) {
                 if fd.kind() == "field_declaration" {
                     let fty = field_text(fd, "type", src).map(|t| map_type_str(t, LanguageId::Go));
+                    let tag_attr = field_text(fd, "tag", src).map(format_go_tag_attr);
                     let mut cur = fd.walk();
                     let names: Vec<String> = fd
                         .children_by_field_name("name", &mut cur)
@@ -122,9 +157,13 @@ fn decompile_type_spec(node: Node<'_>, src: &str, _opts: &TranspileOpts, tr: Tri
                         .collect();
                     let names = if names.is_empty() { vec!["f".to_string()] } else { names };
                     for fnm in names {
+                        let mut ftr = Trivia::default();
+                        if let Some(ref ta) = tag_attr {
+                            push_attrs_to_trivia(&mut ftr, vec![ta.clone()]);
+                        }
                         fields.push(FieldDecl {
                             vis: go_vis(&fnm), name: fnm, is_readonly: false, is_optional: false,
-                            sigil: FieldSigil::None, ty: fty.clone(), default: None, trivia: Trivia::default(),
+                            sigil: FieldSigil::None, ty: fty.clone(), default: None, trivia: ftr,
                         });
                     }
                 }
@@ -148,7 +187,7 @@ fn decompile_type_spec(node: Node<'_>, src: &str, _opts: &TranspileOpts, tr: Tri
         }
     }
     AiceItem::Type(TypeDecl {
-        vis, kind, name, type_params: Vec::new(), extends: Vec::new(),
+        vis, kind, name, type_params, extends: Vec::new(),
         fields, methods, alias_target: None, trivia: tr, span: node_span(node),
     })
 }
@@ -188,6 +227,7 @@ fn extract_go_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
 
 fn decompile_go_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
     let name = field_text(node, "name", src).unwrap_or("Fn").to_string();
+    let type_params = extract_go_type_params(node, src);
     let params = node.child_by_field_name("parameters")
         .map(|pl| extract_go_params(pl, src))
         .unwrap_or_default();
@@ -195,7 +235,7 @@ fn decompile_go_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) 
     let body = node.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, LanguageId::Go, opts))).unwrap_or(FnBody::SignatureOnly);
     FnDecl {
         vis: go_vis(&name), is_async: false, is_static: false, decorators: Vec::new(), name,
-        type_params: Vec::new(), params, return_type, body, trivia: tr, span: node_span(node),
+        type_params, params, return_type, body, trivia: tr, span: node_span(node),
     }
 }
 

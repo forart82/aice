@@ -84,13 +84,29 @@ pub(crate) fn step_stmt_task<'a>(
             let it = st.vals.pop().unwrap();
             let hdr = match lang {
                 LanguageId::Rust => format!("for {binding} in {it} {{"),
-                LanguageId::Go => format!("for _, {binding} := range {it} {{"),
+                LanguageId::Go => {
+                    if let Some(inner) = binding.strip_prefix('(').and_then(|s| s.strip_suffix(')')) {
+                        format!("for {inner} := range {it} {{")
+                    } else {
+                        format!("for _, {binding} := range {it} {{")
+                    }
+                }
                 LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript => format!("for (const {binding} of {it}) {{"),
                 LanguageId::CSharp => format!("foreach (var {binding} in {it}) {{"),
                 LanguageId::Java => format!("for (var {binding} : {it}) {{"),
                 LanguageId::Dart => format!("for (var {binding} in {it}) {{"),
                 LanguageId::Kotlin => format!("for ({binding} in {it}) {{"),
-                LanguageId::Php => format!("foreach ({it} as ${binding}) {{"),
+                LanguageId::Php => {
+                    if let Some(inner) = binding.strip_prefix('(').and_then(|s| s.strip_suffix(')'))
+                        && let Some((k, v)) = inner.split_once(',')
+                    {
+                        let k = k.trim().trim_start_matches('$');
+                        let v = v.trim().trim_start_matches('$');
+                        format!("foreach ({it} as ${k} => ${v}) {{")
+                    } else {
+                        format!("foreach ({it} as ${binding}) {{")
+                    }
+                }
                 _ => format!("for (auto& {binding} : {it}) {{"),
             };
             ec.line(&hdr);

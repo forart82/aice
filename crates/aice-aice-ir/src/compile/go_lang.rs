@@ -4,9 +4,9 @@ use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{ClassDecl, FnBody, FnDecl};
-use crate::ir_types::{ParamDecl, TypeDecl, TypeKind};
+use crate::ir_types::{ParamDecl, TypeDecl, TypeKind, TypeParam};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     if module.items.is_empty() && !module.raw_fallback.is_empty() {
@@ -53,8 +53,9 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
 fn emit_go_type(ec: &mut EmitCtx, td: &TypeDecl) {
     ec.blank();
     ec.emit_trivia(&td.trivia, CommentStyle::Slash);
+    let tps = emit_go_type_params(&td.type_params);
     if td.kind == TypeKind::Interface {
-        ec.line(&format!("type {} interface {{", td.name));
+        ec.line(&format!("type {}{tps} interface {{", td.name));
         ec.push();
         for m in &td.methods {
             let ps = emit_go_params(&m.params);
@@ -65,39 +66,48 @@ fn emit_go_type(ec: &mut EmitCtx, td: &TypeDecl) {
         ec.line("}");
         return;
     }
-    ec.line(&format!("type {} struct {{", td.name));
+    ec.line(&format!("type {}{tps} struct {{", td.name));
     ec.push();
     for f in &td.fields {
         let t = f.ty.as_ref().map(|x| emit_type(x, LanguageId::Go)).unwrap_or_else(|| "any".into());
-        ec.line(&format!("{} {t}", f.name));
+        let tag = extract_go_tag(&f.trivia).map(|tg| format!(" {tg}")).unwrap_or_default();
+        ec.line(&format!("{} {t}{tag}", f.name));
     }
     ec.pop();
     ec.line("}");
 }
 
 fn emit_go_struct(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
+    let tps = emit_go_type_params(&cd.type_params);
     if !cd.props.is_empty() || cd.vis != Visibility::Default {
         ec.blank();
         ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
         if cd.props.is_empty() {
-            ec.line(&format!("type {} struct {{}}", cd.name));
+            ec.line(&format!("type {}{tps} struct {{}}", cd.name));
         } else {
-            ec.line(&format!("type {} struct {{", cd.name));
+            ec.line(&format!("type {}{tps} struct {{", cd.name));
             ec.push();
             for p in &cd.props {
                 let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Go)).unwrap_or_else(|| "any".into());
-                ec.line(&format!("{} {t}", p.name));
+                let tag = extract_go_tag(&p.trivia).map(|tg| format!(" {tg}")).unwrap_or_default();
+                ec.line(&format!("{} {t}{tag}", p.name));
             }
             ec.pop();
             ec.line("}");
         }
     }
+    let recv_args = if cd.type_params.is_empty() {
+        String::new()
+    } else {
+        let ns: Vec<&str> = cd.type_params.iter().map(|tp| tp.name.as_str()).collect();
+        format!("[{}]", ns.join(", "))
+    };
     for m in &cd.methods {
         ec.blank();
         ec.emit_trivia(&m.trivia, CommentStyle::Slash);
         let ps = emit_go_params(&m.params);
         let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::Go)).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default();
-        ec.line(&format!("func (r *{}) {}({ps}){rt} {{", cd.name, m.name));
+        ec.line(&format!("func (r *{}{recv_args}) {}({ps}){rt} {{", cd.name, m.name));
         ec.push();
         emit_go_body(ec, &m.body, ectx);
         ec.pop();
@@ -108,13 +118,42 @@ fn emit_go_struct(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 fn emit_go_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
+    let tps = emit_go_type_params(&f.type_params);
     let ps = emit_go_params(&f.params);
     let rt = f.return_type.as_ref().map(|t| emit_type(t, LanguageId::Go)).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default();
-    ec.line(&format!("func {}({ps}){rt} {{", f.name));
+    ec.line(&format!("func {}{tps}({ps}){rt} {{", f.name));
     ec.push();
     emit_go_body(ec, &f.body, ectx);
     ec.pop();
     ec.line("}");
+}
+
+fn emit_go_type_params(tps: &[TypeParam]) -> String {
+    if tps.is_empty() { return String::new(); }
+    let parts: Vec<String> = tps.iter().map(|tp| {
+        let constraint = if tp.bounds.is_empty() {
+            "any".to_string()
+        } else {
+            tp.bounds.iter().map(|b| emit_type(b, LanguageId::Go)).collect::<Vec<_>>().join(" | ")
+        };
+        format!("{} {constraint}", tp.name)
+    }).collect();
+    format!("[{}]", parts.join(", "))
+}
+
+fn extract_go_tag(tr: &Trivia) -> Option<String> {
+    tr.leading.iter().find_map(|c| {
+        if c.kind != TriviaKind::Attribute { return None; }
+        let inner = c.text.trim_start_matches('@').strip_prefix("tag(")?.strip_suffix(')')?.trim();
+        if inner.starts_with('`') && inner.ends_with('`') {
+            Some(inner.to_string())
+        } else if let Some(unq) = inner.strip_prefix('"').and_then(|s| s.strip_suffix('"')) {
+            let raw = unq.replace("\\\"", "\"").replace("\\\\", "\\");
+            if raw.starts_with('`') && raw.ends_with('`') { Some(raw) } else { Some(format!("`{raw}`")) }
+        } else {
+            None
+        }
+    })
 }
 
 fn emit_go_body(ec: &mut EmitCtx, body: &FnBody, ectx: &ExprEmitCtx) {
