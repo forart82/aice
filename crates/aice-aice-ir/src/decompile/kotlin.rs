@@ -1,8 +1,9 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
+use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
+use crate::decompile::kotlin_dart::{extract_kt_type_params, kt_return_type, kt_type_node};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::push_attrs_to_trivia;
@@ -57,13 +58,6 @@ fn kt_ident(node: Node<'_>, src: &str) -> Option<String> {
         .filter(|s| !s.is_empty())
 }
 
-fn kt_type(node: Node<'_>, src: &str) -> Option<crate::ir_types::AiceType> {
-    child_by_kind(node, "type")
-        .or_else(|| child_by_kind(node, "user_type"))
-        .or_else(|| child_by_kind(node, "nullable_type"))
-        .map(|t| map_type_str(node_text(t, src), LanguageId::Kotlin))
-}
-
 fn has_anon_kw(node: Node<'_>, kw: &str) -> bool {
     (0..node.child_count()).filter_map(|i| node.child(i)).any(|c| !c.is_named() && c.kind() == kw)
 }
@@ -72,6 +66,7 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
     let name = kt_ident(node, src).unwrap_or_else(|| "Class".into());
     let cur_path = parent.map(|p| format!("{p}.{name}")).unwrap_or_else(|| name.clone());
     let (mut decorators, is_abstract) = kt_class_decorators(node, src, parent);
+    let type_params = extract_kt_type_params(node, src);
     let mut primary_ctor = Vec::new();
     if let Some(ctor) = child_by_kind(node, "primary_constructor") {
         let container = child_by_kind(ctor, "class_parameters").unwrap_or(ctor);
@@ -80,7 +75,7 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
                 primary_ctor.push(ParamDecl {
                     name: kt_ident(cp, src).unwrap_or_else(|| "p".into()),
                     vis: kt_param_vis(cp, src), is_readonly: false, is_mut: node_text(cp, src).contains("var "),
-                    is_optional: false, is_rest: false, ty: kt_type(cp, src),
+                    is_optional: false, is_rest: false, ty: kt_type_node(cp, src),
                     default: kt_default_expr(cp, src), trivia: Trivia::default(),
                 });
             }
@@ -121,7 +116,7 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
     }
     decorators.dedup();
     out.push(AiceItem::Class(ClassDecl {
-        vis: kt_vis(node, src), is_abstract, decorators, name, type_params: Vec::new(),
+        vis: kt_vis(node, src), is_abstract, decorators, name, type_params,
         primary_ctor, extends: None, implements, props, methods,
         static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }));
@@ -198,7 +193,7 @@ fn decompile_kt_prop(node: Node<'_>, src: &str, mut tr: Trivia, is_static: bool,
         .map(|e| kt_value_expr(e, src));
     Some(PropDecl {
         name, aliases: Vec::new(), vis: kt_vis(node, src), is_static,
-        is_readonly: !is_mut, is_mut, is_optional: false, ty: kt_type(vd, src), init, trivia: tr,
+        is_readonly: !is_mut, is_mut, is_optional: false, ty: kt_type_node(vd, src), init, trivia: tr,
     })
 }
 
@@ -212,6 +207,7 @@ fn kt_fn_to_method(f: FnDecl, is_static: bool) -> MethodDecl {
 
 fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
     let name = kt_ident(node, src).unwrap_or_else(|| "fn_anon".into());
+    let type_params = extract_kt_type_params(node, src);
     let mut params = Vec::new();
     if let Some(pl) = child_by_kind(node, "function_value_parameters") {
         let (n, mut i) = (pl.child_count(), 0);
@@ -237,7 +233,7 @@ fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) 
             params.push(ParamDecl {
                 name: kt_ident(p, src).unwrap_or_else(|| "p".into()),
                 vis: Visibility::Default, is_readonly: false, is_mut: false,
-                is_optional: false, is_rest: false, ty: kt_type(p, src), default, trivia: Trivia::default(),
+                is_optional: false, is_rest: false, ty: kt_type_node(p, src), default, trivia: Trivia::default(),
             });
             i += 1;
         }
@@ -253,8 +249,8 @@ fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) 
     }).unwrap_or(FnBody::SignatureOnly);
     FnDecl {
         vis: kt_vis(node, src), is_async: node_text(node, src).contains("suspend "), is_static: false,
-        decorators: Vec::new(), name, type_params: Vec::new(), params,
-        return_type: kt_type(node, src), body, trivia: tr, span: node_span(node),
+        decorators: Vec::new(), name, type_params, params,
+        return_type: kt_return_type(node, src), body, trivia: tr, span: node_span(node),
     }
 }
 

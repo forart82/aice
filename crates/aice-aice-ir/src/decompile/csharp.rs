@@ -1,6 +1,7 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
+use crate::decompile::csharp_java::extract_cs_type_params;
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
@@ -156,7 +157,8 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                         vis: mvis, is_static: node_text(ch, src).contains("static "), is_async: node_text(ch, src).contains("async "),
                         is_const: false, accessor: if is_ctor { AccessorKind::Constructor } else { AccessorKind::Normal },
                         name: if is_ctor { "constructor".into() } else { mname },
-                        type_params: Vec::new(), params, return_type: ret, body: mbody, trivia: mtr, span: node_span(ch),
+                        type_params: if is_ctor { Vec::new() } else { extract_cs_type_params(ch, src) },
+                        params, return_type: ret, body: mbody, trivia: mtr, span: node_span(ch),
                     });
                 }
                 _ => {}
@@ -164,7 +166,7 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
         }
     }
     ClassDecl {
-        vis, is_abstract, decorators, name, type_params: Vec::new(),
+        vis, is_abstract, decorators, name, type_params: extract_cs_type_params(node, src),
         primary_ctor, extends: None, implements: Vec::new(),
         props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }

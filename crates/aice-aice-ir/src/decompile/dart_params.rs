@@ -1,9 +1,134 @@
 use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{child_by_kind, map_type_str, named_children, node_text};
-use crate::ir::Trivia;
-use crate::ir_types::ParamDecl;
+use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text};
+use crate::decompile::dart::decompile_dart_body_nodes;
+use crate::decompile::expr_common::decompile_expr;
+use crate::decompile::kotlin_dart::{extract_dart_heritage, extract_dart_type_params};
+use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::push_attrs_to_trivia;
+use crate::ir::{AiceItem, TranspileOpts, Trivia, Visibility};
+use crate::ir_code::{ClassDecl, Expr, PropDecl};
+use crate::ir_types::{EnumDecl, EnumVariant, ParamDecl, VariantPayload};
+
+pub(crate) fn decompile_dart_enum(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> AiceItem {
+    let name = field_text(node, "name", src).unwrap_or("Enum").to_string();
+    let vis = if name.starts_with('_') { Visibility::Private } else { Visibility::Public };
+    let type_params = extract_dart_type_params(node, src);
+    let (extends, implements, mut decorators) = extract_dart_heritage(node, src);
+    let mut entries: Vec<(String, Option<Vec<Expr>>, Trivia)> = Vec::new();
+    let mut member_nodes: Vec<Node<'_>> = Vec::new();
+    if let Some(body) = node.child_by_field_name("body").or_else(|| child_by_kind(node, "enum_body")) {
+        for ch in named_children(body) {
+            if is_comment_kind(ch.kind()) { continue; }
+            if matches!(ch.kind(), "enum_entry" | "enum_constant") {
+                let vn = field_text(ch, "name", src)
+                    .or_else(|| child_by_kind(ch, "identifier").map(|n| node_text(n, src)))
+                    .unwrap_or("v")
+                    .trim()
+                    .to_string();
+                let args = child_by_kind(ch, "arguments").map(|al| {
+                    named_children(al).into_iter()
+                        .filter(|a| !is_comment_kind(a.kind()))
+                        .map(|a| decompile_expr(a, src, LanguageId::Dart))
+                        .collect()
+                });
+                entries.push((vn, args, collect_trivia(ch, src, opts)));
+            } else {
+                member_nodes.push(ch);
+            }
+        }
+    }
+    let (mut props, mut methods) = (Vec::new(), Vec::new());
+    decompile_dart_body_nodes(&member_nodes, &name, src, opts, &mut props, &mut methods);
+    let has_args = entries.iter().any(|(_, a, _)| a.is_some());
+    if has_args || !props.is_empty() || !methods.is_empty() || !implements.is_empty() || !decorators.is_empty() {
+        decorators.insert(0, "enum".into());
+        let mut all_props = Vec::with_capacity(entries.len() + props.len());
+        for (vn, args, mut vtr) in entries {
+            push_attrs_to_trivia(&mut vtr, vec!["@variant".into()]);
+            let init = args.map(|a| Expr::Call {
+                callee: Box::new(Expr::Ident(name.clone())),
+                args: a,
+                is_new: false,
+                is_optional: false,
+                is_tagged: false,
+            });
+            all_props.push(PropDecl {
+                name: vn, aliases: Vec::new(), vis: Visibility::Default, is_static: false,
+                is_readonly: false, is_mut: false, is_optional: false, ty: None, init, trivia: vtr,
+            });
+        }
+        all_props.extend(props);
+        AiceItem::Class(ClassDecl {
+            vis, is_abstract: false, decorators, name, type_params,
+            primary_ctor: Vec::new(), extends, implements,
+            props: all_props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+        })
+    } else {
+        let variants = entries.into_iter().map(|(vn, _, vtr)| EnumVariant {
+            name: vn, payload: VariantPayload::Unit, discriminant: None, trivia: vtr,
+        }).collect();
+        AiceItem::Enum(EnumDecl { vis, name, type_params, variants, trivia: tr, span: node_span(node) })
+    }
+}
+
+pub(crate) fn decompile_dart_mixin(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
+    let name = field_text(node, "name", src)
+        .or_else(|| child_by_kind(node, "identifier").map(|n| node_text(n, src)))
+        .unwrap_or("Mixin")
+        .to_string();
+    let vis = if name.starts_with('_') { Visibility::Private } else { Visibility::Public };
+    let type_params = extract_dart_type_params(node, src);
+    let (extends, implements, mut decorators) = extract_dart_heritage(node, src);
+    decorators.insert(0, "mixin".into());
+    let mut on_types = Vec::new();
+    let mut seen_on = false;
+    for i in 0..node.child_count() {
+        let Some(ch) = node.child(i) else { continue };
+        if !ch.is_named() && ch.kind() == "on" { seen_on = true; continue; }
+        if seen_on && matches!(ch.kind(), "interfaces" | "class_body") { break; }
+        if seen_on && ch.is_named() && !is_comment_kind(ch.kind()) {
+            let txt = node_text(ch, src).trim();
+            if !txt.is_empty() { on_types.push(txt.to_string()); }
+        }
+    }
+    if !on_types.is_empty() { decorators.push(format!("on({})", on_types.join(", "))); }
+    let (mut props, mut methods) = (Vec::new(), Vec::new());
+    if let Some(body) = node.child_by_field_name("body").or_else(|| child_by_kind(node, "class_body")) {
+        decompile_dart_body_nodes(&named_children(body), &name, src, opts, &mut props, &mut methods);
+    }
+    ClassDecl {
+        vis, is_abstract: false, decorators, name, type_params,
+        primary_ctor: Vec::new(), extends, implements,
+        props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+    }
+}
+
+pub(crate) fn decompile_dart_extension(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
+    let name = field_text(node, "name", src)
+        .or_else(|| child_by_kind(node, "identifier").map(|n| node_text(n, src)))
+        .unwrap_or("_")
+        .to_string();
+    let vis = if name != "_" && name.starts_with('_') { Visibility::Private } else { Visibility::Public };
+    let type_params = extract_dart_type_params(node, src);
+    let on_ty = node.child_by_field_name("class")
+        .or_else(|| child_by_kind(node, "type"))
+        .map(|t| node_text(t, src).trim().to_string())
+        .unwrap_or_else(|| "dynamic".into());
+    let (mut props, mut methods) = (Vec::new(), Vec::new());
+    if let Some(body) = node.child_by_field_name("body")
+        .or_else(|| child_by_kind(node, "extension_body"))
+        .or_else(|| child_by_kind(node, "class_body"))
+    {
+        decompile_dart_body_nodes(&named_children(body), &name, src, opts, &mut props, &mut methods);
+    }
+    ClassDecl {
+        vis, is_abstract: false, decorators: vec![format!("extension({on_ty})")], name, type_params,
+        primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
+        props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+    }
+}
 
 pub(crate) fn dart_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
     let mut out: Vec<ParamDecl> = Vec::new();

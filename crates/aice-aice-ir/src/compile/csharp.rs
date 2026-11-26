@@ -1,5 +1,6 @@
 use aice_lang_registry::LanguageId;
 
+use crate::compile::csharp_java::{emit_cs_type_params, emit_cs_where};
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
@@ -66,7 +67,9 @@ fn emit_cs_type(ec: &mut EmitCtx, td: &TypeDecl, _ectx: &ExprEmitCtx) {
         TypeKind::Trait => "interface",
         _ => "struct",
     };
-    ec.line(&format!("{}{kw} {} {{", cs_vis(td.vis), td.name));
+    let tps = emit_cs_type_params(&td.type_params);
+    let wh = emit_cs_where(&td.type_params);
+    ec.line(&format!("{}{kw} {}{tps}{wh} {{", cs_vis(td.vis), td.name));
     ec.push();
     for f in &td.fields {
         let t = f.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "object".into());
@@ -74,8 +77,10 @@ fn emit_cs_type(ec: &mut EmitCtx, td: &TypeDecl, _ectx: &ExprEmitCtx) {
     }
     for m in &td.methods {
         let ps = emit_cs_params(&m.params, _ectx);
+        let mtps = emit_cs_type_params(&m.type_params);
+        let mwh = emit_cs_where(&m.type_params);
         let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::CSharp)).unwrap_or_else(|| "void".into());
-        ec.line(&format!("{rt} {}({ps});", m.name));
+        ec.line(&format!("{rt} {}{mtps}({ps}){mwh};", m.name));
     }
     ec.pop();
     ec.line("}");
@@ -87,12 +92,14 @@ fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     let kw = if cd.decorators.iter().any(|d| d == "record") { "record" }
     else if cd.decorators.iter().any(|d| d == "struct") { "struct" }
     else { "class" };
+    let tps = emit_cs_type_params(&cd.type_params);
+    let wh = emit_cs_where(&cd.type_params);
     let ctor = if cd.primary_ctor.is_empty() { String::new() } else { format!("({})", emit_cs_params(&cd.primary_ctor, ectx)) };
     if kw == "record" && cd.props.is_empty() && cd.methods.is_empty() {
-        ec.line(&format!("{}{kw} {}{ctor};", cs_vis(cd.vis), cd.name));
+        ec.line(&format!("{}{kw} {}{tps}{ctor}{wh};", cs_vis(cd.vis), cd.name));
         return;
     }
-    ec.line(&format!("{}{kw} {}{ctor} {{", cs_vis(cd.vis), cd.name));
+    ec.line(&format!("{}{kw} {}{tps}{ctor}{wh} {{", cs_vis(cd.vis), cd.name));
     ec.push();
     for p in &cd.props {
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "object".into());
@@ -119,22 +126,25 @@ fn emit_cs_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &ExprE
     let ps = emit_cs_params(&m.params, ectx);
     let st = if m.is_static { "static " } else { "" };
     let asy = if m.is_async { "async " } else { "" };
+    let is_ctor = m.accessor == AccessorKind::Constructor;
+    let tps = if is_ctor { String::new() } else { emit_cs_type_params(&m.type_params) };
+    let wh = if is_ctor { String::new() } else { emit_cs_where(&m.type_params) };
     let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::CSharp)).unwrap_or_else(|| "void".into());
     if let FnBody::Expr(e) = &m.body
-        && (m.accessor == AccessorKind::Constructor || rt == "void")
+        && (is_ctor || rt == "void")
     {
         let rhs = emit_expr(e, LanguageId::CSharp, ectx);
-        if m.accessor == AccessorKind::Constructor {
+        if is_ctor {
             ec.line(&format!("{}{cls_name}({ps}) => {rhs};", cs_vis(m.vis)));
         } else {
-            ec.line(&format!("{}{st}{asy}void {}({ps}) => {rhs};", cs_vis(m.vis), m.name));
+            ec.line(&format!("{}{st}{asy}void {}{tps}({ps}){wh} => {rhs};", cs_vis(m.vis), m.name));
         }
         return;
     }
-    if m.accessor == AccessorKind::Constructor {
+    if is_ctor {
         ec.line(&format!("{}{cls_name}({ps}) {{", cs_vis(m.vis)));
     } else {
-        ec.line(&format!("{}{st}{asy}{rt} {}({ps}) {{", cs_vis(m.vis), m.name));
+        ec.line(&format!("{}{st}{asy}{rt} {}{tps}({ps}){wh} {{", cs_vis(m.vis), m.name));
     }
     ec.push();
     match &m.body {
@@ -151,12 +161,14 @@ fn emit_cs_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
     let ps = emit_cs_params(&f.params, ectx);
     let asy = if f.is_async { "async " } else { "" };
+    let tps = emit_cs_type_params(&f.type_params);
+    let wh = emit_cs_where(&f.type_params);
     let rt = f.return_type.as_ref().map(|t| emit_type(t, LanguageId::CSharp)).unwrap_or_else(|| "void".into());
     if let FnBody::Expr(e) = &f.body && rt == "void" {
-        ec.line(&format!("{}{asy}void {}({ps}) => {};", cs_vis(f.vis), f.name, emit_expr(e, LanguageId::CSharp, ectx)));
+        ec.line(&format!("{}{asy}void {}{tps}({ps}){wh} => {};", cs_vis(f.vis), f.name, emit_expr(e, LanguageId::CSharp, ectx)));
         return;
     }
-    ec.line(&format!("{}{asy}{rt} {}({ps}) {{", cs_vis(f.vis), f.name));
+    ec.line(&format!("{}{asy}{rt} {}{tps}({ps}){wh} {{", cs_vis(f.vis), f.name));
     ec.push();
     match &f.body {
         FnBody::SignatureOnly => {}

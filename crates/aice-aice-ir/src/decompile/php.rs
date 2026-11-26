@@ -80,7 +80,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
 
 fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
-    let decorators = extract_php_attrs(node, src);
+    let mut decorators = extract_php_attrs(node, src);
     let extends = child_by_kind(node, "base_clause")
         .and_then(|bc| named_children(bc).into_iter().next())
         .map(|n| node_text(n, src).trim().to_string())
@@ -102,6 +102,25 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
             let mut mtr = collect_trivia(ch, src, opts);
             let mvis = php_vis(ch, src);
             match ch.kind() {
+                "use_declaration" => {
+                    if child_by_kind(ch, "use_list").is_some() {
+                        let raw = normalize_single_line(node_text(ch, src));
+                        let body_s = raw.strip_prefix("use").unwrap_or(&raw).trim();
+                        if !body_s.is_empty() {
+                            decorators.push(format!("use({body_s})"));
+                        }
+                    } else {
+                        let traits: Vec<String> = named_children(ch)
+                            .into_iter()
+                            .filter(|c| !is_comment_kind(c.kind()))
+                            .map(|c| node_text(c, src).trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect();
+                        if !traits.is_empty() {
+                            decorators.push(format!("use({})", traits.join(", ")));
+                        }
+                    }
+                }
                 "property_declaration" => {
                     push_attrs_to_trivia(&mut mtr, extract_php_attrs(ch, src));
                     let ty = ch.child_by_field_name("type").map(|t| map_type_str(node_text(t, src), LanguageId::Php));

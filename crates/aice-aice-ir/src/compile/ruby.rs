@@ -3,8 +3,8 @@ use aice_lang_registry::LanguageId;
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::iter_rb::emit_rb_line;
-use crate::ir::{AiceItem, AiceModule, TranspileError};
-use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, Stmt};
+use crate::ir::{AiceItem, AiceModule, TranspileError, TriviaKind};
+use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl, Stmt};
 use crate::ir_types::ParamDecl;
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -39,11 +39,45 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
+fn rb_attr_macro(p: &PropDecl) -> &'static str {
+    for c in &p.trivia.leading {
+        if c.kind == TriviaKind::Attribute {
+            match c.text.trim_start_matches('@') {
+                "attr_writer" => return "attr_writer",
+                "attr_reader" => return "attr_reader",
+                "attr_accessor" => return "attr_accessor",
+                _ => {}
+            }
+        }
+    }
+    if p.is_readonly { "attr_reader" } else { "attr_accessor" }
+}
+
 fn emit_rb_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&cd.trivia, CommentStyle::Hash);
     let sup = cd.extends.as_ref().map(|e| format!(" < {e}")).unwrap_or_default();
     ec.line(&format!("class {}{sup}", cd.name));
     ec.push();
+    let mut i = 0usize;
+    while i < cd.props.len() {
+        let p = &cd.props[i];
+        let kind = rb_attr_macro(p);
+        ec.emit_trivia(&p.trivia, CommentStyle::Hash);
+        let mut syms = vec![format!(":{}", p.name)];
+        let mut j = i + 1;
+        while j < cd.props.len() {
+            let nxt = &cd.props[j];
+            let has_comment = nxt.trivia.leading.iter().any(|c| c.kind != TriviaKind::Attribute);
+            if rb_attr_macro(nxt) == kind && !has_comment {
+                syms.push(format!(":{}", nxt.name));
+                j += 1;
+            } else {
+                break;
+            }
+        }
+        ec.line(&format!("{kind} {}", syms.join(", ")));
+        i = j;
+    }
     for m in &cd.methods { emit_rb_method(ec, m, ectx); }
     ec.pop();
     ec.line("end");

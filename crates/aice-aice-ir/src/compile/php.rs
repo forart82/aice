@@ -48,6 +48,15 @@ fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     let imp = if cd.implements.is_empty() { String::new() } else { format!(" implements {}", cd.implements.join(", ")) };
     ec.line(&format!("{abs}class {}{ext}{imp} {{", cd.name));
     ec.push();
+    for dec in &cd.decorators {
+        if let Some(traits) = dec.trim_start_matches('@').strip_prefix("use(").and_then(|s| s.strip_suffix(')')) {
+            if traits.contains('{') {
+                ec.line(&format!("use {traits}"));
+            } else {
+                ec.line(&format!("use {traits};"));
+            }
+        }
+    }
     for p in &cd.props {
         ec.emit_trivia(&p.trivia, CommentStyle::Slash);
         ec.emit_attrs(&p.trivia);

@@ -4,8 +4,8 @@ use aice_lang_registry::LanguageId;
 
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
+use crate::compile::kotlin_dart::{emit_kt_type, emit_kt_type_params};
 use crate::compile::stmt_common::emit_brace_stmts;
-use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::ParamDecl;
@@ -88,12 +88,14 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     if has_dec("object") { hdr.push_str("object "); }
     else if has_dec("interface") { hdr.push_str("interface "); }
     else { hdr.push_str("class "); }
+    let (tps, wh) = emit_kt_type_params(&cd.type_params);
     hdr.push_str(&cd.name);
+    hdr.push_str(&tps);
     if !cd.primary_ctor.is_empty() {
         let ps: Vec<String> = cd.primary_ctor.iter().map(|p| {
             let v = kt_vis(p.vis);
             let kw = if p.is_mut { "var " } else { "val " };
-            let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin)).unwrap_or_else(|| "Any".into());
+            let t = p.ty.as_ref().map(emit_kt_type).unwrap_or_else(|| "Any".into());
             let d = p.default.as_ref().map(|e| format!(" = {}", emit_kt_typed_expr(e, &t, ectx))).unwrap_or_default();
             format!("{v}{kw}{}: {t}{d}", p.name)
         }).collect();
@@ -103,6 +105,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     if let Some(ref ext) = cd.extends { supers.push(ext.replace("::", ".")); }
     for imp in &cd.implements { supers.push(imp.replace("::", ".")); }
     if !supers.is_empty() { hdr.push_str(&format!(" : {}", supers.join(", "))); }
+    hdr.push_str(&wh);
 
     let own_props: Vec<&PropDecl> = cd.props.iter()
         .filter(|p| !has_attr(&p.trivia, "nested_type") && companion_tag(&p.trivia).is_none())
@@ -149,7 +152,7 @@ fn emit_kt_prop(ec: &mut EmitCtx, p: &PropDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&p.trivia, CommentStyle::Slash);
     let cst = if has_attr(&p.trivia, "const") { "const " } else { "" };
     let kw = if p.is_mut { "var " } else { "val " };
-    let t_str = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin));
+    let t_str = p.ty.as_ref().map(emit_kt_type);
     let t = t_str.as_deref().map(|s| format!(": {s}")).unwrap_or_default();
     let init = p.init.as_ref().map(|e| format!(" = {}", emit_kt_typed_expr(e, t_str.as_deref().unwrap_or(""), ectx))).unwrap_or_default();
     ec.line(&format!("{}{cst}{kw}{}{t}{init}", kt_vis(p.vis), p.name));
@@ -164,9 +167,11 @@ fn emit_kt_typed_expr(e: &crate::ir_code::Expr, ty: &str, ectx: &ExprEmitCtx) ->
 
 fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+    let (tps, wh) = emit_kt_type_params(&m.type_params);
+    let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };
     let ps = emit_kt_params(&m.params, ectx);
-    let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Kotlin))).unwrap_or_default();
-    ec.line(&format!("{}fun {}({ps}){rt} {{", kt_vis(m.vis), m.name));
+    let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
+    ec.line(&format!("{}fun {tps_sp}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
     ec.push();
     match &m.body {
         FnBody::SignatureOnly => {}
@@ -180,9 +185,11 @@ fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
 fn emit_kt_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
+    let (tps, wh) = emit_kt_type_params(&f.type_params);
+    let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };
     let ps = emit_kt_params(&f.params, ectx);
-    let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Kotlin))).unwrap_or_default();
-    ec.line(&format!("{}fun {}({ps}){rt} {{", kt_vis(f.vis), f.name));
+    let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
+    ec.line(&format!("{}fun {tps_sp}{}({ps}){rt}{wh} {{", kt_vis(f.vis), f.name));
     ec.push();
     match &f.body {
         FnBody::SignatureOnly => {}
@@ -195,7 +202,7 @@ fn emit_kt_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
 
 fn emit_kt_params(params: &[ParamDecl], ectx: &ExprEmitCtx) -> String {
     params.iter().map(|p| {
-        let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin)).unwrap_or_else(|| "Any".into());
+        let t = p.ty.as_ref().map(emit_kt_type).unwrap_or_else(|| "Any".into());
         let d = p.default.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Kotlin, ectx))).unwrap_or_default();
         format!("{}: {t}{d}", p.name)
     }).collect::<Vec<_>>().join(", ")

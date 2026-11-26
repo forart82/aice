@@ -2,7 +2,8 @@ use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, strip_quotes, with_ts_root};
-use crate::decompile::dart_params::dart_params;
+use crate::decompile::dart_params::{dart_params, decompile_dart_enum, decompile_dart_extension, decompile_dart_mixin};
+use crate::decompile::kotlin_dart::{extract_dart_heritage, extract_dart_type_params};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
@@ -25,6 +26,9 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     }));
                 }
                 "class_declaration" => m.items.push(AiceItem::Class(decompile_dart_class(ch, src, opts, tr))),
+                "enum_declaration" => m.items.push(decompile_dart_enum(ch, src, opts, tr)),
+                "mixin_declaration" => m.items.push(AiceItem::Class(decompile_dart_mixin(ch, src, opts, tr))),
+                "extension_declaration" => m.items.push(AiceItem::Class(decompile_dart_extension(ch, src, opts, tr))),
                 "method_declaration" => {
                     if let Some(sig) = ch.child_by_field_name("signature").or_else(|| child_by_kind(ch, "method_signature")).or_else(|| child_by_kind(ch, "function_signature")) {
                         let b = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "function_body"));
@@ -70,66 +74,64 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
 fn decompile_dart_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
     let vis = if name.starts_with('_') { Visibility::Private } else { Visibility::Public };
+    let is_abstract = node_text(node, src).trim_start().starts_with("abstract ");
+    let type_params = extract_dart_type_params(node, src);
+    let (extends, implements, decorators) = extract_dart_heritage(node, src);
     let mut props = Vec::new();
     let mut methods = Vec::new();
     if let Some(body) = child_by_kind(node, "class_body") {
-        let kids = named_children(body);
-        let mut i = 0usize;
-        while i < kids.len() {
-            let ch = kids[i];
-            if is_comment_kind(ch.kind()) { i += 1; continue; }
-            let mtr = collect_trivia(ch, src, opts);
-            match ch.kind() {
-                "member_declaration" => {
-                    if let Some(decl) = child_by_kind(ch, "declaration") {
-                        extract_dart_member(decl, &name, src, opts, mtr, (&mut props, &mut methods));
-                    } else if let Some(md) = child_by_kind(ch, "method_declaration") {
-                        let sig = md.child_by_field_name("signature")
-                            .or_else(|| child_by_kind(md, "method_signature"))
-                            .or_else(|| child_by_kind(md, "function_signature"));
-                        let b = md.child_by_field_name("body").or_else(|| child_by_kind(md, "function_body"));
-                        if let Some(sig) = sig {
-                            extract_dart_sig(sig, b, &name, src, opts, mtr, &mut methods);
-                        }
-                    } else if let Some(sig) = child_by_kind(ch, "method_signature").or_else(|| child_by_kind(ch, "function_signature")) {
-                        let b = child_by_kind(ch, "function_body");
-                        extract_dart_sig(sig, b, &name, src, opts, mtr, &mut methods);
-                    }
-                }
-                "method_declaration" => {
-                    let sig = ch.child_by_field_name("signature")
-                        .or_else(|| child_by_kind(ch, "method_signature"))
-                        .or_else(|| child_by_kind(ch, "function_signature"));
-                    let b = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "function_body"));
-                    if let Some(sig) = sig {
-                        extract_dart_sig(sig, b, &name, src, opts, mtr, &mut methods);
-                    }
-                }
-                "class_member_definition" => {
-                    if let Some(decl) = child_by_kind(ch, "declaration") {
-                        extract_dart_member(decl, &name, src, opts, mtr, (&mut props, &mut methods));
-                    } else if let Some(sig) = child_by_kind(ch, "method_signature").or_else(|| child_by_kind(ch, "function_signature")) {
-                        let b = child_by_kind(ch, "function_body");
-                        extract_dart_sig(sig, b, &name, src, opts, mtr, &mut methods);
-                    }
-                }
-                "declaration" => {
-                    extract_dart_member(ch, &name, src, opts, mtr, (&mut props, &mut methods));
-                }
-                "method_signature" => {
-                    let b = kids.get(i + 1).filter(|n| n.kind() == "function_body").copied();
-                    if b.is_some() { i += 1; }
-                    extract_dart_sig(ch, b, &name, src, opts, mtr, &mut methods);
-                }
-                _ => {}
-            }
-            i += 1;
-        }
+        decompile_dart_body_nodes(&named_children(body), &name, src, opts, &mut props, &mut methods);
     }
     ClassDecl {
-        vis, is_abstract: false, decorators: Vec::new(), name, type_params: Vec::new(),
-        primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
+        vis, is_abstract, decorators, name, type_params,
+        primary_ctor: Vec::new(), extends, implements,
         props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+    }
+}
+
+pub(crate) fn decompile_dart_body_nodes(
+    kids: &[Node<'_>],
+    name: &str,
+    src: &str,
+    opts: &TranspileOpts,
+    props: &mut Vec<PropDecl>,
+    methods: &mut Vec<MethodDecl>,
+) {
+    let mut i = 0usize;
+    while i < kids.len() {
+        let ch = kids[i];
+        if is_comment_kind(ch.kind()) { i += 1; continue; }
+        let mtr = collect_trivia(ch, src, opts);
+        match ch.kind() {
+            "member_declaration" | "class_member_definition" => {
+                if let Some(decl) = child_by_kind(ch, "declaration") {
+                    extract_dart_member(decl, name, src, opts, mtr, (props, methods));
+                } else if let Some(md) = child_by_kind(ch, "method_declaration") {
+                    let sig = md.child_by_field_name("signature")
+                        .or_else(|| child_by_kind(md, "method_signature"))
+                        .or_else(|| child_by_kind(md, "function_signature"));
+                    let b = md.child_by_field_name("body").or_else(|| child_by_kind(md, "function_body"));
+                    if let Some(sig) = sig { extract_dart_sig(sig, b, name, src, opts, mtr, methods); }
+                } else if let Some(sig) = child_by_kind(ch, "method_signature").or_else(|| child_by_kind(ch, "function_signature")) {
+                    extract_dart_sig(sig, child_by_kind(ch, "function_body"), name, src, opts, mtr, methods);
+                }
+            }
+            "method_declaration" => {
+                let sig = ch.child_by_field_name("signature")
+                    .or_else(|| child_by_kind(ch, "method_signature"))
+                    .or_else(|| child_by_kind(ch, "function_signature"));
+                let b = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "function_body"));
+                if let Some(sig) = sig { extract_dart_sig(sig, b, name, src, opts, mtr, methods); }
+            }
+            "declaration" => extract_dart_member(ch, name, src, opts, mtr, (props, methods)),
+            "method_signature" => {
+                let b = kids.get(i + 1).filter(|n| n.kind() == "function_body").copied();
+                if b.is_some() { i += 1; }
+                extract_dart_sig(ch, b, name, src, opts, mtr, methods);
+            }
+            _ => {}
+        }
+        i += 1;
     }
 }
 
@@ -216,7 +218,7 @@ fn extract_dart_sig(sig: Node<'_>, body: Option<Node<'_>>, cls: &str, src: &str,
     let f = decompile_dart_fn_sig(inner, body, src, opts, tr);
     methods.push(MethodDecl {
         vis: f.vis, is_static: node_text(sig, src).trim_start().starts_with("static "), is_async: f.is_async, is_const: false,
-        accessor, name: f.name, type_params: Vec::new(),
+        accessor, name: f.name, type_params: f.type_params,
         params: f.params, return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
     });
 }
@@ -228,16 +230,17 @@ fn decompile_dart_fn_sig(sig: Node<'_>, body: Option<Node<'_>>, src: &str, opts:
         .trim()
         .to_string();
     let vis = if name.starts_with('_') { Visibility::Private } else { Visibility::Public };
+    let type_params = extract_dart_type_params(sig, src);
     let return_type = sig.child_by_field_name("return_type")
         .or_else(|| child_by_kind(sig, "type_identifier"))
         .or_else(|| child_by_kind(sig, "void_type"))
-        .or_else(|| named_children(sig).into_iter().find(|c| c.kind().contains("type")))
+        .or_else(|| named_children(sig).into_iter().find(|c| c.kind().contains("type") && c.kind() != "type_parameters"))
         .map(|t| map_type_str(node_text(t, src), LanguageId::Dart));
     let params = child_by_kind(sig, "formal_parameter_list").map(|p| dart_params(p, src)).unwrap_or_default();
     let fbody = body.map(|b| decompile_dart_fn_body(b, src, opts)).unwrap_or(FnBody::SignatureOnly);
     FnDecl {
         vis, is_async: false, is_static: false, decorators: Vec::new(), name,
-        type_params: Vec::new(), params, return_type, body: fbody, trivia: tr, span: node_span(sig),
+        type_params, params, return_type, body: fbody, trivia: tr, span: node_span(sig),
     }
 }
 

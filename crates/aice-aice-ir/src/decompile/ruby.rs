@@ -4,8 +4,9 @@ use tree_sitter::Node;
 use crate::decompile::cst_util::{field_text, named_children, node_span, node_text, strip_quotes, with_ts_root};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
-use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, Stmt};
+use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl, Stmt};
 use crate::ir_types::ParamDecl;
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -53,6 +54,7 @@ fn decompile_rb_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
     let name = field_text(node, "name", src).unwrap_or("Class").trim().to_string();
     let extends = node.child_by_field_name("superclass").map(|s| node_text(s, src).trim().trim_start_matches('<').trim().to_string());
     let mut cur_vis = Visibility::Public;
+    let mut props = Vec::new();
     let mut methods = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
         for ch in named_children(body) {
@@ -64,6 +66,27 @@ fn decompile_rb_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                     "protected" => cur_vis = Visibility::Protected,
                     "public" => cur_vis = Visibility::Public,
                     _ => {}
+                }
+                continue;
+            }
+            if ch.kind() == "call" {
+                let meth = field_text(ch, "method", src).unwrap_or("").trim();
+                if matches!(meth, "attr_accessor" | "attr_reader" | "attr_writer")
+                    && let Some(args) = ch.child_by_field_name("arguments")
+                {
+                    let mut first = true;
+                    for a in named_children(args) {
+                        if is_comment_kind(a.kind()) { continue; }
+                        let nm = strip_quotes(node_text(a, src).trim()).trim_start_matches(':').trim().to_string();
+                        if nm.is_empty() { continue; }
+                        let mut ptr = if first { first = false; mtr.clone() } else { Trivia::default() };
+                        push_attrs_to_trivia(&mut ptr, vec![format!("@{meth}")]);
+                        props.push(PropDecl {
+                            name: nm, aliases: Vec::new(), vis: cur_vis, is_static: false,
+                            is_readonly: meth == "attr_reader", is_mut: meth != "attr_reader",
+                            is_optional: false, ty: None, init: None, trivia: ptr,
+                        });
+                    }
                 }
                 continue;
             }
@@ -81,7 +104,7 @@ fn decompile_rb_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
     ClassDecl {
         vis: Visibility::Public, is_abstract: false, decorators: Vec::new(), name,
         type_params: Vec::new(), primary_ctor: Vec::new(), extends, implements: Vec::new(),
-        props: Vec::new(), methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+        props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }
 }
 
