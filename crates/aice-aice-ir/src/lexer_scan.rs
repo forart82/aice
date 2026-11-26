@@ -41,6 +41,7 @@ fn scan_all(s: &mut Scanner<'_>) -> Result<(), TranspileError> {
             s.line += 1;
             s.line_start = s.i;
             s.at_line_start = true;
+            s.at_stmt_start = true;
             s.on_import_line = false;
             s.prev_val_tok = false;
             continue;
@@ -71,8 +72,70 @@ fn scan_leading_ws(s: &mut Scanner<'_>) {
     }
 }
 
+fn scan_raw_line_payload(s: &mut Scanner<'_>, pipe_pos: usize) {
+    s.i = pipe_pos + 1;
+    if s.b.get(s.i) == Some(&b' ') {
+        s.i += 1;
+    }
+    let t0 = s.i;
+    while s.i < s.b.len() && s.b[s.i] != b'\n' {
+        s.i += 1;
+    }
+    let text = s.src[t0..s.i].trim_end_matches('\r').to_string();
+    s.push_tok(TokenKind::RawLine, text, pipe_pos, s.i);
+}
+
+fn try_scan_raw_line(s: &mut Scanner<'_>, start: usize) -> bool {
+    let rest = &s.src[start..];
+    if s.at_stmt_start {
+        if s.b[start] == b'|' && matches!(s.peek(1), None | Some(b' ' | b'\n' | b'\r')) {
+            scan_raw_line_payload(s, start);
+            return true;
+        }
+        const TAGS: &[&str] = &[
+            "######", "#####", "####", "###", "##", "#", "todo[x]", "todo[ ]",
+            "shebang", "prolog", "pragma", "code", "ddl", "opt", "con",
+            "dec", "cmd", "var", "set", "ref", "li", "ol", "fm", "th", "tr", "q",
+        ];
+        for tag in TAGS {
+            if let Some(after) = rest.strip_prefix(tag)
+                && let Some(after_pipe) = after.strip_prefix('|')
+                && (after_pipe.is_empty() || matches!(after_pipe.as_bytes()[0], b' ' | b'\n' | b'\r'))
+            {
+                let tag_end = start + tag.len();
+                s.push_tok(TokenKind::Ident, (*tag).to_string(), start, tag_end);
+                scan_raw_line_payload(s, tag_end);
+                return true;
+            }
+        }
+        return false;
+    }
+    if s.b[start] == b':'
+        && s.peek(1) == Some(b'|')
+        && matches!(s.peek(2), None | Some(b' ' | b'\n' | b'\r'))
+    {
+        s.i = start + 1;
+        s.push_tok(TokenKind::Colon, ":".to_string(), start, start + 1);
+        scan_raw_line_payload(s, start + 1);
+        return true;
+    }
+    if s.b[start] == b'|'
+        && matches!(s.peek(1), None | Some(b' ' | b'\n' | b'\r'))
+        && s.out.len() >= 2
+        && matches!(&s.out[s.out.len() - 1].kind, RawKind::Tok(TokenKind::String | TokenKind::Ident, _))
+        && matches!(&s.out[s.out.len() - 2].kind, RawKind::Tok(TokenKind::Ident, kw) if kw == "clause" || kw == "with")
+    {
+        scan_raw_line_payload(s, start);
+        return true;
+    }
+    false
+}
+
 fn scan_token(s: &mut Scanner<'_>) -> Result<(), TranspileError> {
     let start = s.i;
+    if try_scan_raw_line(s, start) {
+        return Ok(());
+    }
     let ch = s.b[s.i];
     match ch {
         b'#' => s.scan_hash(start),

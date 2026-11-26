@@ -4,7 +4,9 @@ use crate::ir::{AiceItem, TranspileError, Trivia};
 use crate::ir_domain_db::{DbMigrationDecl, DbQueryDecl, DbQueryKind, DbSchemaDecl};
 use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
-use crate::parser_domain_schema::{parse_dbtype, parse_gql, parse_prisma, parse_proc, parse_table, parse_trig};
+use crate::parser_domain_schema::{
+    parse_db_atom, parse_dbtype, parse_gql, parse_prisma, parse_proc, parse_table, parse_trig,
+};
 
 pub(crate) fn parse_db_item(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let kw = p.advance().lexeme;
@@ -16,11 +18,48 @@ pub(crate) fn parse_db_item(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceIt
         "trig" => parse_trig(p, trivia),
         "dbtype" => parse_dbtype(p, trivia),
         "ddl" => {
-            p.expect(TokenKind::Colon, "Expected ':'")?;
-            let text = p.advance().lexeme;
+            let text = if matches!(p.peek_kind(), TokenKind::RawLine | TokenKind::TripleString) {
+                p.advance().lexeme
+            } else {
+                p.expect(TokenKind::Colon, "Expected ':'")?;
+                p.advance().lexeme
+            };
             let mut tr = trivia;
             if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
             Ok(AiceItem::DbSchema(DbSchemaDecl::RawDdl { text, trivia: tr }))
+        }
+        "pragma" => {
+            let raw = if p.peek_kind() == TokenKind::RawLine {
+                p.advance().lexeme
+            } else {
+                p.expect(TokenKind::Colon, "Expected ':'")?;
+                p.line_rest_raw()
+            };
+            let sql = if raw.get(..7).is_some_and(|h| h.eq_ignore_ascii_case("PRAGMA ")) {
+                raw
+            } else {
+                format!("PRAGMA {raw}")
+            };
+            let mut tr = trivia;
+            if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+            Ok(AiceItem::DbQuery(DbQueryDecl {
+                dialect: LanguageId::Sqlite, kind: DbQueryKind::Pragma, name: None,
+                ctes: Vec::new(), clauses: vec![("sql".into(), sql)], trivia: tr,
+            }))
+        }
+        "sql" => {
+            p.expect(TokenKind::Colon, "Expected ':'")?;
+            let body = if matches!(p.peek_kind(), TokenKind::RawLine | TokenKind::TripleString) {
+                p.advance().lexeme
+            } else {
+                p.line_rest_raw()
+            };
+            let mut tr = trivia;
+            if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+            Ok(AiceItem::DbQuery(DbQueryDecl {
+                dialect: LanguageId::AnsiSql, kind: DbQueryKind::Exec, name: None,
+                ctes: Vec::new(), clauses: vec![("sql".into(), body)], trivia: tr,
+            }))
         }
         "model" | "datasource" | "generator" | "prisma_enum" => parse_prisma(p, &kw, trivia),
         "gql" => parse_gql(p, trivia),
@@ -32,23 +71,55 @@ pub(crate) fn parse_db_item(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceIt
 
 fn parse_view(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let materialized = p.peek().lexeme == "materialized" && { p.advance(); true };
-    let name = p.expect(TokenKind::String, "Expected view name")?.lexeme;
+    let name = parse_db_atom(p, "Expected view name")?;
     p.expect(TokenKind::Colon, "Expected ':'")?;
-    let query_sql = p.advance().lexeme;
     let mut tr = trivia;
-    if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+    let query_sql = if matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment) {
+        if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+        p.skip_newlines();
+        let mut lines = Vec::new();
+        if p.eat(TokenKind::Indent) {
+            while !p.at_eof() && p.peek_kind() != TokenKind::Dedent {
+                if p.peek_kind() == TokenKind::RawLine { lines.push(p.advance().lexeme); }
+                else { lines.push(p.line_rest_raw()); }
+                p.eat_stmt_end();
+            }
+            p.eat(TokenKind::Dedent);
+        }
+        lines.join("\n")
+    } else if matches!(p.peek_kind(), TokenKind::String | TokenKind::TripleString) {
+        let s = p.advance().lexeme;
+        if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+        s
+    } else {
+        let s = p.line_rest_raw();
+        if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+        s
+    };
     Ok(AiceItem::DbSchema(DbSchemaDecl::View { name, materialized, query_sql, trivia: tr }))
 }
 
 fn parse_index(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let unique = p.peek().lexeme == "unique" && { p.advance(); true };
-    let name = p.expect(TokenKind::String, "Expected index name")?.lexeme;
+    let name = parse_db_atom(p, "Expected index name")?;
     p.expect_ident_or_kw("Expected 'on'")?;
-    let table = p.expect(TokenKind::String, "Expected table name")?.lexeme;
+    let table = parse_db_atom(p, "Expected table name")?;
     p.expect(TokenKind::Colon, "Expected ':'")?;
     let mut cols = Vec::new();
-    while matches!(p.peek_kind(), TokenKind::String | TokenKind::Ident) {
-        cols.push(p.advance().lexeme);
+    while !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) {
+        if p.peek_kind() == TokenKind::String {
+            cols.push(p.advance().lexeme);
+        } else {
+            let (mut s, mut e) = (None, 0usize);
+            while !matches!(p.peek_kind(), TokenKind::Comma | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) {
+                let tok = p.advance();
+                if tok.span.end_byte > tok.span.start_byte {
+                    if s.is_none() { s = Some(tok.span.start_byte); }
+                    e = tok.span.end_byte;
+                }
+            }
+            if let Some(st) = s { cols.push(p.src[st..e].trim().to_string()); }
+        }
         if !p.eat(TokenKind::Comma) { break; }
     }
     let mut tr = trivia;
@@ -56,12 +127,24 @@ fn parse_index(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem, Transpile
     Ok(AiceItem::DbSchema(DbSchemaDecl::Index { name, unique, table, cols, trivia: tr }))
 }
 
+fn restore_cypher_prefix(k: &str, v: String) -> String {
+    if !matches!(k, "MATCH" | "RETURN" | "MERGE" | "WITH" | "CREATE" | "DELETE" | "SET" | "UNWIND") {
+        return v;
+    }
+    if v.get(..k.len()).is_some_and(|h| h.eq_ignore_ascii_case(k))
+        && v.as_bytes().get(k.len()).is_none_or(|b| b.is_ascii_whitespace())
+    {
+        return v;
+    }
+    if v.is_empty() { k.to_string() } else if v.starts_with('\n') { format!("{k}{v}") } else { format!("{k} {v}") }
+}
+
 fn parse_query(p: &mut Parser<'_>, kw: &str, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let (dialect, kind) = if kw == "cypher" {
         (LanguageId::Cypher, DbQueryKind::Cypher)
     } else {
-        let d = parse_dialect_str(&p.expect(TokenKind::String, "Expected dialect")?.lexeme);
-        let k = match p.expect(TokenKind::String, "Expected query kind")?.lexeme.as_str() {
+        let d = parse_dialect_str(&parse_db_atom(p, "Expected dialect")?);
+        let k = match parse_db_atom(p, "Expected query kind")?.as_str() {
             "insert" => DbQueryKind::Insert, "update" => DbQueryKind::Update,
             "delete" => DbQueryKind::Delete, "pragma" => DbQueryKind::Pragma,
             "do" => DbQueryKind::DoBlock, "exec" => DbQueryKind::Exec,
@@ -73,22 +156,61 @@ fn parse_query(p: &mut Parser<'_>, kw: &str, trivia: Trivia) -> Result<AiceItem,
     let name = if p.peek_kind() == TokenKind::String { Some(p.advance().lexeme) } else { None };
     p.expect(TokenKind::Colon, "Expected ':'")?;
     let mut tr = trivia;
+    if matches!(p.peek_kind(), TokenKind::TripleString | TokenKind::RawLine) {
+        let body = p.advance().lexeme;
+        let key = if kind == DbQueryKind::GraphQlOp { "query" } else { "sql" };
+        if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+        return Ok(AiceItem::DbQuery(DbQueryDecl {
+            dialect, kind, name, ctes: Vec::new(), clauses: vec![(key.into(), body)], trivia: tr,
+        }));
+    }
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
-    let (mut ctes, mut clauses) = (Vec::new(), Vec::new());
+    let mut ctes: Vec<(String, String)> = Vec::new();
+    let mut clauses: Vec<(String, String)> = Vec::new();
+    let mut raw_body: Vec<String> = Vec::new();
     p.skip_newlines();
     if p.eat(TokenKind::Indent) {
         while !p.at_eof() && p.peek_kind() != TokenKind::Dedent {
             let _ = p.collect_leading_trivia();
             if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
-            let tag = p.expect_ident_or_kw("Expected with/clause")?.lexeme;
-            let k = p.expect(TokenKind::String, "Expected clause key")?.lexeme;
-            p.expect(TokenKind::Colon, "Expected ':'")?;
-            let v = p.advance().lexeme;
+            if p.peek_kind() == TokenKind::RawLine {
+                let line = p.advance().lexeme;
+                if let Some((_, last_v)) = clauses.last_mut() {
+                    last_v.push('\n');
+                    last_v.push_str(&line);
+                } else if let Some((_, last_v)) = ctes.last_mut() {
+                    last_v.push('\n');
+                    last_v.push_str(&line);
+                } else {
+                    raw_body.push(line);
+                }
+                p.eat_stmt_end();
+                continue;
+            }
+            let (tag, k) = if !matches!(p.peek().lexeme.as_str(), "with" | "clause") && p.peek_n(1).kind == TokenKind::Colon {
+                ("clause".to_string(), parse_db_atom(p, "Expected clause key")?)
+            } else {
+                let t = p.expect_ident_or_kw("Expected with/clause")?.lexeme;
+                let key = parse_db_atom(p, "Expected clause key")?;
+                (t, key)
+            };
+            let v = if p.peek_kind() == TokenKind::RawLine {
+                let raw = p.advance().lexeme;
+                if kind == DbQueryKind::Cypher && tag != "with" { restore_cypher_prefix(&k, raw) } else { raw }
+            } else {
+                p.expect(TokenKind::Colon, "Expected ':'")?;
+                let raw = p.advance().lexeme;
+                if kind == DbQueryKind::Cypher && tag != "with" { restore_cypher_prefix(&k, raw) } else { raw }
+            };
             let _ = p.take_trailing_comment();
             if tag == "with" { ctes.push((k, v)); } else { clauses.push((k, v)); }
             p.eat_stmt_end();
         }
         p.eat(TokenKind::Dedent);
+    }
+    if !raw_body.is_empty() && clauses.is_empty() {
+        let key = if kind == DbQueryKind::GraphQlOp { "query" } else { "sql" };
+        clauses.push((key.into(), raw_body.join("\n")));
     }
     Ok(AiceItem::DbQuery(DbQueryDecl { dialect, kind, name, ctes, clauses, trivia: tr }))
 }
@@ -102,7 +224,7 @@ struct MigFrame {
 }
 
 fn start_migration(p: &mut Parser<'_>, trivia: Trivia) -> Result<MigFrame, TranspileError> {
-    let tool = p.expect(TokenKind::String, "Expected migration tool")?.lexeme;
+    let tool = parse_db_atom(p, "Expected migration tool")?;
     p.expect(TokenKind::Colon, "Expected ':'")?;
     let mut tr = trivia;
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
@@ -152,7 +274,7 @@ fn parse_migration(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem, Trans
         let _ = p.collect_leading_trivia();
         if p.peek_kind() == TokenKind::Dedent || p.at_eof() { continue; }
         p.expect_ident_or_kw("Expected 'section'")?;
-        let sname = p.expect(TokenKind::String, "Expected section name")?.lexeme;
+        let sname = parse_db_atom(p, "Expected section name")?;
         p.expect(TokenKind::Colon, "Expected ':'")?;
         let _ = p.take_trailing_comment();
         p.skip_newlines();

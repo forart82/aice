@@ -3,6 +3,7 @@ use aice_lang_registry::LanguageId;
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::ir::{AiceItem, AiceModule, TranspileError};
 use crate::ir_domain_db::{DbQueryDecl, DbSchemaDecl};
+use crate::printer_compact::expand_sql_constraint;
 
 pub(crate) fn compile_sql_or_migration(module: &AiceModule, target: LanguageId) -> Result<String, TranspileError> {
     let mut ec = EmitCtx::new("  ");
@@ -54,8 +55,8 @@ fn emit_db_schema(ds: &DbSchemaDecl, target: LanguageId, ec: &mut EmitCtx) {
             ec.push();
             let mut defs: Vec<String> = columns.iter().map(|c| {
                 let mut s = format!("{} {}", c.name, c.sql_type);
-                for cc in &c.constraints { s.push(' '); s.push_str(cc); }
-                if let Some(ref d) = c.default { s.push_str(&format!(" DEFAULT {d}")); }
+                for cc in &c.constraints { s.push(' '); s.push_str(&expand_sql_constraint(cc)); }
+                if let Some(ref d) = c.default { s.push_str(&format!(" DEFAULT {}", expand_sql_constraint(d))); }
                 s
             }).collect();
             defs.extend(constraints.iter().cloned());

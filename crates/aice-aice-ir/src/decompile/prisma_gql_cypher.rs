@@ -100,7 +100,13 @@ fn decompile_graphql(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<
                         let ftr = collect_trivia(f, src, opts);
                         let fnm = child_by_kind(f, "name").map(|n| node_text(n, src).trim().into()).unwrap_or_else(|| "f".into());
                         let args = child_by_kind(f, "arguments_definition")
-                            .map(|a| named_children(a).into_iter().map(|c| node_text(c, src).trim().into()).collect())
+                            .map(|a| {
+                                named_children(a)
+                                    .into_iter()
+                                    .filter(|c| c.kind() == "input_value_definition")
+                                    .map(|c| node_text(c, src).trim().into())
+                                    .collect()
+                            })
                             .unwrap_or_default();
                         let fty = named_children(f).into_iter().find(|c| c.kind().contains("type"))
                             .map(|c| node_text(c, src).trim().into()).unwrap_or_else(|| "String".into());

@@ -86,7 +86,7 @@ fn iter12_consecutive_siblings_no_trailing_comment_duplication() {
 fn iter12_graphql_enum_comments_and_rd_sql_multiline_and_col_comments() {
     let gql = "enum Role {\n  ADMIN # gql_enum_tail\n  USER # gql_enum_user\n}\n";
     let (gm, gaice) = to_aice_str(LanguageId::GraphQl, gql, &TranspileOpts::default());
-    assert!(gaice.contains("field \"ADMIN\": \"\" # gql_enum_tail"), "{gaice}");
+    assert!(gaice.contains("ADMIN # gql_enum_tail"), "{gaice}");
     assert!(!gaice.contains("field \"# gql_enum_tail\""), "phantom comment field:\n{gaice}");
     assert_eq!(gaice.matches("gql_enum_tail").count(), 1, "{gaice}");
     assert_eq!(gaice.matches("gql_enum_user").count(), 1, "{gaice}");

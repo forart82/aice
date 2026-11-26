@@ -124,14 +124,21 @@ fn emit_css_rule(ec: &mut EmitCtx, root: &StyleDecl) {
 
 fn expand_css_prop(p: &str) -> &str {
     match p {
-        "bg" => "background-color",
-        "disp" => "display",
-        "p" => "padding",
-        "m" => "margin",
-        "c" => "color",
-        "fz" => "font-size",
-        "b" => "border",
-        "rad" => "border-radius",
+        "bg" => "background-color", "disp" => "display", "p" => "padding",
+        "m" => "margin", "c" => "color", "fz" => "font-size",
+        "b" => "border", "rad" => "border-radius",
+        "fw" => "font-weight", "ff" => "font-family",
+        "ai" => "align-items", "jc" => "justify-content",
+        "fd" => "flex-direction", "fsh" => "flex-shrink",
+        "lh" => "line-height", "ls" => "letter-spacing",
+        "ta" => "text-align", "td" => "text-decoration", "tt" => "text-transform",
+        "ws" => "white-space", "bs" => "box-sizing",
+        "mw" => "max-width", "mnw" => "min-width", "mh" => "max-height", "mnh" => "min-height",
+        "zi" => "z-index", "lst" => "list-style", "gtc" => "grid-template-columns",
+        "bb" => "border-bottom", "bt" => "border-top", "bl" => "border-left",
+        "br" => "border-right", "bc" => "border-collapse",
+        "mt" => "margin-top", "mb" => "margin-bottom", "ml" => "margin-left", "mr" => "margin-right",
+        "pt" => "padding-top", "pb" => "padding-bottom", "pl" => "padding-left", "pr" => "padding-right",
         other => other,
     }
 }

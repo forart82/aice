@@ -9,6 +9,7 @@ use crate::decompile::iter_expr_fin::{
     push_binary_task, push_lambda_task, push_unary_task,
 };
 use crate::decompile::iter_match::push_match_task;
+use crate::decompile::trivia::is_comment_kind;
 use crate::ir_code::{AssignOp, Expr, LiteralVal, MemberKind, UnaryOp};
 use crate::ir_types::{AiceType, ParamDecl};
 
@@ -116,7 +117,13 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             let kids = named_children(node);
             let cond = node.child_by_field_name("condition").or_else(|| kids.first().copied());
             let then_n = node.child_by_field_name("consequence").or_else(|| kids.get(1).copied());
-            let else_n = node.child_by_field_name("alternative").or_else(|| kids.get(2).copied());
+            let else_n = node.child_by_field_name("alternative").or_else(|| kids.get(2).copied()).map(|e| {
+                if e.kind() == "else_clause" {
+                    named_children(e).into_iter().find(|c| !is_comment_kind(c.kind())).unwrap_or(e)
+                } else {
+                    e
+                }
+            });
             if let (Some(c), Some(t), Some(e)) = (cond, then_n, else_n) {
                 env.tasks.push(DTask::FinishExpr(ExprFin::Conditional));
                 env.tasks.push(DTask::Expr(e));

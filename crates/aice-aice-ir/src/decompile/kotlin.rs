@@ -5,7 +5,7 @@ use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
+use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
 use crate::ir_types::ParamDecl;
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -65,14 +65,14 @@ fn decompile_kt_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
     let mut decorators = Vec::new();
     if raw.trim_start().starts_with("data ") { decorators.push("data".into()); }
     let mut primary_ctor = Vec::new();
-    let mut props = Vec::new();
+    let props = Vec::new();
     if let Some(ctor) = child_by_kind(node, "primary_constructor") {
         let param_container = child_by_kind(ctor, "class_parameters").unwrap_or(ctor);
         for cp in named_children(param_container) {
             if cp.kind() == "class_parameter" {
                 let c_raw = node_text(cp, src);
-                let pvis = kt_vis(cp, src);
-                let is_ro = c_raw.contains("val ");
+                let pvis = kt_param_vis(cp, src);
+                let is_mut = c_raw.contains("var ");
                 let pnm = child_by_kind(cp, "identifier")
                     .or_else(|| child_by_kind(cp, "simple_identifier"))
                     .map(|n| node_text(n, src).trim().to_string())
@@ -83,15 +83,9 @@ fn decompile_kt_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                     .map(|t| map_type_str(node_text(t, src), LanguageId::Kotlin));
                 let default = kt_default_expr(cp, src);
                 primary_ctor.push(ParamDecl {
-                    name: pnm.clone(), vis: pvis, is_readonly: is_ro, is_mut: !is_ro,
-                    is_optional: false, is_rest: false, ty: ty.clone(), default: default.clone(), trivia: Trivia::default(),
+                    name: pnm, vis: pvis, is_readonly: false, is_mut,
+                    is_optional: false, is_rest: false, ty, default, trivia: Trivia::default(),
                 });
-                if c_raw.contains("val ") || c_raw.contains("var ") {
-                    props.push(PropDecl {
-                        name: pnm, aliases: Vec::new(), vis: pvis, is_static: false, is_readonly: is_ro,
-                        is_mut: !is_ro, is_optional: false, ty, init: default, trivia: Trivia::default(),
-                    });
-                }
             }
         }
     }
@@ -202,6 +196,17 @@ fn kt_default_expr(node: Node<'_>, src: &str) -> Option<crate::ir_code::Expr> {
         }
     }
     None
+}
+
+fn kt_param_vis(node: Node<'_>, src: &str) -> Visibility {
+    if let Some(mods) = child_by_kind(node, "modifiers") {
+        let t = node_text(mods, src);
+        if t.contains("private") { return Visibility::Private; }
+        if t.contains("protected") { return Visibility::Protected; }
+        if t.contains("internal") { return Visibility::Package; }
+        if t.contains("public") { return Visibility::Public; }
+    }
+    Visibility::Default
 }
 
 fn kt_vis(node: Node<'_>, src: &str) -> Visibility {

@@ -176,7 +176,7 @@ fn c4_dart_ruby_php_toml_twig_graphql_regressions() {
     assert!(nat_gql.contains("scalar DateTime") && !nat_gql.contains("scalar DateTime {"), "GQL scalar invalid:\n{nat_gql}");
     assert!(nat_gql.contains("enum Status") && nat_gql.contains("OPEN") && nat_gql.contains("CLOSED"), "GQL enum lost:\n{nat_gql}");
     assert!(nat_gql.contains("input CreateTicketInput"), "GQL input invalid:\n{nat_gql}");
-    assert!(aice_gql.contains("implements: \"Node\", \"Entity\"") && nat_gql.contains("type User implements Node & Entity"), "GQL implements lost:\n{aice_gql}\n{nat_gql}");
+    assert!(aice_gql.contains("implements: Node, Entity") && nat_gql.contains("type User implements Node & Entity"), "GQL implements lost:\n{aice_gql}\n{nat_gql}");
 
     let pg_trig = "CREATE TRIGGER tr_audit AFTER UPDATE ON ledger FOR EACH ROW EXECUTE FUNCTION audit_balance_change();\n";
     let (aice_pg, _) = roundtrip(LanguageId::PostgreSql, "trig.sql", pg_trig);

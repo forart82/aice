@@ -173,6 +173,19 @@ fn compress_css_prop(p: &str) -> &str {
     match p {
         "background-color" => "bg", "display" => "disp", "padding" => "p",
         "margin" => "m", "color" => "c", "font-size" => "fz",
-        "border" => "b", "border-radius" => "rad", other => other,
+        "border" => "b", "border-radius" => "rad",
+        "font-weight" => "fw", "font-family" => "ff",
+        "align-items" => "ai", "justify-content" => "jc",
+        "flex-direction" => "fd", "flex-shrink" => "fsh",
+        "line-height" => "lh", "letter-spacing" => "ls",
+        "text-align" => "ta", "text-decoration" => "td", "text-transform" => "tt",
+        "white-space" => "ws", "box-sizing" => "bs",
+        "max-width" => "mw", "min-width" => "mnw", "max-height" => "mh", "min-height" => "mnh",
+        "z-index" => "zi", "list-style" => "lst", "grid-template-columns" => "gtc",
+        "border-bottom" => "bb", "border-top" => "bt", "border-left" => "bl",
+        "border-right" => "br", "border-collapse" => "bc",
+        "margin-top" => "mt", "margin-bottom" => "mb", "margin-left" => "ml", "margin-right" => "mr",
+        "padding-top" => "pt", "padding-bottom" => "pb", "padding-left" => "pl", "padding-right" => "pr",
+        other => other,
     }
 }

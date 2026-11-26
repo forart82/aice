@@ -243,11 +243,11 @@ GO
 "#;
     let (tsql_aice, tsql_nat) = roundtrip(LanguageId::TSql, "tsql_proc.sql", tsql);
     assert!(
-        tsql_aice.contains("proc \"tsql\" \"dbo.ProcessLedgerBatch\"(\"@BatchId INT\", \"@Delta MONEY\"):"),
+        tsql_aice.contains("proc \"tsql\" \"dbo.ProcessLedgerBatch\"(@BatchId INT, @Delta MONEY):"),
         "T-SQL proc params lost:\n{tsql_aice}"
     );
     assert!(
-        tsql_aice.contains("proc \"tsql\" \"dbo.usp_UpsertOrder\"(\"@CustomerId INT\", \"@Amount DECIMAL(10, 2) = 0.00\", \"@Note NVARCHAR(100) = 'N/A, ok'\", \"@OrderId INT OUTPUT\"):"),
+        tsql_aice.contains("proc \"tsql\" \"dbo.usp_UpsertOrder\"(@CustomerId INT, \"@Amount DECIMAL(10, 2) = 0.00\", \"@Note NVARCHAR(100) = 'N/A, ok'\", @OrderId INT OUTPUT):"),
         "T-SQL CREATE OR ALTER PROC params lost:\n{tsql_aice}"
     );
     assert!(!tsql_aice.contains("(\"10\")"), "T-SQL captured TOP(10):\n{tsql_aice}");
@@ -264,11 +264,11 @@ GO
 ) ENGINE=InnoDB;
 "#;
     let (my_aice, my_nat) = roundtrip(LanguageId::MySql, "schema.sql", mysql);
-    assert!(!my_aice.contains("col \"KEY\""), "MySQL KEY misparsed as column:\n{my_aice}");
-    assert!(!my_aice.contains("col \"INDEX\""), "MySQL INDEX misparsed as column:\n{my_aice}");
-    assert!(my_aice.contains("constraint: \"KEY `IDX_RUN` (`run_id`)\""), "missing KEY constraint:\n{my_aice}");
-    assert!(my_aice.contains("constraint: \"INDEX idx_title (`title`)\""), "missing INDEX constraint:\n{my_aice}");
-    assert!(my_aice.contains("col \"`key`\": \"VARCHAR(50)\""), "real column `key` misclassified:\n{my_aice}");
+    assert!(!my_aice.contains("col \"KEY\"") && !my_aice.contains("\n  KEY:"), "MySQL KEY misparsed as column:\n{my_aice}");
+    assert!(!my_aice.contains("col \"INDEX\"") && !my_aice.contains("\n  INDEX:"), "MySQL INDEX misparsed as column:\n{my_aice}");
+    assert!(my_aice.contains("con| KEY `IDX_RUN` (`run_id`)"), "missing KEY constraint:\n{my_aice}");
+    assert!(my_aice.contains("con| INDEX idx_title (`title`)"), "missing INDEX constraint:\n{my_aice}");
+    assert!(my_aice.contains("col \"`key`\": VARCHAR(50)"), "real column `key` misclassified:\n{my_aice}");
     assert!(my_nat.contains("KEY `IDX_RUN` (`run_id`)") && my_nat.contains("INDEX idx_title (`title`)"), "{my_nat}");
 
     // Also verify FULLTEXT KEY/INDEX, SPATIAL KEY/INDEX, and unquoted column `key VARCHAR(50)` IR classification
@@ -292,12 +292,12 @@ GO
     let ext_aice = print_aice(&m);
     let ext_reparsed = parse_aice(&ext_aice).expect("parse mysql_ext AICE");
     let ext_nat = tr.to_native(&ext_reparsed, LanguageId::MySql).expect("compile mysql_ext");
-    assert!(!ext_aice.contains("col \"FULLTEXT\"") && !ext_aice.contains("col \"SPATIAL\""), "FULLTEXT/SPATIAL misparsed as col:\n{ext_aice}");
-    assert!(ext_aice.contains("col \"key\": \"VARCHAR(50)\""), "unquoted key column misclassified:\n{ext_aice}");
-    assert!(ext_aice.contains("constraint: \"FULLTEXT KEY ft_title (`title`)\""), "missing FULLTEXT KEY:\n{ext_aice}");
-    assert!(ext_aice.contains("constraint: \"FULLTEXT INDEX ft_title2 (`title`)\""), "missing FULLTEXT INDEX:\n{ext_aice}");
-    assert!(ext_aice.contains("constraint: \"SPATIAL KEY sp_geom (`geom`)\""), "missing SPATIAL KEY:\n{ext_aice}");
-    assert!(ext_aice.contains("constraint: \"SPATIAL INDEX sp_geom2 (`geom`)\""), "missing SPATIAL INDEX:\n{ext_aice}");
+    assert!(!ext_aice.contains("col \"FULLTEXT\"") && !ext_aice.contains("\n  FULLTEXT ") && !ext_aice.contains("col \"SPATIAL\"") && !ext_aice.contains("\n  SPATIAL "), "FULLTEXT/SPATIAL misparsed as col:\n{ext_aice}");
+    assert!(ext_aice.contains("key VARCHAR(50)"), "unquoted key column misclassified:\n{ext_aice}");
+    assert!(ext_aice.contains("con| FULLTEXT KEY ft_title (`title`)"), "missing FULLTEXT KEY:\n{ext_aice}");
+    assert!(ext_aice.contains("con| FULLTEXT INDEX ft_title2 (`title`)"), "missing FULLTEXT INDEX:\n{ext_aice}");
+    assert!(ext_aice.contains("con| SPATIAL KEY sp_geom (`geom`)"), "missing SPATIAL KEY:\n{ext_aice}");
+    assert!(ext_aice.contains("con| SPATIAL INDEX sp_geom2 (`geom`)"), "missing SPATIAL INDEX:\n{ext_aice}");
     assert!(ext_nat.contains("FULLTEXT KEY ft_title (`title`)") && ext_nat.contains("SPATIAL INDEX sp_geom2 (`geom`)"), "{ext_nat}");
 }
 

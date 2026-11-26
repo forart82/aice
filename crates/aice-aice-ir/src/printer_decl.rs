@@ -86,6 +86,11 @@ pub(crate) fn print_class_decl(c: &mut PrintCtx<'_>, cd: &ClassDecl, d: usize) {
     let ctor = if cd.primary_ctor.is_empty() { String::new() } else { format!("({})", format_params(c, &cd.primary_ctor)) };
     let ext = cd.extends.as_ref().map(|e| format!(" extends {e}")).unwrap_or_default();
     let imp = if cd.implements.is_empty() { String::new() } else { format!(" implements {}", cd.implements.join(", ")) };
+    let empty_body = cd.static_blocks.is_empty() && cd.props.is_empty() && cd.methods.is_empty();
+    if empty_body && !cd.primary_ctor.is_empty() && c.opts.compact {
+        c.line_tr(d, &format!("{}{abs}class {}{}{ctor}{ext}{imp}", cd.vis.aice_prefix(), cd.name, format_type_params(&cd.type_params)), &cd.trivia);
+        return;
+    }
     c.line_tr(d, &format!("{}{abs}class {}{}{ctor}{ext}{imp}:", cd.vis.aice_prefix(), cd.name, format_type_params(&cd.type_params)), &cd.trivia);
     for sb in &cd.static_blocks {
         c.line(d + 1, "static:");
@@ -93,7 +98,7 @@ pub(crate) fn print_class_decl(c: &mut PrintCtx<'_>, cd: &ClassDecl, d: usize) {
     }
     for p in &cd.props { print_prop_decl(c, p, d + 1); }
     for m in &cd.methods { print_method_decl(c, m, d + 1); }
-    if cd.static_blocks.is_empty() && cd.props.is_empty() && cd.methods.is_empty() {
+    if empty_body {
         c.line(d + 1, "pass");
     }
 }

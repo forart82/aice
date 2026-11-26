@@ -9,6 +9,7 @@ pub(crate) struct Scanner<'a> {
     pub line: usize,
     pub line_start: usize,
     pub at_line_start: bool,
+    pub at_stmt_start: bool,
     pub on_import_line: bool,
     pub prev_val_tok: bool,
     pub template_stack: Vec<usize>,
@@ -24,6 +25,7 @@ impl<'a> Scanner<'a> {
             line: 1,
             line_start: 0,
             at_line_start: true,
+            at_stmt_start: true,
             on_import_line: false,
             prev_val_tok: false,
             template_stack: Vec::new(),
@@ -46,6 +48,7 @@ impl<'a> Scanner<'a> {
     }
 
     pub fn push_tok(&mut self, kind: TokenKind, lexeme: String, start: usize, end: usize) {
+        self.at_stmt_start = false;
         self.prev_val_tok = matches!(
             kind,
             TokenKind::Ident | TokenKind::Number | TokenKind::String | TokenKind::TripleString

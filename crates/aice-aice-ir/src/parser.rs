@@ -223,6 +223,16 @@ impl<'a> Parser<'a> {
             "data" => parse_data(self, trivia),
             "doc" => parse_doc(self, trivia),
             "sh" => parse_sh(self, trivia),
+            "shebang" | "set" | "var" | "cmd" if self.peek_n(1).kind == TokenKind::RawLine => {
+                parse_sh(self, trivia)
+            }
+            "pragma" if self.peek_n(1).kind == TokenKind::RawLine => parse_db_item(self, trivia),
+            "sql"
+                if self.peek_n(1).kind == TokenKind::Colon
+                    && matches!(self.peek_n(2).kind, TokenKind::RawLine | TokenKind::TripleString) =>
+            {
+                parse_db_item(self, trivia)
+            }
             "table" | "view" | "index" | "proc" | "trig" | "dbtype" | "ddl" | "model"
             | "datasource" | "generator" | "prisma_enum" | "gql" | "query" | "cypher"
             | "migration" => parse_db_item(self, trivia),

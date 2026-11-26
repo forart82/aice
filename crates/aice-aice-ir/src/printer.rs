@@ -1,3 +1,5 @@
+use aice_lang_registry::LanguageId;
+
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileOpts, Trivia, TriviaKind};
 use crate::ir_code::AssignOp;
 use crate::ir_types::ParamDecl;
@@ -15,7 +17,16 @@ pub fn print_aice_with_opts(module: &AiceModule, opts: &TranspileOpts) -> String
     if module.items.is_empty() && !module.raw_fallback.is_empty() {
         return module.raw_fallback.clone();
     }
-    let mut ctx = PrintCtx::new(opts);
+    let eff_lang = if module.source_lang == LanguageId::Aice {
+        match module.module_name.as_str() {
+            "html" => LanguageId::Html,
+            "twig" => LanguageId::Twig,
+            _ => module.source_lang,
+        }
+    } else {
+        module.source_lang
+    };
+    let mut ctx = PrintCtx::new(opts, eff_lang);
     ctx.emit_trivia(&module.module_trivia, 0);
     ctx.line(0, &format!("module {}", module.module_name));
     for (idx, item) in module.items.iter().enumerate() {
@@ -38,12 +49,13 @@ pub fn print_aice_with_opts(module: &AiceModule, opts: &TranspileOpts) -> String
 
 pub(crate) struct PrintCtx<'a> {
     pub opts: &'a TranspileOpts,
+    pub lang: LanguageId,
     pub out: String,
 }
 
 impl<'a> PrintCtx<'a> {
-    fn new(opts: &'a TranspileOpts) -> Self {
-        Self { opts, out: String::new() }
+    fn new(opts: &'a TranspileOpts, lang: LanguageId) -> Self {
+        Self { opts, lang, out: String::new() }
     }
 
     pub fn indent(&mut self, depth: usize) {

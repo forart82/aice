@@ -142,9 +142,16 @@ fn step_template_ctrl(
     };
     let mut children = Vec::new();
     if p.eat(TokenKind::Colon) {
-        if matches!(p.peek_kind(), TokenKind::String | TokenKind::TripleString) {
+        if !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof) {
+            let txt = if matches!(p.peek_kind(), TokenKind::String | TokenKind::TripleString)
+                && matches!(p.peek_n(1).kind, TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof)
+            {
+                p.advance().lexeme
+            } else {
+                p.line_rest_raw()
+            };
             children.push(LayoutNode::Element {
-                tag: "#text".into(), attrs: Vec::new(), text: Some(p.advance().lexeme),
+                tag: "#text".into(), attrs: Vec::new(), text: Some(txt),
                 child_expr: None, children: Vec::new(), trivia: Trivia::default(),
             });
             continue_ctrl_branches(p, CtrlState { kind, arg, children, branches: Vec::new(), tr }, blocks, owners)?;
@@ -168,25 +175,73 @@ fn step_template_ctrl(
     Ok(())
 }
 
+fn parse_layout_ident(p: &mut Parser<'_>, msg: &str) -> Result<String, TranspileError> {
+    if p.peek_kind() == TokenKind::String {
+        return Ok(p.advance().lexeme);
+    }
+    let mut s = p.expect_ident_or_kw(msg)?.lexeme;
+    while p.eat(TokenKind::Minus) {
+        s.push('-');
+        s.push_str(&p.expect_ident_or_kw(msg)?.lexeme);
+    }
+    Ok(s)
+}
+
+fn parse_layout_attr_str(p: &mut Parser<'_>) -> Expr {
+    if p.peek_kind() == TokenKind::String {
+        return Expr::Literal(crate::ir_code::LiteralVal::Str { value: p.advance().lexeme, multiline: false });
+    }
+    let (mut s, mut e) = (None, 0usize);
+    while !matches!(p.peek_kind(), TokenKind::Comma | TokenKind::RParen | TokenKind::Newline | TokenKind::Eof) {
+        if s.is_some()
+            && p.peek().span.start_byte > e
+            && (p.peek_kind() == TokenKind::String || p.peek_kind() == TokenKind::Ident || p.peek().is_keyword())
+        {
+            break;
+        }
+        let t = p.advance();
+        if t.span.end_byte > t.span.start_byte {
+            if s.is_none() { s = Some(t.span.start_byte); }
+            e = t.span.end_byte;
+        }
+    }
+    let val = s.map(|st| p.src[st..e].trim().to_string()).unwrap_or_default();
+    Expr::Literal(crate::ir_code::LiteralVal::Str { value: val, multiline: false })
+}
+
 fn step_layout_elem(
     p: &mut Parser<'_>,
     mut tr: Trivia,
     blocks: &mut Vec<Vec<LayoutNode>>,
     owners: &mut Vec<LayoutOwner>,
 ) -> Result<(), TranspileError> {
-    let tag = if p.peek_kind() == TokenKind::String { p.advance().lexeme } else { p.expect_ident_or_kw("Expected tag")?.lexeme };
+    let tag = parse_layout_ident(p, "Expected tag")?;
     let mut attrs = Vec::new();
     if p.eat(TokenKind::LParen) {
         while p.peek_kind() != TokenKind::RParen && !p.at_eof() {
-            let name = if p.peek_kind() == TokenKind::String { p.advance().lexeme } else { p.expect_ident_or_kw("Expected attr")?.lexeme };
-            let value = if p.eat(TokenKind::Colon) { Some(parse_expr(p)?) } else { None };
+            let name = parse_layout_ident(p, "Expected attr")?;
+            let value = if p.eat(TokenKind::Equal) {
+                Some(parse_layout_attr_str(p))
+            } else if p.eat(TokenKind::Colon) {
+                Some(parse_expr(p)?)
+            } else {
+                None
+            };
             attrs.push(LayoutAttr { name, value });
-            if !p.eat(TokenKind::Comma) { break; }
+            p.eat(TokenKind::Comma);
         }
         p.expect(TokenKind::RParen, "Expected ')'")?;
     }
     let (mut text, mut child_expr) = (None, None);
-    if p.eat(TokenKind::Colon) {
+    if p.eat(TokenKind::Equal) {
+        text = Some(if matches!(p.peek_kind(), TokenKind::String | TokenKind::TripleString)
+            && matches!(p.peek_n(1).kind, TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof)
+        {
+            p.advance().lexeme
+        } else {
+            p.line_rest_raw()
+        });
+    } else if p.eat(TokenKind::Colon) {
         if matches!(p.peek_kind(), TokenKind::String | TokenKind::TripleString) {
             text = Some(p.advance().lexeme);
         } else if matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment) {

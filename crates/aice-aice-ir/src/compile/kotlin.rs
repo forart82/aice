@@ -45,7 +45,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     } else {
         let ps: Vec<String> = cd.primary_ctor.iter().map(|p| {
             let v = kt_vis(p.vis);
-            let kw = if p.is_readonly { "val " } else { "var " };
+            let kw = if p.is_mut { "var " } else { "val " };
             let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Kotlin)).unwrap_or_else(|| "Any".into());
             let d = p.default.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Kotlin, ectx))).unwrap_or_default();
             format!("{v}{kw}{}: {t}{d}", p.name)

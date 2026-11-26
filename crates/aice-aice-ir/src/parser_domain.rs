@@ -105,10 +105,37 @@ fn parse_style_header(p: &mut Parser<'_>, trivia: Trivia) -> Result<StyleFrame, 
     let selector = if p.peek_kind() == TokenKind::String { p.advance().lexeme } else { p.line_rest_raw_until_colon() };
     p.expect(TokenKind::Colon, "Expected ':'")?;
     let mut tr = trivia;
+    let mut props = Vec::new();
+    if !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof) {
+        while !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof) {
+            let name = if p.peek_kind() == TokenKind::String { p.advance().lexeme } else { p.line_rest_raw_until_colon() };
+            let value = if p.eat(TokenKind::Colon) {
+                if matches!(p.peek_kind(), TokenKind::String | TokenKind::TripleString)
+                    && matches!(p.peek_n(1).kind, TokenKind::Semicolon | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment)
+                {
+                    Some(p.advance().lexeme)
+                } else {
+                    let (mut s, mut e) = (None, 0usize);
+                    while !matches!(p.peek_kind(), TokenKind::Semicolon | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) {
+                        let t = p.advance();
+                        if t.span.end_byte > t.span.start_byte {
+                            if s.is_none() { s = Some(t.span.start_byte); }
+                            e = t.span.end_byte;
+                        }
+                    }
+                    Some(s.map(|st| p.src[st..e].trim().to_string()).unwrap_or_default())
+                }
+            } else { None };
+            props.push(StyleProp { name, value, trivia: Trivia::default() });
+            if !p.eat(TokenKind::Semicolon) { break; }
+        }
+        if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
+        return Ok(StyleFrame { selector, props, children: Vec::new(), tr, sp, has_indent: false });
+    }
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
     p.skip_newlines();
     let has_indent = p.eat(TokenKind::Indent);
-    Ok(StyleFrame { selector, props: Vec::new(), children: Vec::new(), tr, sp, has_indent })
+    Ok(StyleFrame { selector, props, children: Vec::new(), tr, sp, has_indent })
 }
 
 fn parse_style_decl(p: &mut Parser<'_>, trivia: Trivia) -> Result<StyleDecl, TranspileError> {

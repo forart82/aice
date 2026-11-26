@@ -3,7 +3,7 @@ use crate::ir::Span;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TokenKind {
     // Structural
-    Newline, Indent, Dedent, Eof, Comment,
+    Newline, Indent, Dedent, Eof, Comment, RawLine,
     // Identifiers & Literals
     Ident, Number, String, TripleString, Boolean, Nil, HexColor, Regex,
     TemplateHead, TemplateMiddle, TemplateTail, TemplateNoSubst,
