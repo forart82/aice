@@ -2,7 +2,7 @@ use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
-use crate::decompile::expr_lit::{parse_dollar_interp, parse_interp_text};
+use crate::decompile::expr_lit::{decompile_string_lit, parse_interp_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task};
 use crate::decompile::iter_expr_fin::{
@@ -11,7 +11,7 @@ use crate::decompile::iter_expr_fin::{
 use crate::decompile::iter_match::push_match_task;
 use crate::decompile::op_map::find_assign_parts;
 use crate::decompile::trivia::is_comment_kind;
-use crate::ir_code::{AssignOp, BinaryOp, Expr, LiteralVal, MemberKind, UnaryOp};
+use crate::ir_code::{AssignOp, BinaryOp, Expr, LiteralVal, MemberKind, Stmt, UnaryOp};
 use crate::ir_types::{AiceType, ParamDecl};
 
 pub(crate) enum ObjSlot {
@@ -36,7 +36,7 @@ pub(crate) enum ExprFin {
     Array(usize),
     TypeCast(String),
     Await,
-    Closure { is_async: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, ret: Option<AiceType>, body_kind: u8 },
+    Closure { is_async: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, destruct_stmts: Vec<Stmt>, ret: Option<AiceType>, body_kind: u8 },
     RubyBlock { params: Vec<ParamDecl>, has_body: bool },
     InlineJsx(bool),
 }
@@ -45,8 +45,17 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
     loop {
         match node.kind() {
             "parenthesized_expression" | "expression_statement" | "argument" => {
-                if let Some(ch) = named_children(node).into_iter().next() { node = ch; }
-                else { env.exprs.push(Expr::Ident(node_text(node, env.src).trim().into())); return; }
+                if let Some(ch) = named_children(node).into_iter().next() {
+                    if node.kind() == "parenthesized_expression" && ch.kind() == "named_expression" {
+                        let txt = crate::decompile::ts_helpers::normalize_single_line(node_text(node, env.src));
+                        env.exprs.push(Expr::Ident(txt));
+                        return;
+                    }
+                    node = ch;
+                } else {
+                    env.exprs.push(Expr::Ident(node_text(node, env.src).trim().into()));
+                    return;
+                }
             }
             "expression_list" if named_children(node).len() == 1 => { node = named_children(node)[0]; }
             "condition_clause" => {
@@ -86,17 +95,10 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "false" | "boolean_literal" if raw == "false" || raw == "False" => env.exprs.push(Expr::Literal(LiteralVal::Bool(false))),
         "null" | "nil" | "none" | "None" | "null_literal" => env.exprs.push(Expr::Literal(LiteralVal::Nil)),
         "string" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"
-        | "verbatim_string_literal" | "char_literal" | "character_literal" => {
-            let e = if env.lang == LanguageId::Python && (raw.starts_with("f\"") || raw.starts_with("f'")) {
-                parse_interp_text(&strip_quotes(&raw[1..]), "{", "}")
-            } else if matches!(env.lang, LanguageId::Dart | LanguageId::Kotlin) && raw.contains('$') {
-                parse_dollar_interp(&strip_quotes(raw))
-            } else if env.lang == LanguageId::Ruby && raw.starts_with('"') && raw.contains("#{") {
-                parse_interp_text(&strip_quotes(raw), "#{", "}")
-            } else {
-                Expr::Literal(LiteralVal::Str { value: strip_quotes(raw), multiline: raw.contains('\n') })
-            };
-            env.exprs.push(e);
+        | "verbatim_string_literal" | "byte_string_literal" | "raw_byte_string_literal"
+        | "c_string_literal" | "raw_c_string_literal" | "raw_string"
+        | "char_literal" | "character_literal" => {
+            env.exprs.push(decompile_string_lit(raw, env.lang));
         }
         "template_string" => {
             let inner = raw.strip_prefix('`').and_then(|s| s.strip_suffix('`')).unwrap_or(raw);

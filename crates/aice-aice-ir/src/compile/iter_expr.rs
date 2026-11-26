@@ -4,7 +4,8 @@ use crate::compile::expr_emit::{ExprEmitCtx, assign_native, bin_op_native, emit_
 use crate::compile::iter_emit::{CTask, EvalState, body_kind_of};
 use crate::compile::iter_expr_call::{make_inline_jsx, push_eval_call};
 use crate::compile::iter_expr_fmt::{
-    format_closure, format_closure_param, format_record_entry, format_template, unary_op_native,
+    format_closure, format_closure_param, format_record_entry, format_template,
+    needs_walrus_parens, unary_op_native,
 };
 use crate::ir_code::{BinaryOp, Expr, FnBody, MemberKind, RecordEntry, UnaryOp};
 
@@ -214,8 +215,8 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             for ex in exprs.iter().rev() { tasks.push(CTask::EvalExpr(ex)); }
         }
         Expr::Binary { op, left, right } => {
-            let lp = crate::printer_expr::needs_binary_parens(left, *op, false);
-            let rp = crate::printer_expr::needs_binary_parens(right, *op, true);
+            let lp = crate::printer_expr::needs_binary_parens(left, *op, false) || needs_walrus_parens(left);
+            let rp = crate::printer_expr::needs_binary_parens(right, *op, true) || needs_walrus_parens(right);
             tasks.push(CTask::MakeBinary { op: *op, is_str: is_str_like(left) || is_str_like(right) });
             if rp { tasks.push(CTask::WrapParen); }
             tasks.push(CTask::EvalExpr(right));
@@ -224,7 +225,8 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
         }
         Expr::Unary { op, is_postfix, operand } => {
             let wrap = *op != UnaryOp::Yield
-                && matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
+                && (matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
+                    || needs_walrus_parens(operand));
             tasks.push(CTask::MakeUnary { op: *op, is_postfix: *is_postfix, wrap });
             tasks.push(CTask::EvalExpr(operand));
         }

@@ -10,7 +10,27 @@ use crate::ir_code::{BinaryOp, Expr, FnBody, LiteralVal, MemberKind, RecordEntry
 pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     let (params, default_nodes) = crate::decompile::tsx_jsx::extract_lambda_params(node, env.src, env.lang);
     let default_mask: Vec<bool> = default_nodes.iter().map(Option::is_some).collect();
-    let ret = node.child_by_field_name("return_type").map(|r| crate::decompile::tsx_jsx::map_ts_type_node(r, env.src, env.lang));
+    let destruct_stmts = if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) {
+        node.child_by_field_name("parameters")
+            .filter(|pn| pn.kind() == "formal_parameters")
+            .map(|pn| crate::decompile::ts_helpers::extract_ts_destructured_param_stmts(pn, env.src, env.lang))
+            .unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let ret_node = node.child_by_field_name("return_type").or_else(|| {
+        (env.lang == LanguageId::Cpp)
+            .then(|| {
+                node.child_by_field_name("declarator")
+                    .or_else(|| child_by_kind(node, "lambda_declarator"))
+                    .and_then(|d| child_by_kind(d, "trailing_return_type"))
+            })
+            .flatten()
+    });
+    let ret = ret_node.map(|r| {
+        let txt = node_text(r, env.src).trim().trim_start_matches("->").trim();
+        crate::decompile::cst_util::map_type_str(txt, env.lang)
+    });
     let body_node = node.child_by_field_name("body").or_else(|| named_children(node).into_iter().last());
     let (body_kind, target_n) = match body_node {
         Some(b) if b.kind() == "function_expression_body" => {
@@ -18,7 +38,7 @@ pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
             else if let Some(ex) = named_children(b).into_iter().next() { (2u8, Some(ex)) }
             else { (0u8, None) }
         }
-        Some(b) if matches!(b.kind(), "statement_block" | "block") => (1u8, Some(b)),
+        Some(b) if matches!(b.kind(), "statement_block" | "block" | "compound_statement") => (1u8, Some(b)),
         Some(b) => (2u8, Some(b)),
         None => (0u8, None),
     };
@@ -34,7 +54,7 @@ pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         .unwrap_or("")
         .split_whitespace()
         .any(|w| w == "async");
-    env.tasks.push(DTask::FinishExpr(ExprFin::Closure { is_async, params, default_mask, ret, body_kind }));
+    env.tasks.push(DTask::FinishExpr(ExprFin::Closure { is_async, params, default_mask, destruct_stmts, ret, body_kind }));
     if let Some(tn) = target_n {
         if body_kind == 1 { env.tasks.push(DTask::Block(tn)); } else { env.tasks.push(DTask::Expr(tn)); }
     }
@@ -177,10 +197,29 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
         ExprFin::Array(n) => Expr::Array(env.exprs.split_off(env.exprs.len() - n)),
         ExprFin::TypeCast(ty_name) => Expr::Binary { op: BinaryOp::As, left: Box::new(env.exprs.pop().expect("cast")), right: Box::new(Expr::Ident(ty_name)) },
         ExprFin::Await => Expr::Await(Box::new(env.exprs.pop().expect("await"))),
-        ExprFin::Closure { is_async, mut params, default_mask, ret, body_kind } => {
+        ExprFin::Closure { is_async, mut params, default_mask, mut destruct_stmts, ret, body_kind } => {
             let body = match body_kind {
-                1 => FnBody::Block(env.blocks.pop().unwrap_or_default()),
-                2 => FnBody::Expr(env.exprs.pop().expect("cl expr")),
+                1 => {
+                    let mut stmts = env.blocks.pop().unwrap_or_default();
+                    if !destruct_stmts.is_empty() {
+                        destruct_stmts.append(&mut stmts);
+                        FnBody::Block(destruct_stmts)
+                    } else {
+                        FnBody::Block(stmts)
+                    }
+                }
+                2 => {
+                    let expr = env.exprs.pop().expect("cl expr");
+                    if !destruct_stmts.is_empty() {
+                        destruct_stmts.push(crate::ir_code::Stmt::Return {
+                            value: Some(expr),
+                            trivia: Default::default(),
+                        });
+                        FnBody::Block(destruct_stmts)
+                    } else {
+                        FnBody::Expr(expr)
+                    }
+                }
                 _ => FnBody::SignatureOnly,
             };
             let def_cnt = default_mask.iter().filter(|&&b| b).count();

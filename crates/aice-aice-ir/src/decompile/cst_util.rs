@@ -43,13 +43,7 @@ pub(crate) fn node_span(n: Node<'_>) -> Span {
 }
 
 pub(crate) fn strip_quotes(s: &str) -> String {
-    let t = s.trim();
-    for q in ["\"\"\"", "'''", "\"", "'", "`"] {
-        if t.len() >= q.len() * 2 && t.starts_with(q) && t.ends_with(q) {
-            return t[q.len()..t.len() - q.len()].to_string();
-        }
-    }
-    t.to_string()
+    crate::decompile::expr_lit::strip_quotes_lit(s)
 }
 
 pub(crate) fn map_type_str(raw: &str, lang: LanguageId) -> AiceType {

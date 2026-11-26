@@ -8,8 +8,8 @@ use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::{
-    extract_ts_class_heritage, extract_ts_decorators, format_ts_decorator_attr, is_ts_prop_optional,
-    is_ts_readonly_prefix, push_attrs_to_trivia,
+    extract_ts_class_heritage, extract_ts_decorators, extract_ts_destructured_param_stmts,
+    format_ts_decorator_attr, is_ts_prop_optional, is_ts_readonly_prefix, push_attrs_to_trivia,
 };
 use crate::decompile::tsx_jsx::{extract_ts_params, extract_ts_type_params, map_ts_type_node, try_extract_jsx_component};
 use crate::ir::{
@@ -71,15 +71,29 @@ fn decompile_top_item(
         "function_declaration" => {
             let name = field_text(node, "name", src).unwrap_or("fn_anon").to_string();
             let type_params = extract_ts_type_params(node, src, lang);
-            let params = node.child_by_field_name("parameters").map(|p| extract_ts_params(p, src, lang)).unwrap_or_default();
+            let param_node = node.child_by_field_name("parameters");
+            let params = param_node.map(|p| extract_ts_params(p, src, lang)).unwrap_or_default();
+            let mut destruct = param_node.map(|p| extract_ts_destructured_param_stmts(p, src, lang)).unwrap_or_default();
             if lang == LanguageId::Tsx
-                && let Some(comp) = try_extract_jsx_component(node, vis, &name, type_params.clone(), params.clone(), src, lang, opts, tr.clone())
+                && let Some(mut comp) = try_extract_jsx_component(node, vis, &name, type_params.clone(), params.clone(), src, lang, opts, tr.clone())
             {
+                if !destruct.is_empty() {
+                    destruct.append(&mut comp.body_stmts);
+                    comp.body_stmts = destruct;
+                }
                 m.items.push(AiceItem::Component(comp));
                 return;
             }
             let ret = node.child_by_field_name("return_type").map(|r| map_ts_type_node(r, src, lang));
-            let body = node.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, lang, opts))).unwrap_or(FnBody::SignatureOnly);
+            let body = node.child_by_field_name("body").map(|b| {
+                let mut stmts = decompile_block(b, src, lang, opts);
+                if !destruct.is_empty() {
+                    destruct.append(&mut stmts);
+                    FnBody::Block(destruct)
+                } else {
+                    FnBody::Block(stmts)
+                }
+            }).unwrap_or(FnBody::SignatureOnly);
             m.items.push(AiceItem::Fn(FnDecl {
                 vis, is_async: node_text(node, src).trim_start().starts_with("async "), is_static: false,
                 decorators, name, type_params, params, return_type: ret, body, trivia: tr, span: node_span(node),
@@ -231,9 +245,14 @@ fn decompile_class(node: Node<'_>, vis: Visibility, mut decorators: Vec<String>,
                     let mname = field_text(ch, "name", src).unwrap_or("method").to_string();
                     let accessor = if mname == "constructor" { AccessorKind::Constructor } else { AccessorKind::Normal };
                     let mtps = extract_ts_type_params(ch, src, lang);
-                    let params = ch.child_by_field_name("parameters").map(|p| extract_ts_params(p, src, lang)).unwrap_or_default();
+                    let pnode = ch.child_by_field_name("parameters");
+                    let params = pnode.map(|p| extract_ts_params(p, src, lang)).unwrap_or_default();
+                    let mut mdest = pnode.map(|p| extract_ts_destructured_param_stmts(p, src, lang)).unwrap_or_default();
                     let ret = ch.child_by_field_name("return_type").map(|r| map_ts_type_node(r, src, lang));
-                    let mbody = ch.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, lang, opts))).unwrap_or(FnBody::SignatureOnly);
+                    let mbody = ch.child_by_field_name("body").map(|b| {
+                        let mut stmts = decompile_block(b, src, lang, opts);
+                        if !mdest.is_empty() { mdest.append(&mut stmts); FnBody::Block(mdest) } else { FnBody::Block(stmts) }
+                    }).unwrap_or(FnBody::SignatureOnly);
                     methods.push(MethodDecl {
                         vis: mvis, is_static: hdr.contains("static "), is_async: hdr.contains("async "), is_const: false,
                         accessor, name: mname, type_params: mtps, params, return_type: ret,

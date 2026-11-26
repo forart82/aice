@@ -4,6 +4,10 @@ use crate::compile::type_map::emit_type;
 use crate::ir_code::{Expr, RecordEntry, UnaryOp};
 use crate::ir_types::{AiceType, ParamDecl};
 
+pub(crate) fn needs_walrus_parens(e: &Expr) -> bool {
+    matches!(e, Expr::Ident(s) if s.contains(":=") && !(s.starts_with('(') && s.ends_with(')')))
+}
+
 pub(crate) fn unary_op_native(op: UnaryOp, lang: LanguageId) -> &'static str {
     match (op, lang) {
         (UnaryOp::Not, LanguageId::Python) => "not ",

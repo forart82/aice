@@ -94,12 +94,17 @@ pub(crate) fn extract_lambda_params<'a>(
     if lang == LanguageId::CSharp {
         return extract_cs_lambda_params(node, src);
     }
+    if lang == LanguageId::Cpp {
+        return crate::decompile::ts_helpers::extract_cpp_lambda_params(node, src);
+    }
     let mut params = Vec::new();
     let mut def_nodes = Vec::new();
     if let Some(pn) = node.child_by_field_name("parameters").or_else(|| node.child_by_field_name("parameter")) {
         if pn.kind() == "identifier" {
             params.push(ParamDecl { name: node_text(pn, src).into(), vis: Default::default(), is_readonly: false, is_mut: false, is_optional: false, is_rest: false, ty: None, default: None, trivia: Trivia::default() });
             def_nodes.push(None);
+        } else if lang == LanguageId::Rust && pn.kind() == "closure_parameters" {
+            return crate::decompile::ts_helpers::extract_rust_closure_params(pn, src);
         } else if lang == LanguageId::Dart && pn.kind() == "formal_parameter_list" {
             params = crate::decompile::dart_params::dart_params(pn, src);
             def_nodes.resize(params.len(), None);

@@ -1,9 +1,12 @@
+use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_stmt::StmtFin;
-use crate::decompile::match_cf::{parse_rust_pattern_iter, parse_simple_pattern};
+use crate::decompile::match_cf::{
+    parse_rust_pattern_iter, parse_simple_pattern, push_c_switch_arms, push_php_match_arm, push_py_case_arm,
+};
 use crate::decompile::stmt_common::find_body_node;
 use crate::decompile::trivia::{collect_header_trailing, collect_trivia};
 use crate::ir_code::{BinaryOp, Expr, FnBody, Pattern, UnaryOp};
@@ -42,39 +45,39 @@ pub(crate) fn push_match_arms<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, is_ex
         .or_else(|| child_by_kind(node, "switch_block")).unwrap_or(node);
     let arm_nodes: Vec<Node<'a>> = named_children(container).into_iter().filter(|ch| matches!(
         ch.kind(),
-        "match_arm" | "when_entry" | "switch_case" | "switch_default" | "case_clause" | "expression_case" | "default_case"
+        "match_arm" | "when_entry" | "switch_case" | "switch_default" | "case_clause"
+            | "expression_case" | "default_case" | "case_statement"
+            | "match_conditional_expression" | "match_default_expression"
     ) || (node.kind() == "case" && matches!(ch.kind(), "when" | "else"))).collect();
 
+    if node.kind() == "switch_statement" && matches!(env.lang, LanguageId::C | LanguageId::Cpp) {
+        push_c_switch_arms(env, &arm_nodes, is_expr, hdr_tr);
+        return;
+    }
     env.tasks.push(DTask::FinishStmt(StmtFin::Match { is_expr, case_len: arm_nodes.len(), hdr_tr }));
     for ch in arm_nodes.into_iter().rev() {
         match ch.kind() {
             "match_arm" => push_rust_arm(env, ch),
             "when_entry" => push_kotlin_when_entry(env, ch, is_subjectless),
+            "match_conditional_expression" | "match_default_expression" => push_php_match_arm(env, ch),
+            "case_clause" if env.lang == LanguageId::Python => push_py_case_arm(env, ch),
             "when" if node.kind() == "case" => push_ruby_when(env, ch, is_subjectless),
             "else" if node.kind() == "case" => {
                 let bn = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "then")).unwrap_or(ch);
-                env.tasks.push(DTask::FinishStmt(StmtFin::MatchArm {
-                    pat: Pattern::Wildcard, has_guard: false, trivia: collect_trivia(ch, env.src, env.opts),
-                }));
+                env.tasks.push(DTask::FinishStmt(StmtFin::MatchArm { pat: Pattern::Wildcard, has_guard: false, trivia: collect_trivia(ch, env.src, env.opts) }));
                 env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: true });
                 env.tasks.push(DTask::Block(bn));
             }
             _ => {
-                let pat = if matches!(ch.kind(), "switch_default" | "default_case") {
-                    Pattern::Wildcard
-                } else {
+                let pat = if matches!(ch.kind(), "switch_default" | "default_case") { Pattern::Wildcard } else {
                     field_text(ch, "value", env.src).or_else(|| field_text(ch, "pattern", env.src))
                         .map(|s| parse_simple_pattern(s.trim())).unwrap_or(Pattern::Wildcard)
                 };
-                env.tasks.push(DTask::FinishStmt(StmtFin::MatchArm {
-                    pat, has_guard: false, trivia: collect_trivia(ch, env.src, env.opts),
-                }));
+                env.tasks.push(DTask::FinishStmt(StmtFin::MatchArm { pat, has_guard: false, trivia: collect_trivia(ch, env.src, env.opts) }));
                 if let Some(bn) = find_body_node(ch) {
                     env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: false });
                     env.tasks.push(DTask::Block(bn));
-                } else {
-                    env.bodies.push(FnBody::Block(Vec::new()));
-                }
+                } else { env.bodies.push(FnBody::Block(Vec::new())); }
             }
         }
     }
