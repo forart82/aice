@@ -1,5 +1,6 @@
 use crate::r5::checks::{ErrorSpan, collect_ts_error_spans};
 use crate::r6::mysql_rd::validate_mysql_set_special;
+use crate::r6::mysql_ts_norm::{collect_mysql_clause_masks, validate_mysql_lock_tables};
 use crate::r6::sql_expr::{check_sql_stmt_completeness, validate_and_collect_trim_masks};
 use crate::r6::sql_lex::{SqlTok, SqlTokKind, sp};
 use crate::r6::sql_pratt::validate_pratt_expr;
@@ -8,6 +9,7 @@ use crate::ts_pool::{GrammarSlot, ParserPool};
 pub fn validate_mysql_dml(stmt: &[SqlTok], src: &str, pool: &mut ParserPool, errs: &mut Vec<ErrorSpan>) {
     if stmt.is_empty() { return; }
     errs.extend(check_sql_stmt_completeness(stmt, src));
+    if validate_mysql_lock_tables(stmt, src, errs) { return; }
     if stmt[0].is_kw(src, "DECLARE") || stmt[0].is_kw(src, "LEAVE") || stmt[0].is_kw(src, "ITERATE") || stmt[0].is_kw(src, "SIGNAL") {
         if stmt.len() < 2 { errs.push(sp(stmt[0].line, stmt[0].col, "Incomplete MySQL control statement")); }
         return;
@@ -207,7 +209,17 @@ fn is_bt_sep_neighbor(k: SqlTokKind) -> bool {
 
 pub(crate) fn tokens_to_ts_sql(toks: &[SqlTok], src: &str, errs: &mut Vec<ErrorSpan>) -> String {
     let Some(first) = toks.first() else { return ";".to_string(); };
-    let masks = validate_and_collect_trim_masks(toks, src, errs);
+    let mut raw_masks = validate_and_collect_trim_masks(toks, src, errs);
+    raw_masks.extend(collect_mysql_clause_masks(toks, src, errs));
+    raw_masks.sort_unstable_by_key(|m| m.0);
+    let mut masks: Vec<(usize, usize)> = Vec::with_capacity(raw_masks.len());
+    for (s, e) in raw_masks {
+        if let Some(last) = masks.last_mut() && s <= last.1 {
+            last.1 = last.1.max(e);
+        } else {
+            masks.push((s, e));
+        }
+    }
     let mut out = String::with_capacity(toks.last().map_or(0, |l| l.end - first.start) + 8);
     let mut cur = first.start;
     let mut mi = 0usize;
@@ -255,6 +267,14 @@ pub(crate) fn tokens_to_ts_sql(toks: &[SqlTok], src: &str, errs: &mut Vec<ErrorS
             for ch in t.slice(src).chars() {
                 out.push(if ch == '\n' { '\n' } else { ' ' });
             }
+        } else if idx > 0
+            && (t.is_kw(src, "UNSIGNED") || t.is_kw(src, "SIGNED"))
+            && toks[idx - 1].is_kw(src, "AS")
+            && toks.get(idx + 1).is_some_and(|n| n.kind == SqlTokKind::RParen)
+        {
+            let w = t.slice(src).len();
+            out.push_str("INT");
+            for _ in 3..w { out.push(' '); }
         } else {
             out.push_str(t.slice(src));
         }

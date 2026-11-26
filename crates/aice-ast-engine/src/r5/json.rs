@@ -2,12 +2,12 @@ use std::collections::HashSet;
 
 use aice_lang_registry::{
     AstSlice, AstSlicer, DepEdge, DepKind, IntraBlockSelector, LanguageAdapter, LanguageId,
-    OutlineView, ParseError, ParsedTree, SliceError, SymbolKind, SymbolNode, SymbolSelector,
+    OutlineEntry, OutlineView, ParseError, ParsedTree, SliceError, SymbolKind, SymbolNode,
+    SymbolSelector,
 };
 
 use crate::r5::cst_helpers::{
-    field_text, node_text, outline_from_symbols, push_sym, qualified, slice_symbol_from_list,
-    with_ts_root,
+    field_text, node_text, push_sym, qualified, slice_symbol_from_list, with_ts_root,
 };
 use crate::r5::dep_helpers::collect_schema_comment_deps;
 use crate::ts_pool::parse_tree_sitter;
@@ -91,10 +91,113 @@ impl AstSlicer for JsonAdapter {
         tree: &ParsedTree,
         src: &str,
         depth: usize,
-        include_types: bool,
+        _include_types: bool,
     ) -> OutlineView {
-        outline_from_symbols(&self.extract_symbols(tree, src), src, depth, include_types)
+        let entries = with_ts_root(tree, Vec::new(), |root| outline_json(root, src, depth));
+        OutlineView {
+            entries,
+            total_lines: src.lines().count(),
+        }
     }
+}
+
+fn json_node_lines(node: tree_sitter::Node<'_>) -> (usize, usize) {
+    let start = node.start_position();
+    let end = node.end_position();
+    let end_row = if end.column == 0 && end.row > start.row {
+        end.row - 1
+    } else {
+        end.row
+    };
+    (start.row + 1, (end_row + 1).max(start.row + 1))
+}
+
+fn json_val_summary(val: tree_sitter::Node<'_>) -> Option<String> {
+    match val.kind() {
+        "object" => {
+            let mut keys = 0usize;
+            for i in 0..val.named_child_count() {
+                if val.named_child(i as u32).is_some_and(|c| c.kind() == "pair") {
+                    keys += 1;
+                }
+            }
+            Some(if keys == 0 { "{}".to_string() } else { format!("{{{keys} keys}}") })
+        }
+        "array" => {
+            let items = val.named_child_count();
+            Some(if items == 0 { "[]".to_string() } else { format!("[{items} items]") })
+        }
+        _ => None,
+    }
+}
+
+fn outline_json(root: tree_sitter::Node<'_>, src: &str, depth: usize) -> Vec<OutlineEntry> {
+    enum Step<'a> { Node(tree_sitter::Node<'a>), PopScope, PopArr }
+    let mut out = Vec::new();
+    let mut scope: Vec<String> = Vec::new();
+    let mut arr_depth = 0usize;
+    let mut stack = vec![Step::Node(root)];
+    while let Some(step) = stack.pop() {
+        match step {
+            Step::PopScope => { scope.pop(); continue; }
+            Step::PopArr => { arr_depth = arr_depth.saturating_sub(1); continue; }
+            Step::Node(node) => {
+                if node.kind() == "pair" && let Some(raw_key) = field_text(node, "key", src) {
+                    let key = raw_key.trim_matches('"').to_string();
+                    let key_depth = scope.len() + 1;
+                    let (start_line, end_line) = json_node_lines(node);
+                    let val = node.child_by_field_name("value");
+                    let val_is_container = val.is_some_and(|v| matches!(v.kind(), "object" | "array"));
+                    let emit = if depth == 0 {
+                        arr_depth == 0 && (key_depth == 1 || (key_depth == 2 && val_is_container && end_line > start_line))
+                    } else {
+                        key_depth <= depth
+                    };
+                    if emit {
+                        out.push(OutlineEntry {
+                            name: qualified(&scope, &key, "."),
+                            kind: SymbolKind::Constant,
+                            start_line,
+                            end_line,
+                            signature: val.and_then(json_val_summary),
+                        });
+                    }
+                    let descend = if depth == 0 {
+                        arr_depth == 0 && key_depth == 1 && val.is_some_and(|v| v.kind() == "object")
+                    } else {
+                        key_depth < depth
+                    };
+                    if descend && let Some(v) = val {
+                        scope.push(key);
+                        stack.push(Step::PopScope);
+                        stack.push(Step::Node(v));
+                    }
+                    continue;
+                }
+                if node.kind() == "array" {
+                    if depth == 0 && scope.is_empty() && arr_depth == 0 && out.is_empty() {
+                        let (start_line, end_line) = json_node_lines(node);
+                        out.push(OutlineEntry {
+                            name: "[]".to_string(),
+                            kind: SymbolKind::Constant,
+                            start_line,
+                            end_line,
+                            signature: json_val_summary(node),
+                        });
+                        continue;
+                    }
+                    arr_depth += 1;
+                    stack.push(Step::PopArr);
+                }
+                for i in (0..node.named_child_count()).rev() {
+                    if let Some(c) = node.named_child(i as u32) {
+                        stack.push(Step::Node(c));
+                    }
+                }
+            }
+        }
+    }
+    out
 }
 
 fn walk_json(root: tree_sitter::Node<'_>, src: &str, scope: &mut Vec<String>, out: &mut Vec<SymbolNode>) {

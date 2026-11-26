@@ -233,4 +233,58 @@ impl<'a> EofDeltaCtx<'a> {
                 || self.is_shifted_eof(sp)
         })
     }
+
+    pub(crate) fn is_untouched_baseline_span(&self, sp: &ErrorSpan) -> bool {
+        if sp.end_line <= self.prefix {
+            return self.base_spans.iter().any(|b| {
+                b.line == sp.line
+                    && b.column == sp.column
+                    && b.end_line == sp.end_line
+                    && b.message == sp.message
+            });
+        }
+        if sp.line > self.cand_edit_end.max(self.prefix) {
+            let shifted_line = (sp.line as isize - self.line_delta).max(1) as usize;
+            let shifted_end = (sp.end_line as isize - self.line_delta).max(1) as usize;
+            return self.base_spans.iter().any(|b| {
+                b.line == shifted_line
+                    && b.column == sp.column
+                    && b.end_line == shifted_end
+                    && b.message == sp.message
+            });
+        }
+        false
+    }
+
+    pub(crate) fn select_delta_error_spans(&self, cand_spans: &[ErrorSpan]) -> Vec<ErrorSpan> {
+        let overlap_edit = |s: &ErrorSpan| {
+            if self.cand_edit_end < self.cand_edit_start {
+                s.line <= self.cand_edit_start && s.end_line >= self.cand_edit_start
+            } else {
+                s.line <= self.cand_edit_end && s.end_line >= self.cand_edit_start
+            }
+        };
+        let edit_overlap: Vec<ErrorSpan> = cand_spans
+            .iter()
+            .filter(|s| !self.skip_edit_span(s) && !self.is_untouched_baseline_span(s) && overlap_edit(s))
+            .cloned()
+            .collect();
+        if !edit_overlap.is_empty() {
+            return edit_overlap;
+        }
+        let newly_added: Vec<ErrorSpan> = cand_spans
+            .iter()
+            .filter(|s| !self.skip_edit_span(s) && !self.is_untouched_baseline_span(s))
+            .cloned()
+            .collect();
+        if !newly_added.is_empty() {
+            return newly_added;
+        }
+        vec![ErrorSpan {
+            line: self.cand_edit_start.max(1),
+            column: 1,
+            end_line: self.cand_edit_end.max(self.cand_edit_start).max(1),
+            message: "Edited lines introduce syntax error".to_string(),
+        }]
+    }
 }

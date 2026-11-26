@@ -1767,3 +1767,42 @@ fn regression_f21_dry_run_diff_trim_prefix_suffix_and_no_body_dump() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+#[test]
+fn regression_wave3_f43_bounded_firewall_diagnostics_no_220_line_dump() {
+    use aice_batch_write::diagnostics::{format_context_window, format_firewall_diagnostics};
+    use aice_lang_registry::FirewallDiagnostic;
+
+    let mut lines: Vec<String> = (1..=300).map(|i| format!("SELECT {i};")).collect();
+    // Simulate a huge single-line mysqldump INSERT at L248
+    lines[247] = format!("INSERT INTO `big` VALUES {};", "(1,'payload'),".repeat(200));
+    let src = format!("{}\n", lines.join("\n"));
+
+    // 1. Two diagnostics 221 lines apart (L28 and L249): must emit <= 30 total lines (<= 25 context lines)
+    let diags = vec![
+        FirewallDiagnostic { line: 28, column: 12, message: "Syntax error near L28".into(), context: String::new() },
+        FirewallDiagnostic { line: 249, column: 5, message: "Syntax error near L249".into(), context: String::new() },
+    ];
+    let out = format_firewall_diagnostics(Path::new("outilModule.sql"), LanguageId::MySql, &src, &diags);
+    let total_lines = out.lines().count();
+    let ctx_lines = out.lines().filter(|l| l.contains('│')).count();
+    assert!(total_lines <= 30, "expected <= 30 total lines, got {total_lines}:\n{out}");
+    assert!(ctx_lines <= 25, "expected <= 25 context lines, got {ctx_lines}:\n{out}");
+    assert!(out.contains("Context around L28") && out.contains("Context around L249"), "missing per-diag windows:\n{out}");
+    assert!(!out.contains("140│"), "must NOT dump unrelated middle lines between L28 and L249:\n{out}");
+    assert!(out.len() < 4096, "giant single-line dump should be truncated in context, len={}", out.len());
+
+    // 2. Five diagnostics spread across 300 lines: capped to top 3 windows and <= 25 context lines
+    let many_diags: Vec<FirewallDiagnostic> = [20, 90, 160, 230, 290]
+        .into_iter()
+        .map(|ln| FirewallDiagnostic { line: ln, column: 1, message: format!("err L{ln}"), context: String::new() })
+        .collect();
+    let out_many = format_firewall_diagnostics(Path::new("big.sql"), LanguageId::MySql, &src, &many_diags);
+    assert!(out_many.lines().count() <= 30, "many_diags lines={}", out_many.lines().count());
+    assert!(out_many.lines().filter(|l| l.contains('│')).count() <= 25);
+
+    // 3. Direct format_context_window(src, 28, 249) is also strictly capped to <= 25 context lines
+    let win = format_context_window(&src, 28, 249);
+    assert!(win.lines().count() <= 28, "format_context_window dumped {} lines", win.lines().count());
+    assert!(win.contains("lines omitted"), "expected omission marker:\n{win}");
+}

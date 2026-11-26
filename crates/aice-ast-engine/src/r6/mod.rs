@@ -10,6 +10,7 @@ mod mysql_opt;
 mod mysql_part;
 mod mysql_rd;
 mod mysql_stmt;
+mod mysql_ts_norm;
 pub mod plpgsql;
 mod plpgsql_rd;
 mod plpgsql_stmt;

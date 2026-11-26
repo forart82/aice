@@ -1899,3 +1899,102 @@ fn regression_w2_m3_iter15_verifier_fixes() {
     assert_valid(LanguageId::TSql, "t15_exec_at_ident_ok.sql", "INSERT INTO dbo.T EXEC ('SELECT 1') AT LinkedSrv;");
     assert_valid(LanguageId::TSql, "t15_exec_at_bracket_null_ok.sql", "INSERT INTO dbo.T EXEC ('SELECT 1') AT [NULL];");
 }
+
+#[test]
+fn regression_wave3_f43_mysql_collate_charset_clauses_and_prebroken_delta_isolation() {
+    let fw = DefaultSyntaxFirewall;
+
+    // 1. Valid MySQL column/table clauses unsupported natively by tree-sitter-sql MUST pass
+    assert_valid(
+        LanguageId::MySql,
+        "f43_collate_ok.sql",
+        concat!(
+            "CREATE TABLE `module_sla_policy` (\n",
+            "  `id` int(11) UNSIGNED ZEROFILL NOT NULL AUTO_INCREMENT,\n",
+            "  `amount` decimal(10,2) UNSIGNED NOT NULL DEFAULT '0.00',\n",
+            "  `severity_name` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,\n",
+            "  `title` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci DEFAULT NULL,\n",
+            "  `code` varchar(16) CHARSET ascii NOT NULL,\n",
+            "  `notes` longtext COLLATE utf8mb4_unicode_ci,\n",
+            "  `updated_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,\n",
+            "  `synced_at` datetime(6) DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),\n",
+            "  `run_id` int(11) DEFAULT NULL,\n",
+            "  PRIMARY KEY (`id`) USING BTREE,\n",
+            "  KEY `idx_run` (`run_id`) USING HASH,\n",
+            "  CONSTRAINT `FK_run` FOREIGN KEY (`run_id`) REFERENCES `run` (`id`) ON DELETE CASCADE\n",
+            ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;\n",
+            "CREATE INDEX `idx_sev` ON `module_sla_policy` (`severity_name`) USING BTREE;\n",
+            "LOCK TABLES `module_sla_policy` WRITE;\n",
+            "UNLOCK TABLES;\n",
+        ),
+    );
+    assert_valid(
+        LanguageId::MySql,
+        "f43_no_opts_collate.sql",
+        "CREATE TABLE `t` (`a` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL, `ts` timestamp ON UPDATE CURRENT_TIMESTAMP());",
+    );
+    assert_valid(
+        LanguageId::MySql,
+        "f43_select_collate.sql",
+        "SELECT `name` COLLATE utf8mb4_unicode_ci, CAST(`id` AS UNSIGNED) FROM `users`;",
+    );
+
+    // 2. Genuinely broken syntax around COLLATE / CHARSET / clauses MUST still fail
+    for (name, bad_sql) in [
+        ("f43_bad_collate_semi.sql", "CREATE TABLE `t` (`a` varchar(32) COLLATE ;);"),
+        ("f43_bad_collate_kw.sql", "CREATE TABLE `t` (`a` varchar(32) COLLATE NOT NULL);"),
+        ("f43_bad_collate_comma.sql", "CREATE TABLE `t` (`a` varchar(32) COLLATE , `b` int);"),
+        ("f43_bad_charset_semi.sql", "CREATE TABLE `t` (`a` varchar(32) CHARACTER SET ;);"),
+        ("f43_bad_charset_short.sql", "CREATE TABLE `t` (`a` varchar(32) CHARSET );"),
+        ("f43_bad_on_upd.sql", "CREATE TABLE `t` (`ts` timestamp ON UPDATE CURRENT_TIMESTAMP(bogus));"),
+        ("f43_bad_using.sql", "CREATE TABLE `t` (`id` int, KEY `k` (`id`) USING BOGUS);"),
+        ("f43_bad_unsigned_notype.sql", "CREATE TABLE `t` (`a` UNSIGNED);"),
+        ("f43_bad_truncated.sql", "CREATE TABLE `t` (`a` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL"),
+        ("f43_bad_unlock.sql", "UNLOCK TABLES EXTRA;"),
+        ("f43_bad_lock.sql", "LOCK TABLES `t` BOGUS;"),
+    ] {
+        assert_invalid(LanguageId::MySql, name, bad_sql);
+    }
+
+    // 3. Pre-broken MySQL baseline (untouched error at L28 and suffix error at L66):
+    //    - Valid edit at L50 passes incremental firewall
+    //    - Invalid edit at L50 reports ONLY the new error near L50, NEVER untouched L28 or shifted L66
+    let mut base_lines: Vec<String> = (1..=70).map(|i| format!("-- comment line {i}")).collect();
+    base_lines[27] = "SELECT FROM broken_baseline_tbl;".to_string(); // L28 untouched error
+    base_lines[49] = "SELECT 1;".to_string(); // L50 edit target
+    base_lines[65] = "SELECT FROM broken_suffix_tbl;".to_string(); // L66 untouched suffix error
+    let base = format!("{}\n", base_lines.join("\n"));
+
+    let mut good_lines = base_lines.clone();
+    good_lines[49] = concat!(
+        "CREATE TABLE `sla` (\n",
+        "  `id` int(11) NOT NULL AUTO_INCREMENT,\n",
+        "  `name` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL,\n",
+        "  PRIMARY KEY (`id`)\n",
+        ") ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;",
+    ).to_string();
+    let cand_good = format!("{}\n", good_lines.join("\n"));
+    assert!(
+        fw.verify_incremental(Some(&base), &cand_good, Path::new("outil.sql"), LanguageId::MySql).is_valid(),
+        "valid MySQL COLLATE table edit on pre-broken file must pass"
+    );
+
+    let mut bad_lines = base_lines.clone();
+    bad_lines[49] = concat!(
+        "CREATE TABLE `sla` (\n",
+        "  `id` int(11) NOT NULL,\n",
+        "  `name` varchar(32) COLLATE NOT NULL\n",
+        ") ENGINE=InnoDB;",
+    ).to_string();
+    let cand_bad = format!("{}\n", bad_lines.join("\n"));
+    match fw.verify_incremental(Some(&base), &cand_bad, Path::new("outil.sql"), LanguageId::MySql) {
+        FirewallVerdict::Invalid { diagnostics } => {
+            assert!(!diagnostics.is_empty());
+            assert!(
+                diagnostics.iter().all(|d| (50..=55).contains(&d.line)),
+                "must report ONLY new edit error lines (50..=55), never untouched L28/L69: {diagnostics:?}"
+            );
+        }
+        FirewallVerdict::Valid => panic!("malformed COLLATE NOT NULL edit must fail"),
+    }
+}

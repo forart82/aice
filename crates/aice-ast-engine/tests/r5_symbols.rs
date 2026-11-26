@@ -380,3 +380,99 @@ fn regression_iter19_deep_stacks_2mib() {
         .join()
         .unwrap();
 }
+
+#[test]
+fn regression_wave3_f34_compact_json_outline_preserves_deep_symbol_slicing() {
+    let reg = EngineRegistry::new();
+    let adapter = reg.adapter(LanguageId::Json).unwrap();
+    let slicer = reg.slicer(LanguageId::Json).unwrap();
+
+    // 1. Nested 160+ line JSON Schema modeled after session_state.schema.json
+    let mut schema = String::from(concat!(
+        "{\n",
+        "  \"$schema\": \"https://json-schema.org/draft/2020-12/schema\",\n",
+        "  \"title\": \"AgentSessionStateCheckpoint\",\n",
+        "  \"description\": \"Structured AI agent state checkpoint schema for context economics and compaction survival.\",\n",
+        "  \"type\": \"object\",\n",
+        "  \"required\": [\"session_id\", \"project_name\", \"tool_call_budget\"],\n",
+        "  \"properties\": {\n",
+    ));
+    for i in 1..=18 {
+        schema.push_str(&format!(
+            "    \"field_{i}\": {{\n      \"type\": \"object\",\n      \"description\": \"Detailed description for field_{i} with long explanatory text.\",\n      \"properties\": {{\n        \"nested_a\": {{ \"type\": \"string\", \"description\": \"Inner value a for field_{i}.\" }},\n        \"nested_b\": {{ \"type\": \"integer\", \"minimum\": 0 }}\n      }}\n    }},\n"
+        ));
+    }
+    schema.push_str(concat!(
+        "    \"tool_call_budget\": {\n",
+        "      \"type\": \"object\",\n",
+        "      \"properties\": {\n",
+        "        \"consumed\": { \"type\": \"integer\", \"minimum\": 0 },\n",
+        "        \"remaining\": { \"type\": \"integer\", \"minimum\": 0 }\n",
+        "      }\n",
+        "    }\n",
+        "  },\n",
+        "  \"additionalProperties\": false\n",
+        "}\n",
+    ));
+    assert!(schema.lines().count() >= 150, "schema lines={}", schema.lines().count());
+
+    let tree = adapter.parse_cst(&schema).unwrap();
+    assert!(!tree.has_error());
+
+    // Compact default outline (depth == 0)
+    let outline = slicer.outline(&tree, &schema, 0, true);
+    assert!(!outline.entries.is_empty());
+    let rendered: String = outline
+        .entries
+        .iter()
+        .map(|e| match &e.signature {
+            Some(sig) => format!("const {} # [L{}-L{}] : {sig}\n", e.name, e.start_line, e.end_line),
+            None => format!("const {} # [L{}-L{}]\n", e.name, e.start_line, e.end_line),
+        })
+        .collect();
+    assert!(
+        rendered.len() * 3 < schema.len(),
+        "JSON outline must be much smaller than raw JSON (outline={}B, raw={}B):\n{rendered}",
+        rendered.len(),
+        schema.len()
+    );
+    assert!(
+        outline.entries.iter().any(|e| e.name == "properties")
+            && outline.entries.iter().any(|e| e.name == "properties.tool_call_budget"),
+        "expected top-level & level-2 container landmarks: {:?}",
+        outline.entries.iter().map(|e| &e.name).collect::<Vec<_>>()
+    );
+    assert!(
+        !outline.entries.iter().any(|e| e.name.contains("nested_a") || e.name.ends_with(".description")),
+        "default JSON outline must not bloat with deep leaf dotted paths"
+    );
+    assert!(
+        !rendered.contains("Detailed description for field_1"),
+        "JSON outline must not echo full raw JSON scalar values"
+    );
+
+    // Deep dotted symbol slicing MUST remain 100% intact via extract_symbols()
+    let deep = slicer
+        .slice_symbol(
+            &tree,
+            &schema,
+            &SymbolSelector { name: "properties.tool_call_budget.properties.consumed".to_string(), ordinal: None },
+        )
+        .expect("deep dotted JSON symbol slice must still succeed");
+    assert!(deep.content.contains("\"consumed\""));
+
+    // 2. package.json with 80 scalar dependencies stays ultra-compact in outline while scripts.build slices cleanly
+    let mut pkg = String::from("{\n  \"name\": \"demo-app\",\n  \"version\": \"1.0.0\",\n  \"scripts\": {\n    \"build\": \"tsc\",\n    \"test\": \"vitest\"\n  },\n  \"dependencies\": {\n");
+    for i in 1..=80 {
+        let comma = if i < 80 { "," } else { "" };
+        pkg.push_str(&format!("    \"dep-pkg-{i}\": \"^1.{i}.0\"{comma}\n"));
+    }
+    pkg.push_str("  }\n}\n");
+    let pkg_tree = adapter.parse_cst(&pkg).unwrap();
+    let pkg_outline = slicer.outline(&pkg_tree, &pkg, 0, true);
+    assert_eq!(pkg_outline.entries.len(), 4, "only top-level keys expected for scalar-only dependencies: {:?}", pkg_outline.entries);
+    let build_slice = slicer
+        .slice_symbol(&pkg_tree, &pkg, &SymbolSelector { name: "scripts.build".to_string(), ordinal: None })
+        .expect("scripts.build must still slice");
+    assert!(build_slice.content.contains("\"tsc\""));
+}

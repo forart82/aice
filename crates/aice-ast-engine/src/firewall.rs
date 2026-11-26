@@ -157,7 +157,7 @@ fn verify_prebroken_delta(
     if cand_spans.len() > base_spans.len() {
         if !delta_ctx.allow_span_split(raw_cand_slice, cand_spans, path, pool) {
             return FirewallVerdict::Invalid {
-                diagnostics: spans_to_diagnostics(cand, cand_spans.to_vec()),
+                diagnostics: spans_to_diagnostics(cand, delta_ctx.select_delta_error_spans(cand_spans)),
             };
         }
         need_edit_check = true;
@@ -168,16 +168,8 @@ fn verify_prebroken_delta(
         if delta_ctx.try_midfile_split(raw_cand_slice, cand_spans, path, pool) {
             need_edit_check = true;
         } else {
-            let mut diag_spans: Vec<ErrorSpan> = cand_spans
-                .iter()
-                .filter(|s| overlaps_edit(s, cand_edit_start, cand_edit_end) && !delta_ctx.skip_edit_span(s))
-                .cloned()
-                .collect();
-            if diag_spans.is_empty() {
-                diag_spans = cand_spans.to_vec();
-            }
             return FirewallVerdict::Invalid {
-                diagnostics: spans_to_diagnostics(cand, diag_spans),
+                diagnostics: spans_to_diagnostics(cand, delta_ctx.select_delta_error_spans(cand_spans)),
             };
         }
     }
@@ -223,7 +215,11 @@ fn verify_prebroken_delta(
                         path, pool, pfx, raw_base, raw_cand, &cand_lines[cand_edit_end..], last_code_idx, cache,
                     );
                     match er {
-                        None => return invalid_span(cand, sp),
+                        None => return if existed && sp.line < cand_edit_start {
+                            invalid_diag(cand, cand_edit_start, 1, "Edited lines introduce syntax error inside existing error span")
+                        } else {
+                            invalid_span(cand, sp)
+                        },
                         Some(true) => return invalid_diag(cand, cand_edit_start, 1, "Edited lines introduce syntax error inside existing error span"),
                         Some(false) => {}
                     }
