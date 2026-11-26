@@ -249,3 +249,83 @@ fn path_guard_empty_and_adversarial_symlink_nul_matrix() {
     let _ = std::fs::remove_dir_all(&ws);
     let _ = std::fs::remove_dir_all(&outside);
 }
+
+#[test]
+fn json_parser_linear_time_large_strings_and_utf8_escape_semantics() {
+    use std::time::Instant;
+
+    // 512 KiB and 2 MiB JSON-RPC-like payloads must parse in strict O(N) time (F-12 / S2-001)
+    for (size, label) in [(512 * 1024, "512 KiB"), (2 * 1024 * 1024, "2 MiB")] {
+        let pad = "a".repeat(size);
+        let payload = format!(
+            "{{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\",\"params\":{{\"pad\":\"{pad}\"}}}}"
+        );
+        let start = Instant::now();
+        let val = parse_json(&payload).unwrap_or_else(|e| panic!("failed {label}: {e}"));
+        let elapsed = start.elapsed();
+
+        let parsed_pad = val
+            .as_object()
+            .and_then(|o| o.get("params"))
+            .and_then(|p| p.as_object())
+            .and_then(|o| o.get("pad"))
+            .and_then(|v| v.as_str())
+            .expect("params.pad string");
+        assert_eq!(parsed_pad.len(), size);
+        assert!(parsed_pad.bytes().all(|b| b == b'a'));
+
+        // Unoptimized debug builds are ~10x slower than release; quadratic O(N^2) took ~30s+ in release
+        let budget_ms: u128 = if cfg!(debug_assertions) { 500 } else { 20 };
+        assert!(
+            elapsed.as_millis() < budget_ms,
+            "{label} JSON string parse took {} ms (budget < {budget_ms} ms)",
+            elapsed.as_millis()
+        );
+    }
+
+    // Large payload mixing multibyte UTF-8 and escapes
+    let chunk = "café-日本語-🚀\\n\\t\\\"\\\\";
+    let repeated = chunk.repeat(4096);
+    let mixed_json = format!("\"{repeated}\"");
+    let mixed = parse_json(&mixed_json).expect("large mixed utf8 + escape string");
+    let expected_chunk = "café-日本語-🚀\n\t\"\\";
+    assert_eq!(mixed.as_str(), Some(expected_chunk.repeat(4096).as_str()));
+
+    // All RFC 8259 escapes + UTF-16 surrogate pairs + literal UTF-8 + BOM prefix
+    let escapes_json = "\u{FEFF}\"\\\"\\\\\\/\\b\\f\\n\\r\\t\\u0041\\u0000\\uD83D\\uDE80é中🚀\"";
+    let parsed = parse_json(escapes_json).expect("all escapes + utf8 + bom");
+    assert_eq!(
+        parsed.as_str(),
+        Some("\"\\/\u{0008}\u{000c}\n\r\tA\0🚀é中🚀")
+    );
+    assert_eq!(parse_json("\"\"").expect("empty string").as_str(), Some(""));
+
+    // Control characters < 0x20 rejected with exact byte offset after UTF-8 prefix
+    for ctrl in 0x00u8..0x20u8 {
+        let s = format!("\"héllo{}end\"", ctrl as char);
+        let err = parse_json(&s).expect_err("control char must be rejected");
+        assert_eq!(
+            err.offset,
+            "\"héllo".len(),
+            "wrong offset for control byte 0x{ctrl:02x}: {err}"
+        );
+    }
+
+    // Unterminated strings, invalid escapes, and malformed UTF-16 surrogates
+    for bad in [
+        "\"unterminated",
+        "\"héllo",
+        "\"trailing\\",
+        "\"\\x\"",
+        "\"\\é\"",
+        "\"\\u12\"",
+        "\"\\u123g\"",
+        "\"\\uéa\"",
+        "\"\\uD83D\"",
+        "\"\\uD83Dabc\"",
+        "\"\\uD83D\\u0041\"",
+        "\"\\uDE80\"",
+    ] {
+        assert!(parse_json(bad).is_err(), "expected error for: {bad}");
+    }
+}

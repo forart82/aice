@@ -37,7 +37,8 @@ pub fn detect_language(path: &Path, sample: &str) -> LanguageId {
         "md" | "markdown" => LanguageId::Markdown,
         "html" | "htm" => LanguageId::Html,
         "css" => LanguageId::Css,
-        "xml" | "svg" | "xsd" | "dtd" | "xsl" | "xslt" => LanguageId::Xml,
+        "xml" | "svg" | "xsd" | "dtd" | "xsl" | "xslt" | "csproj" | "vbproj" | "fsproj"
+        | "props" | "targets" | "xaml" | "axaml" | "nuspec" | "plist" | "resx" => LanguageId::Xml,
         "sh" | "bash" | "zsh" => LanguageId::Bash,
         "rs" => LanguageId::Rust,
         "ts" | "mts" | "cts" => LanguageId::TypeScript,

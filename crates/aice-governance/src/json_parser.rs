@@ -7,6 +7,7 @@ const MAX_JSON_DEPTH: usize = 128;
 pub fn parse_json(input: &str) -> Result<JsonValue, JsonError> {
     let input = input.trim_start_matches('\u{FEFF}');
     let mut parser = Parser {
+        input,
         bytes: input.as_bytes(),
         pos: 0,
         depth: 0,
@@ -21,6 +22,7 @@ pub fn parse_json(input: &str) -> Result<JsonValue, JsonError> {
 }
 
 struct Parser<'a> {
+    input: &'a str,
     bytes: &'a [u8],
     pos: usize,
     depth: usize,
@@ -101,11 +103,18 @@ impl<'a> Parser<'a> {
             } else if b < 0x20 {
                 return Err(self.err("unescaped control character in string"));
             } else {
-                let s = std::str::from_utf8(&self.bytes[self.pos..])
-                    .map_err(|_| self.err("invalid utf-8 in string"))?;
-                let ch = s.chars().next().ok_or_else(|| self.err("unexpected eof"))?;
-                out.push(ch);
-                self.pos += ch.len_utf8();
+                let run_start = self.pos;
+                let bytes = self.bytes;
+                let mut p = self.pos + 1;
+                while p < bytes.len() {
+                    let c = bytes[p];
+                    if c == b'"' || c == b'\\' || c < 0x20 {
+                        break;
+                    }
+                    p += 1;
+                }
+                out.push_str(&self.input[run_start..p]);
+                self.pos = p;
             }
         }
         Err(self.err("unterminated string"))

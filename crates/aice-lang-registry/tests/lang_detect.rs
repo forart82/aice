@@ -423,3 +423,35 @@ fn regression_iter6_mysql_delimiter_operators_and_stmt_boundaries() {
         );
     }
 }
+
+#[test]
+fn detects_msbuild_xaml_and_ecosystem_xml_extensions() {
+    let xml_cases = [
+        ("src/App.csproj", "<Project Sdk=\"Microsoft.NET.Sdk\"></Project>"),
+        ("SRC/APP.CSPROJ", "<Project></Project>"),
+        ("Legacy/Tool.vbproj", "<Project></Project>"),
+        ("Lib/Core.fsproj", "<Project></Project>"),
+        ("Directory.Build.props", "<Project><PropertyGroup /></Project>"),
+        ("Directory.Build.targets", "<Project><Target Name=\"Build\" /></Project>"),
+        ("Views/MainWindow.xaml", "<Window><broken></nope>\n"),
+        ("Views/Dialog.XAML", "<Window />"),
+        ("Views/MainView.axaml", "<UserControl />"),
+        ("MyPkg.nuspec", "<package><metadata /></package>"),
+        ("ios/Info.plist", "<?xml version=\"1.0\"?><plist version=\"1.0\"><dict/></plist>"),
+        ("Properties/Resources.resx", "<root><data name=\"A\"><value>1</value></data></root>"),
+    ];
+
+    for (path, sample) in xml_cases {
+        assert_eq!(
+            detect_language(Path::new(path), sample),
+            LanguageId::Xml,
+            "expected Xml for {path}"
+        );
+    }
+
+    // Do not blindly classify arbitrary .config files as Xml (could be INI/key-value)
+    assert_eq!(
+        detect_language(Path::new("app.config"), "[section]\nkey = value\n"),
+        LanguageId::PlainText
+    );
+}
