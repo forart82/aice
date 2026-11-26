@@ -1,14 +1,16 @@
 use aice_aice_ir::AiceTranspiler;
 use aice_aice_ir::ir::{AiceItem, AiceModule, TranspileOpts};
-use aice_aice_ir::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
+use aice_aice_ir::ir_code::ClassDecl;
 use aice_aice_ir::ir_domain_db::{DbQueryDecl, DbSchemaDecl};
 use aice_ast_engine::EngineRegistry;
 use aice_lang_registry::{SymbolKind, SymbolNode};
 
 use crate::aice_project_domain::{project_db_migration, project_doc_section, project_shell_item};
+use crate::aice_project_slice::{
+    MidSliceResult, project_fn_head, slice_fn_mid, slice_method_mid, trim_method_tail,
+};
 use crate::aice_project_util::{
-    contains_ident, find_sym_span, find_text_span, item_line_range, parse_balanced_module,
-    slice_lines_range, span_lines, wrap_method_for_lang,
+    contains_ident, find_sym_span, find_text_span, item_line_range, slice_lines_range, span_lines,
 };
 
 pub struct ProjectWindowArgs<'a> {
@@ -25,9 +27,17 @@ pub struct ProjectWindowArgs<'a> {
 }
 
 pub fn project_module_window(args: &ProjectWindowArgs<'_>) -> Option<AiceModule> {
+    project_module_window_opts(args, true)
+}
+
+pub(crate) fn project_module_window_opts(
+    args: &ProjectWindowArgs<'_>,
+    slice_mid_body: bool,
+) -> Option<AiceModule> {
     let win_src = slice_lines_range(args.full_src, args.starts, args.start_line, args.end_line);
     let short_hint = args.sym_hint.map(|s| s.rsplit(['.', ':']).next().unwrap_or(s));
     let mut items = Vec::new();
+    let mut unrepresentable_mid = false;
 
     for item in &args.module.items {
         let Some((is, ie)) = item_line_range(item, args.starts, args.syms, args.full_src) else {
@@ -42,7 +52,15 @@ pub fn project_module_window(args: &ProjectWindowArgs<'_>) -> Option<AiceModule>
         }
         match item {
             AiceItem::Class(cls) => {
-                if let Some(c) = project_class(cls, is, win_src, short_hint, args) {
+                if let Some(c) = project_class(
+                    cls,
+                    is,
+                    win_src,
+                    short_hint,
+                    args,
+                    slice_mid_body,
+                    &mut unrepresentable_mid,
+                ) {
                     items.push(AiceItem::Class(c));
                 }
             }
@@ -51,6 +69,11 @@ pub fn project_module_window(args: &ProjectWindowArgs<'_>) -> Option<AiceModule>
                     items.push(AiceItem::Fn(f));
                 }
             }
+            AiceItem::Fn(fd) if slice_mid_body => match slice_fn_mid(fd, ie, args) {
+                MidSliceResult::Sliced(f) => items.push(AiceItem::Fn(f)),
+                MidSliceResult::Trivial => {}
+                MidSliceResult::Unrepresentable => unrepresentable_mid = true,
+            },
             AiceItem::DbSchema(ds) => {
                 items.push(AiceItem::DbSchema(project_db_schema(ds, win_src)));
             }
@@ -96,7 +119,7 @@ pub fn project_module_window(args: &ProjectWindowArgs<'_>) -> Option<AiceModule>
         }
     }
 
-    if items.is_empty() {
+    if unrepresentable_mid || items.is_empty() {
         return None;
     }
     let mut sub = AiceModule::new(args.module.source_lang, args.module.module_name.clone());
@@ -110,9 +133,20 @@ fn project_class(
     win_src: &str,
     short_hint: Option<&str>,
     args: &ProjectWindowArgs<'_>,
+    slice_mid_body: bool,
+    unrepresentable_mid: &mut bool,
 ) -> Option<ClassDecl> {
     let mut trimmed = cls.clone();
-    if cls_start < args.start_line && short_hint.is_some() {
+    let cls_def_overlaps = span_lines(cls.span, args.starts)
+        .is_none_or(|(cs, ce)| ce >= args.start_line && cs <= args.end_line);
+    let inside_single_method = cls.methods.iter().any(|m| {
+        span_lines(m.span, args.starts)
+            .is_some_and(|(ms, me)| ms < args.start_line && me >= args.end_line)
+    });
+    if (cls_start < args.start_line && short_hint.is_some())
+        || !cls_def_overlaps
+        || inside_single_method
+    {
         trimmed.props.clear();
         trimmed.static_blocks.clear();
     } else {
@@ -132,6 +166,12 @@ fn project_class(
             kept_methods.push(m.clone());
         } else if ms >= args.start_line && ms <= args.end_line {
             kept_methods.push(trim_method_tail(m, ms, args));
+        } else if slice_mid_body && ms < args.start_line && me >= args.start_line {
+            match slice_method_mid(m, me, args) {
+                MidSliceResult::Sliced(sm) => kept_methods.push(sm),
+                MidSliceResult::Trivial => {}
+                MidSliceResult::Unrepresentable => *unrepresentable_mid = true,
+            }
         }
     }
     trimmed.methods = kept_methods;
@@ -142,74 +182,6 @@ fn project_class(
         return None;
     }
     Some(trimmed)
-}
-
-fn trim_method_tail(m: &MethodDecl, m_start: usize, args: &ProjectWindowArgs<'_>) -> MethodDecl {
-    let slice = slice_lines_range(args.full_src, args.starts, m_start, args.end_line);
-    let wrapped = wrap_method_for_lang(args.module.source_lang, slice);
-    for candidate in [wrapped.as_str(), slice] {
-        if let Some(sub_mod) = parse_balanced_module(
-            args.module.source_lang,
-            candidate,
-            args.registry,
-            args.transpiler,
-            args.opts,
-        ) {
-            for it in sub_mod.items {
-                match it {
-                    AiceItem::Class(c) => {
-                        if let Some(fm) = c.methods.into_iter().find(|x| x.name == m.name) {
-                            return fm;
-                        }
-                    }
-                    AiceItem::Fn(f) if f.name == m.name => {
-                        return MethodDecl {
-                            vis: m.vis, is_static: m.is_static, is_async: m.is_async,
-                            is_const: m.is_const, accessor: m.accessor, name: m.name.clone(),
-                            type_params: m.type_params.clone(), params: m.params.clone(),
-                            return_type: m.return_type.clone(), body: f.body,
-                            trivia: m.trivia.clone(), span: m.span,
-                        };
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-    MethodDecl {
-        vis: m.vis, is_static: m.is_static, is_async: m.is_async,
-        is_const: m.is_const, accessor: m.accessor, name: m.name.clone(),
-        type_params: m.type_params.clone(), params: m.params.clone(),
-        return_type: m.return_type.clone(), body: FnBody::SignatureOnly,
-        trivia: m.trivia.clone(), span: m.span,
-    }
-}
-
-fn project_fn_head(fd: &FnDecl, f_start: usize, args: &ProjectWindowArgs<'_>) -> Option<FnDecl> {
-    let slice = slice_lines_range(args.full_src, args.starts, f_start, args.end_line);
-    if let Some(sub_mod) = parse_balanced_module(
-        args.module.source_lang,
-        slice,
-        args.registry,
-        args.transpiler,
-        args.opts,
-    ) && let Some(AiceItem::Fn(f)) = sub_mod
-        .items
-        .into_iter()
-        .find(|it| matches!(it, AiceItem::Fn(_)))
-    {
-        return Some(f);
-    }
-    if args.sym_hint.is_none() && args.end_line > f_start {
-        return None;
-    }
-    Some(FnDecl {
-        vis: fd.vis, is_async: fd.is_async, is_static: fd.is_static,
-        decorators: fd.decorators.clone(), name: fd.name.clone(),
-        type_params: fd.type_params.clone(), params: fd.params.clone(),
-        return_type: fd.return_type.clone(), body: FnBody::SignatureOnly,
-        trivia: fd.trivia.clone(), span: fd.span,
-    })
 }
 
 fn project_db_schema(ds: &DbSchemaDecl, win_src: &str) -> DbSchemaDecl {

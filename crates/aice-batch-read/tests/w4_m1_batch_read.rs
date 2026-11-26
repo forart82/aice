@@ -143,23 +143,41 @@ export class App {
     assert_eq!(pack.multi_files, vec!["src/app.ts"]);
     assert_eq!(pack.raw_baseline.len(), app_ts.len());
 
-    // 2. Order-independent Full subsumption + >120L auto-outline
+    // 2. Explicit selectors alongside bare Full are preserved when !op.full (F-10),
+    //    while explicit --full still subsumes selectors.
     for args in [
         vec!["src/big.ts:L1-L5", "src/big.ts"],
         vec!["src/big.ts", "src/big.ts:c_10"],
     ] {
-        let p = ws.run_read(read_op(args));
+        let p = ws.run_read(read_op(args.clone()));
         assert_eq!(p.exit_code, 0);
         assert_eq!(p.emitted_output.matches("// file: src/big.ts").count(), 1);
-        assert!(p.emitted_output.contains("Auto-outlined src/big.ts"), "{}", p.emitted_output);
+        assert!(!p.emitted_output.contains("Auto-outlined src/big.ts"), "{}", p.emitted_output);
+        assert!(
+            p.emitted_output.contains("c_1") || p.emitted_output.contains("c_10"),
+            "{}",
+            p.emitted_output
+        );
+
+        let mut full_op = read_op(args);
+        full_op.full = true;
+        let pf = ws.run_read(full_op);
+        assert_eq!(pf.exit_code, 0);
+        assert!(pf.emitted_output.contains("c_200"), "explicit --full should emit full file");
     }
 
-    // Dir + specific symbol in both orders
+    // Dir + specific symbol in both orders: preserves symbol when !op.full, subsumes when op.full
     for args in [vec!["src", "src/app.ts:App.inc"], vec!["src/app.ts:App.inc", "src"]] {
-        let p = ws.run_read(read_op(args));
+        let p = ws.run_read(read_op(args.clone()));
         assert_eq!(p.exit_code, 0);
         assert_eq!(p.emitted_output.matches("// file: src/app.ts").count(), 1);
-        assert!(p.emitted_output.contains("reset("), "Full should subsume inc: {}", p.emitted_output);
+        assert!(p.emitted_output.contains("inc("), "{}", p.emitted_output);
+
+        let mut full_op = read_op(args);
+        full_op.full = true;
+        let pf = ws.run_read(full_op);
+        assert_eq!(pf.exit_code, 0);
+        assert!(pf.emitted_output.contains("reset("), "explicit --full should subsume inc: {}", pf.emitted_output);
     }
 
     // Inverted range still fails closed even with Full

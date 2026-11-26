@@ -7,7 +7,7 @@ use aice_governance::{Governed, ReadOp};
 use aice_lang_registry::LanguageId;
 
 use crate::BatchReadPack;
-use crate::budget::{count_cl100k_exact, effective_token_budget};
+use crate::budget::{count_cl100k_exact, effective_read_token_budget};
 use crate::budget_fill::{BudgetCandidate, apply_water_fill_budget};
 use crate::gitignore::{filter_walk_output, to_rel_posix};
 use crate::matcher::{ResolvedTarget, apply_cli_symbol_flag, resolve_targets_with_governance};
@@ -77,7 +77,24 @@ pub fn render_pack(
         })
         .collect();
     let caller_paths: Vec<String> = topo.caller_hits.iter().map(|h| h.caller_path.clone()).collect();
-    let max_tokens = effective_token_budget(governed.surface(), op.max_tokens);
+    let has_explicit_selectors = rendered.iter().any(|(t, _)| {
+        !t.is_expanded
+            && t.spec.selectors.iter().any(|s| {
+                matches!(
+                    s,
+                    TargetSelector::Symbol(_)
+                        | TargetSelector::LineRange { .. }
+                        | TargetSelector::Regex(_)
+                        | TargetSelector::IntraBlock(_)
+                )
+            })
+    });
+    let max_tokens = effective_read_token_budget(
+        governed.surface(),
+        op.max_tokens,
+        op.full,
+        has_explicit_selectors,
+    );
     let topo_prio = op.include_deps || op.include_callers;
     let est_chars: usize = rendered
         .iter()

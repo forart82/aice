@@ -1,5 +1,6 @@
 pub mod aice_project;
 pub(crate) mod aice_project_domain;
+pub(crate) mod aice_project_slice;
 pub mod aice_project_util;
 pub mod budget;
 pub mod budget_fill;

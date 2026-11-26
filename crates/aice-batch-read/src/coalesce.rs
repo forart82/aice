@@ -13,6 +13,14 @@ pub fn coalesce_targets(
     targets: Vec<ResolvedTarget>,
     registry: &EngineRegistry,
 ) -> Vec<ResolvedTarget> {
+    coalesce_targets_with_opts(targets, registry, false)
+}
+
+pub fn coalesce_targets_with_opts(
+    targets: Vec<ResolvedTarget>,
+    registry: &EngineRegistry,
+    explicit_full: bool,
+) -> Vec<ResolvedTarget> {
     let mut out: Vec<ResolvedTarget> = Vec::new();
     let mut idx_by_rel: HashMap<String, usize> = HashMap::new();
 
@@ -36,12 +44,16 @@ pub fn coalesce_targets(
     }
 
     for t in &mut out {
-        coalesce_target_selectors(t, registry);
+        coalesce_target_selectors(t, registry, explicit_full);
     }
     out
 }
 
-fn coalesce_target_selectors(target: &mut ResolvedTarget, registry: &EngineRegistry) {
+fn coalesce_target_selectors(
+    target: &mut ResolvedTarget,
+    registry: &EngineRegistry,
+    explicit_full: bool,
+) {
     let selectors = std::mem::take(&mut target.spec.selectors);
     if selectors.len() <= 1 {
         target.spec.selectors = selectors;
@@ -49,18 +61,29 @@ fn coalesce_target_selectors(target: &mut ResolvedTarget, registry: &EngineRegis
     }
 
     if selectors.iter().any(|s| matches!(s, TargetSelector::Full)) {
-        let mut merged = Vec::new();
-        let mut seen_inv = HashSet::new();
-        for s in selectors {
-            if let TargetSelector::InvertedLineRange { start, end } = s
-                && seen_inv.insert((start, end))
-            {
-                merged.push(TargetSelector::InvertedLineRange { start, end });
+        let has_explicit_slice = selectors.iter().any(|s| {
+            matches!(
+                s,
+                TargetSelector::Symbol(_)
+                    | TargetSelector::LineRange { .. }
+                    | TargetSelector::Regex(_)
+                    | TargetSelector::IntraBlock(_)
+            )
+        });
+        if explicit_full || !has_explicit_slice {
+            let mut merged = Vec::new();
+            let mut seen_inv = HashSet::new();
+            for s in selectors {
+                if let TargetSelector::InvertedLineRange { start, end } = s
+                    && seen_inv.insert((start, end))
+                {
+                    merged.push(TargetSelector::InvertedLineRange { start, end });
+                }
             }
+            merged.push(TargetSelector::Full);
+            target.spec.selectors = merged;
+            return;
         }
-        merged.push(TargetSelector::Full);
-        target.spec.selectors = merged;
-        return;
     }
 
     let mut dropped_indices = HashSet::new();

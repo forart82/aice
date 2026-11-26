@@ -96,10 +96,13 @@ pub fn render_resolved_target(
         .as_ref()
         .and_then(|t| registry.adapter(lang).map(|a| a.extract_symbols(t, &src)))
         .unwrap_or_default();
-    let outline_text = registry
+    let outline_view = registry
         .slicer(lang)
-        .and_then(|s| tree.as_ref().map(|t| s.outline(t, &src, op.depth.unwrap_or(0), op.include_types)))
-        .map(|ov| render_outline_aice(&ov, &target.rel_path, false))
+        .and_then(|s| tree.as_ref().map(|t| s.outline(t, &src, op.depth.unwrap_or(0), op.include_types)));
+    let outline_text = outline_view
+        .as_ref()
+        .filter(|ov| !ov.entries.is_empty())
+        .map(|ov| render_outline_aice(ov, &target.rel_path, false))
         .unwrap_or_default();
 
     let mut header = format!("// file: {}\n", target.rel_path);
@@ -111,10 +114,10 @@ pub fn render_resolved_target(
     let is_full_only = target.spec.selectors.len() == 1
         && matches!(target.spec.selectors[0], TargetSelector::Full);
     let force_outline = op.outline || (op.outline_target && !target.is_expanded);
-    if force_outline || (is_full_only && !op.full && total_lines > 120 && lang != LanguageId::PlainText) {
-        if let (Some(slicer), Some(t)) = (registry.slicer(lang), tree.as_ref()) {
-            let ov = slicer.outline(t, &src, op.depth.unwrap_or(0), op.include_types);
-            emitted.push_str(&render_outline_aice(&ov, &target.rel_path, !force_outline));
+    let auto_outline = is_full_only && !op.full && total_lines > 120 && lang != LanguageId::PlainText;
+    if force_outline || (auto_outline && outline_view.as_ref().is_some_and(|ov| !ov.entries.is_empty())) {
+        if let Some(ov) = outline_view.as_ref() {
+            emitted.push_str(&render_outline_aice(ov, &target.rel_path, !force_outline));
         } else {
             emitted.push_str(&transpile_full_aice(transpiler, tree.as_ref(), lang, &src, &opts));
         }

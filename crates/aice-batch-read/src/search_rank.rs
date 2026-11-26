@@ -56,18 +56,18 @@ pub fn score_file_matches(
         let Some(m) = compiled.find_in_line(line) else {
             continue;
         };
-        if ident_mode && !is_whole_word_match(line, m.start_byte, m.end_byte) {
-            let all = compiled.find_all_in_line(line);
-            if !all
-                .iter()
-                .any(|hit| is_whole_word_match(line, hit.start_byte, hit.end_byte))
-            {
-                continue;
-            }
-        }
+        let whole_word = ident_mode
+            && (is_whole_word_match(line, m.start_byte, m.end_byte)
+                || compiled
+                    .find_all_in_line(line)
+                    .iter()
+                    .any(|hit| is_whole_word_match(line, hit.start_byte, hit.end_byte)));
         let line_num = idx + 1;
         matched_lines.push(line_num);
-        let tier_score = classify_line_score(line.trim(), raw_query, ident_mode, is_test);
+        let mut tier_score = classify_line_score(line.trim(), raw_query, ident_mode, is_test);
+        if whole_word {
+            tier_score += if is_test { 15.0 } else { 150.0 };
+        }
         if tier_score > best_tier_score {
             best_tier_score = tier_score;
         }

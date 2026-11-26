@@ -4,9 +4,28 @@ use aice_telemetry::{BpeCounts, count_both, count_cl100k, count_lines};
 pub const DEFAULT_API_BYTE_BUDGET: usize = 28_672;
 pub const DEFAULT_CLI_BYTE_BUDGET: usize = 9_216;
 pub const DEFAULT_CLI_TOKEN_BUDGET: usize = 5_000;
+pub const DEFAULT_EXPLICIT_SLICE_TOKEN_BUDGET: usize = 24_000;
 
 pub fn effective_token_budget(_surface: OutputSurface, explicit_tokens: Option<usize>) -> usize {
     explicit_tokens.unwrap_or(DEFAULT_CLI_TOKEN_BUDGET)
+}
+
+pub fn effective_read_token_budget(
+    surface: OutputSurface,
+    explicit_tokens: Option<usize>,
+    is_full: bool,
+    has_explicit_selectors: bool,
+) -> usize {
+    if let Some(tokens) = explicit_tokens {
+        return tokens;
+    }
+    if is_full {
+        return usize::MAX;
+    }
+    if has_explicit_selectors {
+        return DEFAULT_EXPLICIT_SLICE_TOKEN_BUDGET;
+    }
+    effective_token_budget(surface, None)
 }
 
 pub fn effective_byte_budget(surface: OutputSurface, explicit_tokens: Option<usize>) -> usize {

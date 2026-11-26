@@ -23,7 +23,7 @@ impl ActiveSlot {
     pub(crate) fn new(orig_idx: usize, cand: &BudgetCandidate) -> Self {
         let current = cand.emitted.clone();
         let full_tok = count_cl100k_exact(&current);
-        let outline = if cand.outline_text.is_empty() {
+        let outline = if !has_usable_outline(cand) {
             None
         } else {
             let s = format!(
@@ -35,6 +35,19 @@ impl ActiveSlot {
         };
         Self { orig_idx, current, full_tok, tok: full_tok, outline, compacted: false, kept: true }
     }
+}
+
+fn has_usable_outline(cand: &BudgetCandidate) -> bool {
+    !cand.outline_text.trim().is_empty() && !cand.outline_text.contains("// (no AST symbols")
+}
+
+fn first_outline_line(cand: &BudgetCandidate) -> Option<&str> {
+    if !has_usable_outline(cand) {
+        return None;
+    }
+    cand.outline_text
+        .lines()
+        .find(|l| !is_non_content_marker(cand, l) && !l.trim().starts_with("// Auto-outlined "))
 }
 
 pub(crate) fn is_non_content_marker(cand: &BudgetCandidate, line: &str) -> bool {
@@ -81,11 +94,25 @@ pub(crate) fn minimal_target_tokens(cand: &BudgetCandidate) -> Option<usize> {
         .lines()
         .skip(cand.header.lines().count())
         .find(|l| !is_non_content_marker(cand, l))?;
-    let trunc_min = ["// ... [truncated]\n", "// ...\n"]
+    let mut best = ["// ... [truncated]\n", "// ...\n"]
         .into_iter()
         .map(|tail| count_cl100k_exact(&format!("{}{first_content}\n{tail}", cand.header)))
-        .min()?;
-    Some(full_tok.min(trunc_min))
+        .min()?
+        .min(full_tok);
+    if let Some(ol_line) = first_outline_line(cand)
+        && let Some(ol_min) = ["// ... [truncated]\n", "// ...\n"]
+            .into_iter()
+            .map(|tail| {
+                count_cl100k_exact(&format!(
+                    "{}// [compacted to :outline to fit token budget]\n{ol_line}\n{tail}",
+                    cand.header
+                ))
+            })
+            .min()
+    {
+        best = best.min(ol_min);
+    }
+    Some(best)
 }
 
 pub(crate) fn fit_minimal_target(cand: &BudgetCandidate, budget: usize) -> Option<String> {
@@ -97,10 +124,64 @@ pub(crate) fn fit_minimal_target(cand: &BudgetCandidate, budget: usize) -> Optio
         .lines()
         .skip(cand.header.lines().count())
         .find(|l| !is_non_content_marker(cand, l))?;
-    ["// ... [truncated]\n", "// ...\n"]
+    if let Some(fit) = ["// ... [truncated]\n", "// ...\n"]
         .into_iter()
         .map(|tail| format!("{}{first_content}\n{tail}", cand.header))
         .find(|s| count_cl100k_exact(s) <= budget)
+    {
+        return Some(fit);
+    }
+    if let Some(ol_line) = first_outline_line(cand)
+        && let Some(fit) = ["// ... [truncated]\n", "// ...\n"]
+            .into_iter()
+            .map(|tail| {
+                format!(
+                    "{}// [compacted to :outline to fit token budget]\n{ol_line}\n{tail}",
+                    cand.header
+                )
+            })
+            .find(|s| count_cl100k_exact(s) <= budget)
+    {
+        return Some(fit);
+    }
+    if count_cl100k_exact(first_content) > 40 {
+        return fit_truncated_single_line(cand, first_content, budget);
+    }
+    None
+}
+
+fn fit_truncated_single_line(
+    cand: &BudgetCandidate,
+    line: &str,
+    budget: usize,
+) -> Option<String> {
+    let chars: Vec<char> = line.chars().collect();
+    if chars.is_empty() {
+        return None;
+    }
+    let tail = "// ...\n";
+    let mut lo = 0usize;
+    let mut hi = chars.len();
+    while lo < hi {
+        let mid = lo + (hi - lo).div_ceil(2);
+        let prefix: String = chars[..mid].iter().collect();
+        let probe = format!("{}{prefix}...\n{tail}", cand.header);
+        if count_cl100k_exact(&probe) <= budget {
+            lo = mid;
+        } else {
+            hi = mid - 1;
+        }
+    }
+    if lo < 8 {
+        return None;
+    }
+    let prefix: String = chars[..lo].iter().collect();
+    let trimmed = prefix.trim_end();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let out = format!("{}{trimmed}...\n{tail}", cand.header);
+    (count_cl100k_exact(&out) <= budget).then_some(out)
 }
 
 pub(crate) fn is_viable_candidate(cand: &BudgetCandidate, max_tokens: usize) -> bool {

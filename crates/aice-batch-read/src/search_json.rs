@@ -83,7 +83,10 @@ pub(crate) fn build_budgeted_bundle(
 }
 
 fn is_slice_line_marker(t: &str) -> bool {
-    t.strip_prefix("# L")
+    let range = t
+        .strip_prefix("# L")
+        .or_else(|| t.strip_prefix('L').and_then(|s| s.strip_suffix(':')));
+    range
         .and_then(|rest| rest.split_once("-L"))
         .is_some_and(|(a, b)| {
             !a.is_empty()

@@ -11,7 +11,7 @@ use aice_governance::path_guard::is_path_contained;
 use aice_governance::{Governed, ReadOp};
 use aice_lang_registry::{AdapterLookup, LanguageId, detect_language};
 
-use crate::coalesce::coalesce_targets;
+use crate::coalesce::coalesce_targets_with_opts;
 use crate::discovery::walk_project_root;
 use crate::gitignore::to_rel_posix;
 use crate::matcher::ResolvedTarget;
@@ -33,7 +33,7 @@ pub fn build_topo_pack(
     if targets.is_empty() {
         return TopoPack::default();
     }
-    let targets = coalesce_targets(targets, registry);
+    let targets = coalesce_targets_with_opts(targets, registry, op.full);
     let needs_ws = op.include_deps || op.include_callers;
     if targets.len() <= 1 && !needs_ws {
         return TopoPack {

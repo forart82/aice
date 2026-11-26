@@ -97,7 +97,31 @@ pub fn parse_slash_regex(raw: &str) -> Result<(String, bool, bool), String> {
     Ok((body.to_string(), ci, ml))
 }
 
+fn has_unescaped_pipe(raw: &str) -> bool {
+    let chars: Vec<char> = raw.chars().collect();
+    let (mut i, mut in_class) = (0usize, false);
+    while i < chars.len() {
+        let ch = chars[i];
+        if ch == '\\' && i + 1 < chars.len() {
+            i += 2;
+            continue;
+        }
+        if ch == '[' && !in_class {
+            in_class = true;
+        } else if ch == ']' && in_class {
+            in_class = false;
+        } else if ch == '|' && !in_class {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 pub fn normalize_bre(raw: &str) -> String {
+    if has_unescaped_pipe(raw) {
+        return raw.to_string();
+    }
     let chars: Vec<char> = raw.chars().collect();
     let mut out = String::with_capacity(raw.len());
     let (mut i, mut in_class) = (0usize, false);
@@ -105,8 +129,8 @@ pub fn normalize_bre(raw: &str) -> String {
         let ch = chars[i];
         if ch == '\\' && i + 1 < chars.len() {
             let next = chars[i + 1];
-            if !in_class && matches!(next, '|' | '(' | ')') {
-                out.push(next);
+            if !in_class && next == '|' {
+                out.push('|');
             } else {
                 out.push('\\');
                 out.push(next);
@@ -190,11 +214,10 @@ pub fn compile_search_pattern(raw: &str, case_insensitive: bool) -> CompiledPatt
 
 pub fn compile_slash_regex(raw: &str) -> Result<CompiledPattern, String> {
     let (body, ci, ml) = parse_slash_regex(raw)?;
-    let normalized = normalize_bre(&body);
-    if has_redos_risk(&normalized) {
+    if has_redos_risk(&body) {
         return Ok(CompiledPattern::literal(&body, ci, ml));
     }
-    match parse_regex(&normalized) {
+    match parse_regex(&body) {
         Ok(ast) => Ok(CompiledPattern {
             raw: body,
             case_insensitive: ci,

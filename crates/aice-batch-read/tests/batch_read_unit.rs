@@ -100,9 +100,11 @@ fn case_insensitive_non_ascii_find_literal_returns_valid_char_boundaries_and_nev
     let matches_foo = pat_foo.find_all_in_line(hay_foo);
     assert_eq!(matches_foo.len(), 1);
     assert_eq!(&hay_foo[matches_foo[0].start_byte..matches_foo[0].end_byte], "foo");
-    assert!(score_file_matches("a.txt", "foo", &pat_foo, &[hay_foo]).is_none());
-    let (_, hit_lines) = score_file_matches("a.txt", "foo", &pat_foo, &["İ foo é"]).unwrap();
+    let (sub_score, sub_lines) = score_file_matches("a.txt", "foo", &pat_foo, &[hay_foo]).unwrap();
+    let (word_score, hit_lines) = score_file_matches("a.txt", "foo", &pat_foo, &["İ foo é"]).unwrap();
+    assert_eq!(sub_lines, vec![1]);
     assert_eq!(hit_lines, vec![1]);
+    assert!(word_score > sub_score, "whole-word match must outrank substring match");
 
     let pat_i = CompiledPattern::literal("i", true, false);
     let hay_tr = "İstanbul";
