@@ -121,16 +121,16 @@ fn decompile_top_item(
 
 fn decompile_import(node: Node<'_>, src: &str, tr: Trivia) -> ImportDecl {
     let raw = node_text(node, src);
-    let is_type_only = raw.contains("import type ");
+    let is_type_only = raw.trim_start().starts_with("import type ");
     let source = field_text(node, "source", src).map(strip_quotes).unwrap_or_default();
     let mut specifiers = Vec::new();
     if let Some(clause) = child_by_kind(node, "import_clause") {
         for ch in named_children(clause) {
             match ch.kind() {
-                "identifier" => specifiers.push(ImportSpec { name: node_text(ch, src).into(), alias: None, is_wildcard: false, is_default: true, is_type: false }),
+                "identifier" => specifiers.push(ImportSpec { name: node_text(ch, src).into(), alias: None, is_wildcard: false, is_default: true, is_type: is_type_only }),
                 "namespace_import" => {
                     let al = named_children(ch).into_iter().last().map(|a| node_text(a, src).to_string());
-                    specifiers.push(ImportSpec { name: "*".into(), alias: al, is_wildcard: true, is_default: false, is_type: false });
+                    specifiers.push(ImportSpec { name: "*".into(), alias: al, is_wildcard: true, is_default: false, is_type: is_type_only });
                 }
                 "named_imports" => {
                     for sp in named_children(ch) {

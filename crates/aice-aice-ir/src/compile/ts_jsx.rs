@@ -48,6 +48,10 @@ fn emit_jsx_node(ec: &mut EmitCtx, root: &LayoutNode, target: LanguageId, ectx: 
                 }
                 let mut attr_s = String::new();
                 for a in attrs {
+                    if a.name == "..." && let Some(ex) = &a.value {
+                        attr_s.push_str(&format!(" {{...{}}}", emit_expr(ex, target, ectx)));
+                        continue;
+                    }
                     match &a.value {
                         Some(crate::ir_code::Expr::Literal(crate::ir_code::LiteralVal::Str { value, .. })) => {
                             attr_s.push_str(&format!(" {}=\"{value}\"", a.name));

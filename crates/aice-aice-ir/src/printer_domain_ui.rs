@@ -71,6 +71,9 @@ pub(crate) fn print_component(c: &mut PrintCtx<'_>, comp: &ComponentDecl, d: usi
                     let mut s = if is_markup { fmt_attr_key(tag) } else { format_ident_or_quoted(tag) };
                     if !attrs.is_empty() {
                         let as_: Vec<String> = attrs.iter().map(|a| {
+                            if a.name == "..." && let Some(v) = &a.value {
+                                return format!("...{}", print_expr(v));
+                            }
                             let k = fmt_attr_key(&a.name);
                             match &a.value {
                                 Some(Expr::Literal(LiteralVal::Str { value, .. })) if is_markup => {

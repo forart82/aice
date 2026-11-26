@@ -219,6 +219,11 @@ fn step_layout_elem(
     let mut attrs = Vec::new();
     if p.eat(TokenKind::LParen) {
         while p.peek_kind() != TokenKind::RParen && !p.at_eof() {
+            if p.eat(TokenKind::Ellipsis) {
+                attrs.push(LayoutAttr { name: "...".into(), value: Some(parse_expr(p)?) });
+                p.eat(TokenKind::Comma);
+                continue;
+            }
             let name = parse_layout_ident(p, "Expected attr")?;
             let value = if p.eat(TokenKind::Equal) {
                 Some(parse_layout_attr_str(p))

@@ -56,20 +56,26 @@ fn emit_import(ec: &mut EmitCtx, imp: &ImportDecl, is_js: bool) {
         return;
     }
     if imp.specifiers.len() == 1 && imp.specifiers[0].is_wildcard {
+        if is_js && imp.specifiers[0].is_type { return; }
+        let tp = if !is_js && imp.specifiers[0].is_type { "type " } else { "" };
         let a = imp.specifiers[0].alias.as_deref().unwrap_or("ns");
-        ec.line(&format!("import * as {a} from \"{}\";", imp.source));
+        ec.line(&format!("import {tp}* as {a} from \"{}\";", imp.source));
         return;
     }
-    let defs: Vec<_> = imp.specifiers.iter().filter(|s| s.is_default).collect();
-    let named: Vec<String> = imp.specifiers.iter().filter(|s| !s.is_default && !(is_js && s.is_type)).map(|s| {
+    let defs: Vec<_> = imp.specifiers.iter().filter(|s| s.is_default && !(is_js && s.is_type)).collect();
+    let wild: Vec<_> = imp.specifiers.iter().filter(|s| s.is_wildcard && !(is_js && s.is_type)).collect();
+    let named: Vec<String> = imp.specifiers.iter().filter(|s| !s.is_default && !s.is_wildcard && !(is_js && s.is_type)).map(|s| {
         let tp = if s.is_type && !is_js { "type " } else { "" };
         match &s.alias { Some(a) => format!("{tp}{} as {a}", s.name), None => format!("{tp}{}", s.name) }
     }).collect();
-    if is_js && imp.is_type_only && defs.is_empty() && named.is_empty() { return; }
+    if is_js && imp.is_type_only && defs.is_empty() && wild.is_empty() && named.is_empty() { return; }
+    let type_pfx = if !is_js && wild.is_empty() && named.is_empty() && defs.first().is_some_and(|d| d.is_type) { "type " } else { "" };
     let mut parts = Vec::new();
     if let Some(d) = defs.first() { parts.push(d.alias.clone().unwrap_or_else(|| d.name.clone())); }
+    if let Some(w) = wild.first() { parts.push(format!("* as {}", w.alias.as_deref().unwrap_or("ns"))); }
     if !named.is_empty() { parts.push(format!("{{ {} }}", named.join(", "))); }
-    ec.line(&format!("import {} from \"{}\";", parts.join(", "), imp.source));
+    if parts.is_empty() { return; }
+    ec.line(&format!("import {type_pfx}{} from \"{}\";", parts.join(", "), imp.source));
 }
 
 fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl, target: LanguageId) {

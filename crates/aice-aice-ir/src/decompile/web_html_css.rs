@@ -34,10 +34,47 @@ fn decompile_html(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<Aic
     Ok(m)
 }
 
+fn flush_html_text(
+    text_buf: &mut String,
+    run_start: &mut Option<usize>,
+    prev_end: &mut Option<usize>,
+    prev_elem_end: Option<usize>,
+    next_elem_start: Option<usize>,
+    src: &str,
+    slots: &mut Vec<HtmlSlot>,
+) {
+    let trimmed = text_buf.trim();
+    if !trimmed.is_empty() {
+        let lead_gap = prev_elem_end
+            .zip(*run_start)
+            .and_then(|(pe, rs)| src.get(pe..rs))
+            .is_some_and(|g| g.starts_with(char::is_whitespace) || g.ends_with(char::is_whitespace));
+        let trail_gap = prev_end
+            .zip(next_elem_start)
+            .and_then(|(pe, ns)| src.get(pe..ns))
+            .is_some_and(|g| g.starts_with(char::is_whitespace) || g.ends_with(char::is_whitespace));
+        let lead = prev_elem_end.is_some() && (text_buf.starts_with(char::is_whitespace) || lead_gap);
+        let trail = next_elem_start.is_some() && (text_buf.ends_with(char::is_whitespace) || trail_gap);
+        let mut s = String::with_capacity(trimmed.len() + usize::from(lead) + usize::from(trail));
+        if lead { s.push(' '); }
+        s.push_str(trimmed);
+        if trail { s.push(' '); }
+        slots.push(HtmlSlot::Text(s));
+    }
+    text_buf.clear();
+    *run_start = None;
+    *prev_end = None;
+}
+
+enum HtmlSlot {
+    Elem,
+    Text(String),
+}
+
 fn decompile_html_elem(root: Node<'_>, src: &str, opts: &TranspileOpts) -> LayoutNode {
     enum HTask<'a> {
         Enter(Node<'a>),
-        Finish { tag: String, attrs: Vec<LayoutAttr>, text: Option<String>, len: usize, trivia: Trivia },
+        Finish { tag: String, attrs: Vec<LayoutAttr>, slots: Vec<HtmlSlot>, elem_len: usize, trivia: Trivia },
     }
     let mut tasks = vec![HTask::Enter(root)];
     let mut out: Vec<LayoutNode> = Vec::new();
@@ -62,13 +99,22 @@ fn decompile_html_elem(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Layou
                     }
                 }
                 let mut child_elems = Vec::new();
+                let mut slots = Vec::new();
                 let mut text_buf = String::new();
+                let mut run_start: Option<usize> = None;
                 let mut prev_end: Option<usize> = None;
+                let mut prev_elem_end: Option<usize> = None;
                 for ch in named_children(node) {
                     if is_comment_kind(ch.kind()) { continue; }
                     match ch.kind() {
-                        "element" | "script_element" | "style_element" => child_elems.push(ch),
+                        "element" | "script_element" | "style_element" => {
+                            flush_html_text(&mut text_buf, &mut run_start, &mut prev_end, prev_elem_end, Some(ch.start_byte()), src, &mut slots);
+                            slots.push(HtmlSlot::Elem);
+                            child_elems.push(ch);
+                            prev_elem_end = Some(ch.end_byte());
+                        }
                         "text" | "raw_text" | "entity" => {
+                            if run_start.is_none() { run_start = Some(ch.start_byte()); }
                             if let Some(pe) = prev_end && ch.start_byte() > pe {
                                 let gap = &src[pe..ch.start_byte()];
                                 if gap.bytes().all(|b| b.is_ascii_whitespace()) {
@@ -83,16 +129,26 @@ fn decompile_html_elem(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Layou
                         _ => {}
                     }
                 }
-                let trimmed = text_buf.trim();
-                let text = if trimmed.is_empty() { None } else { Some(trimmed.to_string()) };
-                tasks.push(HTask::Finish { tag, attrs, text, len: child_elems.len(), trivia: tr });
+                flush_html_text(&mut text_buf, &mut run_start, &mut prev_end, prev_elem_end, None, src, &mut slots);
+                let elem_len = child_elems.len();
+                tasks.push(HTask::Finish { tag, attrs, slots, elem_len, trivia: tr });
                 for ch in child_elems.into_iter().rev() { tasks.push(HTask::Enter(ch)); }
             }
-            HTask::Finish { tag, attrs, text, len, trivia } => {
-                let children = out.split_off(out.len() - len);
-                out.push(LayoutNode::Element {
-                    tag, attrs, text: if children.is_empty() { text } else { None }, child_expr: None, children, trivia,
-                });
+            HTask::Finish { tag, attrs, slots, elem_len, trivia } => {
+                let mut elems = out.split_off(out.len() - elem_len).into_iter();
+                if elem_len == 0 {
+                    let text = slots.into_iter().find_map(|s| match s { HtmlSlot::Text(t) => Some(t), HtmlSlot::Elem => None });
+                    out.push(LayoutNode::Element { tag, attrs, text, child_expr: None, children: Vec::new(), trivia });
+                } else {
+                    let children = slots.into_iter().map(|s| match s {
+                        HtmlSlot::Elem => elems.next().expect("html elem child"),
+                        HtmlSlot::Text(t) => LayoutNode::Element {
+                            tag: "#text".into(), attrs: Vec::new(), text: Some(t),
+                            child_expr: None, children: Vec::new(), trivia: Trivia::default(),
+                        },
+                    }).collect();
+                    out.push(LayoutNode::Element { tag, attrs, text: None, child_expr: None, children, trivia });
+                }
             }
         }
     }

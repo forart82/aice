@@ -51,6 +51,64 @@ fn emit_html_comp(ec: &mut EmitCtx, comp: &ComponentDecl) {
     for n in &comp.layout { emit_html_node(ec, n); }
 }
 
+fn fmt_html_attrs(attrs: &[crate::ir_domain::LayoutAttr]) -> String {
+    let mut attr_s = String::new();
+    for a in attrs {
+        match &a.value {
+            Some(Expr::Literal(LiteralVal::Str { value, .. })) => {
+                attr_s.push_str(&format!(" {}=\"{}\"", a.name, esc_attr(value)));
+            }
+            Some(ex) => attr_s.push_str(&format!(" {}=\"{:?}\"", a.name, ex)),
+            None => attr_s.push_str(&format!(" {}", a.name)),
+        }
+    }
+    attr_s
+}
+
+fn can_render_inline(children: &[LayoutNode]) -> bool {
+    let mut stack: Vec<&LayoutNode> = children.iter().collect();
+    while let Some(n) = stack.pop() {
+        match n {
+            LayoutNode::Element { children: sub, trivia, .. } if trivia.is_empty() => {
+                stack.extend(sub.iter());
+            }
+            _ => return false,
+        }
+    }
+    true
+}
+
+fn render_html_inline(children: &[LayoutNode]) -> String {
+    enum IOp<'a> { Node(&'a LayoutNode), Close(String) }
+    let mut out = String::new();
+    let mut tasks: Vec<IOp<'_>> = children.iter().rev().map(IOp::Node).collect();
+    while let Some(op) = tasks.pop() {
+        match op {
+            IOp::Close(s) => out.push_str(&s),
+            IOp::Node(LayoutNode::Element { tag, attrs, text, children: sub, .. }) => {
+                if tag == "#text" {
+                    if let Some(t) = text { out.push_str(t); }
+                    continue;
+                }
+                let attr_s = fmt_html_attrs(attrs);
+                if VOID_TAGS.contains(&tag.as_str()) {
+                    out.push_str(&format!("<{tag}{attr_s} />"));
+                } else if let Some(t) = text {
+                    out.push_str(&format!("<{tag}{attr_s}>{t}</{tag}>"));
+                } else if sub.is_empty() {
+                    out.push_str(&format!("<{tag}{attr_s}></{tag}>"));
+                } else {
+                    out.push_str(&format!("<{tag}{attr_s}>"));
+                    tasks.push(IOp::Close(format!("</{tag}>")));
+                    for ch in sub.iter().rev() { tasks.push(IOp::Node(ch)); }
+                }
+            }
+            IOp::Node(_) => {}
+        }
+    }
+    out
+}
+
 fn emit_html_node(ec: &mut EmitCtx, root: &LayoutNode) {
     enum HOp<'a> { Node(&'a LayoutNode), PopLine(String) }
     let mut tasks = vec![HOp::Node(root)];
@@ -61,22 +119,22 @@ fn emit_html_node(ec: &mut EmitCtx, root: &LayoutNode) {
                 LayoutNode::Comment(t) => ec.line(&format!("<!-- {t} -->")),
                 LayoutNode::Element { tag, attrs, text, children, trivia, .. } => {
                     ec.emit_trivia(trivia, CommentStyle::Html);
-                    let mut attr_s = String::new();
-                    for a in attrs {
-                        match &a.value {
-                            Some(Expr::Literal(LiteralVal::Str { value, .. })) => {
-                                attr_s.push_str(&format!(" {}=\"{}\"", a.name, esc_attr(value)));
-                            }
-                            Some(ex) => attr_s.push_str(&format!(" {}=\"{:?}\"", a.name, ex)),
-                            None => attr_s.push_str(&format!(" {}", a.name)),
-                        }
+                    if tag == "#text" {
+                        if let Some(t) = text { ec.line(t); }
+                        continue;
                     }
+                    let attr_s = fmt_html_attrs(attrs);
                     if VOID_TAGS.contains(&tag.as_str()) {
                         ec.line(&format!("<{tag}{attr_s} />"));
                     } else if let Some(t) = text {
                         ec.line(&format!("<{tag}{attr_s}>{t}</{tag}>"));
                     } else if children.is_empty() {
                         ec.line(&format!("<{tag}{attr_s}></{tag}>"));
+                    } else if children.iter().any(|c| matches!(c, LayoutNode::Element { tag, .. } if tag == "#text"))
+                        && can_render_inline(children)
+                    {
+                        let inner = render_html_inline(children);
+                        ec.line(&format!("<{tag}{attr_s}>{inner}</{tag}>"));
                     } else {
                         ec.line(&format!("<{tag}{attr_s}>"));
                         ec.push();

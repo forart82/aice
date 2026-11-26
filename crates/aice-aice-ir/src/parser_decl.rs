@@ -15,15 +15,16 @@ pub(crate) fn parse_import(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) 
         let src_tok = p.expect(TokenKind::String, "Expected import source string")?;
         p.expect(TokenKind::Import, "Expected 'import'")?;
         loop {
+            let is_t = p.eat(TokenKind::Type);
+            if is_t { is_type_only = true; }
             if p.eat(TokenKind::Star) {
                 let alias = if p.eat(TokenKind::As) { Some(p.expect_ident_or_kw("Expected alias")?.lexeme) } else { None };
-                specs.push(ImportSpec { name: "*".into(), alias, is_wildcard: true, is_default: false, is_type: false });
+                specs.push(ImportSpec { name: "*".into(), alias, is_wildcard: true, is_default: false, is_type: is_t });
             } else {
-                let is_t = p.eat(TokenKind::Type);
-                if is_t { is_type_only = true; }
                 let is_def = p.peek().lexeme == "default";
-                let name = p.expect_ident_or_kw("Expected import specifier")?.lexeme;
-                let alias = if p.eat(TokenKind::As) { Some(p.expect_ident_or_kw("Expected alias")?.lexeme) } else { None };
+                let mut name = p.expect_ident_or_kw("Expected import specifier")?.lexeme;
+                let mut alias = if p.eat(TokenKind::As) { Some(p.expect_ident_or_kw("Expected alias")?.lexeme) } else { None };
+                if is_def && let Some(a) = alias.take() { name = a; }
                 specs.push(ImportSpec { name, alias, is_wildcard: false, is_default: is_def, is_type: is_t });
             }
             if !p.eat(TokenKind::Comma) { break; }

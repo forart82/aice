@@ -86,6 +86,26 @@ fn scan_jsx_attrs<'a>(tag_node: Node<'a>, src: &'a str) -> (Vec<(String, u8, Str
                     None => specs.push((name, 0, String::new())),
                 }
             }
+        } else if matches!(ch.kind(), "jsx_expression" | "jsx_spread_attribute") {
+            let inner = named_children(ch)
+                .into_iter()
+                .find(|n| !crate::decompile::trivia::is_comment_kind(n.kind()));
+            let target = match inner {
+                Some(n) if n.kind() == "spread_element" => named_children(n)
+                    .into_iter()
+                    .find(|c| !crate::decompile::trivia::is_comment_kind(c.kind())),
+                Some(n)
+                    if ch.kind() == "jsx_spread_attribute"
+                        || node_text(ch, src).trim_start_matches('{').trim_start().starts_with("...") =>
+                {
+                    Some(n)
+                }
+                _ => None,
+            };
+            if let Some(e) = target {
+                specs.push(("...".to_string(), 2, String::new()));
+                exprs.push(e);
+            }
         }
     }
     (specs, exprs)
@@ -159,6 +179,7 @@ pub(crate) fn finish_layout_to_expr(env: &mut DecompEnv<'_>, mut ln: LayoutNode,
     }
     let eff_tag = if force_empty_tag { String::new() } else { tag };
     let rec_entries = attrs.into_iter().map(|a| match a.value {
+        Some(v) if a.name == "..." => RecordEntry::Spread(v),
         Some(v) => RecordEntry::Field { key: Some(a.name), value: v },
         None => RecordEntry::Field { key: None, value: Expr::Literal(LiteralVal::Str { value: a.name, multiline: false }) },
     }).collect();

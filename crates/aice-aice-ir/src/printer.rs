@@ -204,14 +204,25 @@ fn print_import(c: &mut PrintCtx<'_>, imp: &ImportDecl, d: usize) {
         return;
     }
     if imp.specifiers.len() == 1 && imp.specifiers[0].is_wildcard && imp.specifiers[0].alias.is_some() {
+        let tp = if imp.specifiers[0].is_type { "type " } else { "" };
         let a = imp.specifiers[0].alias.as_deref().unwrap_or("");
-        c.line_tr(d, &format!("{}from {} import * as {}", imp.vis.aice_prefix(), src, a), &imp.trivia);
+        c.line_tr(d, &format!("{}from {} import {tp}* as {}", imp.vis.aice_prefix(), src, a), &imp.trivia);
         return;
     }
     let parts: Vec<String> = imp.specifiers.iter().map(|s| {
         let mut out = if s.is_type { "type ".to_string() } else { String::new() };
-        out.push_str(&s.name);
-        if let Some(ref a) = s.alias { out.push_str(" as "); out.push_str(a); }
+        if s.is_default {
+            let local = s.alias.as_deref().unwrap_or(&s.name);
+            if local == "default" {
+                out.push_str("default");
+            } else {
+                out.push_str("default as ");
+                out.push_str(local);
+            }
+        } else {
+            out.push_str(&s.name);
+            if let Some(ref a) = s.alias { out.push_str(" as "); out.push_str(a); }
+        }
         out
     }).collect();
     c.line_tr(d, &format!("{}from {} import {}", imp.vis.aice_prefix(), src, parts.join(", ")), &imp.trivia);
