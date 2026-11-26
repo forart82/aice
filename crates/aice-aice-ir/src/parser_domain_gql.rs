@@ -90,8 +90,12 @@ pub(crate) fn parse_gql(p: &mut Parser<'_>, trivia: Trivia) -> Result<AiceItem, 
         while !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof) {
             let fname = parse_db_atom(p, "Expected gql field")?;
             let fty = if p.eat(TokenKind::Colon) {
-                let (mut s, mut e) = (None, 0usize);
-                while !matches!(p.peek_kind(), TokenKind::Comma | TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof) {
+                let (mut s, mut e, mut depth) = (None, 0usize, 0usize);
+                while !matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Comment | TokenKind::Dedent | TokenKind::Eof) {
+                    let k = p.peek_kind();
+                    if depth == 0 && k == TokenKind::Comma { break; }
+                    if matches!(k, TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace) { depth += 1; }
+                    else if matches!(k, TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace) { depth = depth.saturating_sub(1); }
                     let t = p.advance();
                     if t.span.end_byte > t.span.start_byte {
                         if s.is_none() { s = Some(t.span.start_byte); }

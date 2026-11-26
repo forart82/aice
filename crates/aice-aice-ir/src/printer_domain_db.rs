@@ -220,8 +220,12 @@ fn print_gql_field(c: &mut PrintCtx<'_>, root: &GraphQlField, init_d: usize) {
             format!("({})", ps.join(", "))
         };
         let pfx = if matches!(f.name.as_str(), "implements" | "directive" | "field") || !is_clean_db_word(&f.name) { "field " } else { "" };
-        let fty = if is_clean_db_expr_tail(&f.field_type) { f.field_type.clone() } else { format!("\"{}\"", escape_str(&f.field_type)) };
-        let mut l = format!("{pfx}{}{args}{}{fty}", fmt_db_word(&f.name), c.colon_sep());
+        let mut l = if f.field_type.is_empty() {
+            format!("{pfx}{}{args}", fmt_db_word(&f.name))
+        } else {
+            let fty = if is_clean_db_expr_tail(&f.field_type) { f.field_type.clone() } else { format!("\"{}\"", escape_str(&f.field_type)) };
+            format!("{pfx}{}{args}{}{fty}", fmt_db_word(&f.name), c.colon_sep())
+        };
         for dir in &f.directives { l.push_str(&format!(" | {}", fmt_db_segment(dir))); }
         c.line_tr(d, &l, &f.trivia);
         for ch in f.children.iter().rev() { stack.push((ch, d + 1)); }

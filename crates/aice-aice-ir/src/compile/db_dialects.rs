@@ -49,27 +49,39 @@ fn emit_graphql(module: &AiceModule) -> Result<String, TranspileError> {
     ec.emit_trivia(&module.module_trivia, CommentStyle::Hash);
     for it in &module.items {
         match it {
-            AiceItem::DbSchema(DbSchemaDecl::GraphQlType { kind, name, implements, fields, trivia, .. }) => {
+            AiceItem::DbSchema(DbSchemaDecl::GraphQlType { kind, name, implements, directives, fields, trivia }) => {
                 ec.blank();
                 ec.emit_trivia(trivia, CommentStyle::Hash);
                 let imp = if implements.is_empty() { String::new() } else { format!(" implements {}", implements.join(" & ")) };
+                let dirs = if directives.is_empty() { String::new() } else { format!(" {}", directives.join(" ")) };
                 let kw = match kind.as_str() {
                     "object" => "type",
                     "input_object" => "input",
                     other => other,
                 };
                 if kw == "scalar" && fields.is_empty() {
-                    ec.line(&format!("scalar {name}"));
+                    ec.line(&format!("scalar {name}{dirs}"));
                     continue;
                 }
-                ec.line(&format!("{kw} {name}{imp} {{"));
+                if kw == "union" {
+                    let members: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+                    if members.is_empty() {
+                        ec.line(&format!("union {name}{dirs}"));
+                    } else {
+                        ec.line(&format!("union {name}{dirs} = {}", members.join(" | ")));
+                    }
+                    continue;
+                }
+                ec.line(&format!("{kw} {name}{imp}{dirs} {{"));
                 ec.push();
                 for f in fields {
+                    ec.emit_trivia(&f.trivia, CommentStyle::Hash);
+                    let fdirs = if f.directives.is_empty() { String::new() } else { format!(" {}", f.directives.join(" ")) };
                     if kw == "enum" || f.field_type.is_empty() {
-                        ec.line(&f.name);
+                        ec.line(&format!("{}{fdirs}", f.name));
                     } else {
                         let args = if f.args.is_empty() { String::new() } else { format!("({})", f.args.join(", ")) };
-                        ec.line(&format!("{}{args}: {}", f.name, f.field_type));
+                        ec.line(&format!("{}{args}: {}{fdirs}", f.name, f.field_type));
                     }
                 }
                 ec.pop();

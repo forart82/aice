@@ -3,7 +3,7 @@ use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, named_children, node_text, with_ts_root};
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
-use crate::ir::{AiceItem, AiceModule, TranspileError, TranspileOpts};
+use crate::ir::{AiceItem, AiceModule, TranspileError, TranspileOpts, Trivia};
 use crate::ir_domain_db::{DbQueryDecl, DbQueryKind, DbSchemaDecl, GraphQlField, PrismaField};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -81,8 +81,20 @@ fn decompile_graphql(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<
         }
         if is_comment_kind(inner.kind()) { continue; }
         let tr = collect_trivia(inner, src, opts);
-        if inner.kind() == "operation_definition" {
-            let op_type = child_by_kind(inner, "operation_type").map(|n| node_text(n, src).trim().into()).unwrap_or_else(|| "query".into());
+        if matches!(
+            inner.kind(),
+            "operation_definition"
+                | "fragment_definition"
+                | "directive_definition"
+                | "schema_definition"
+                | "type_extension"
+                | "schema_extension"
+        ) {
+            let op_type = if inner.kind() == "operation_definition" {
+                child_by_kind(inner, "operation_type").map(|n| node_text(n, src).trim().into()).unwrap_or_else(|| "query".into())
+            } else {
+                inner.kind().trim_end_matches("_definition").into()
+            };
             let name = child_by_kind(inner, "name").map(|n| node_text(n, src).trim().into());
             let body = node_text(inner, src).trim().to_string();
             m.items.push(AiceItem::DbQuery(DbQueryDecl {
@@ -93,6 +105,7 @@ fn decompile_graphql(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<
             let raw_kind = inner.kind().trim_end_matches("_definition").replace("_type", "");
             let kind = if raw_kind == "input_object" { "input".to_string() } else { raw_kind };
             let name = child_by_kind(inner, "name").map(|n| node_text(n, src).trim().into()).unwrap_or_else(|| "Type".into());
+            let directives = collect_gql_directives(inner, src);
             let mut fields = Vec::new();
             if let Some(fdef) = child_by_kind(inner, "fields_definition").or_else(|| child_by_kind(inner, "input_fields_definition")) {
                 for f in named_children(fdef) {
@@ -101,16 +114,20 @@ fn decompile_graphql(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<
                         let fnm = child_by_kind(f, "name").map(|n| node_text(n, src).trim().into()).unwrap_or_else(|| "f".into());
                         let args = child_by_kind(f, "arguments_definition")
                             .map(|a| {
-                                named_children(a)
-                                    .into_iter()
+                                named_children(a).into_iter()
                                     .filter(|c| c.kind() == "input_value_definition")
                                     .map(|c| node_text(c, src).trim().into())
                                     .collect()
                             })
                             .unwrap_or_default();
-                        let fty = named_children(f).into_iter().find(|c| c.kind().contains("type"))
-                            .map(|c| node_text(c, src).trim().into()).unwrap_or_else(|| "String".into());
-                        fields.push(GraphQlField { name: fnm, args, field_type: fty, directives: Vec::new(), children: Vec::new(), trivia: ftr });
+                        let mut fty = named_children(f).into_iter().find(|c| c.kind().contains("type"))
+                            .map(|c| node_text(c, src).trim().to_string()).unwrap_or_else(|| "String".into());
+                        if let Some(dv) = child_by_kind(f, "default_value") {
+                            let d = node_text(dv, src).trim();
+                            if !d.is_empty() { fty.push(' '); fty.push_str(d); }
+                        }
+                        let fdirs = collect_gql_directives(f, src);
+                        fields.push(GraphQlField { name: fnm, args, field_type: fty, directives: fdirs, children: Vec::new(), trivia: ftr });
                     }
                 }
             } else if let Some(edef) = child_by_kind(inner, "enum_values_definition") {
@@ -122,31 +139,43 @@ fn decompile_graphql(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<
                         .or_else(|| child_by_kind(ev, "name"))
                         .map(|n| node_text(n, src).trim().to_string())
                         .unwrap_or_else(|| node_text(ev, src).trim().to_string());
+                    let fdirs = collect_gql_directives(ev, src);
                     if !vnm.is_empty() {
-                        fields.push(GraphQlField { name: vnm, args: Vec::new(), field_type: String::new(), directives: Vec::new(), children: Vec::new(), trivia: ftr });
+                        fields.push(GraphQlField { name: vnm, args: Vec::new(), field_type: String::new(), directives: fdirs, children: Vec::new(), trivia: ftr });
                     }
+                }
+            } else if let Some(umt) = child_by_kind(inner, "union_member_types") {
+                let mut members = Vec::new();
+                collect_gql_list(umt, "union_member_types", src, &mut members);
+                for mname in members {
+                    fields.push(GraphQlField { name: mname, args: Vec::new(), field_type: String::new(), directives: Vec::new(), children: Vec::new(), trivia: Trivia::default() });
                 }
             }
             let mut implements = Vec::new();
             if let Some(imp) = child_by_kind(inner, "implements_interfaces") {
-                collect_gql_implements(imp, src, &mut implements);
+                collect_gql_list(imp, "implements_interfaces", src, &mut implements);
             }
             m.items.push(AiceItem::DbSchema(DbSchemaDecl::GraphQlType {
-                kind, name, implements, directives: Vec::new(), fields, trivia: tr,
+                kind, name, implements, directives, fields, trivia: tr,
             }));
         }
     }
     Ok(m)
 }
 
-fn collect_gql_implements(root: Node<'_>, src: &str, out: &mut Vec<String>) {
-    let mut stack: Vec<Node<'_>> = named_children(root)
-        .into_iter()
-        .rev()
-        .filter(|c| !is_comment_kind(c.kind()))
-        .collect();
+fn collect_gql_directives(node: Node<'_>, src: &str) -> Vec<String> {
+    let Some(dirs) = child_by_kind(node, "directives") else { return Vec::new(); };
+    named_children(dirs).into_iter()
+        .filter(|c| c.kind() == "directive")
+        .map(|c| node_text(c, src).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+fn collect_gql_list(root: Node<'_>, rec_kind: &str, src: &str, out: &mut Vec<String>) {
+    let mut stack: Vec<Node<'_>> = named_children(root).into_iter().rev().filter(|c| !is_comment_kind(c.kind())).collect();
     while let Some(n) = stack.pop() {
-        if n.kind() == "implements_interfaces" {
+        if n.kind() == rec_kind {
             for ch in named_children(n).into_iter().rev() {
                 if !is_comment_kind(ch.kind()) { stack.push(ch); }
             }

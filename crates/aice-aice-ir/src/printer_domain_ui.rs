@@ -148,7 +148,14 @@ fn fmt_style_prop(p: &StyleProp, sep: &str) -> String {
                 format!("{}{sep}{v}", p.name)
             }
         }
-        None => p.name.clone(),
+        None => {
+            let needs_quote = p.name.contains(':')
+                || p.name.contains(';')
+                || p.name.contains('"')
+                || p.name.contains('\n')
+                || has_comment_hazard(&p.name);
+            if needs_quote { format!("\"{}\"", escape_str(&p.name)) } else { p.name.clone() }
+        }
     }
 }
 
@@ -159,6 +166,7 @@ fn can_inline_style(st: &StyleDecl) -> bool {
         && st.trivia.trailing.is_none()
         && st.props.iter().all(|p| {
             p.trivia.is_empty()
+                && (p.value.is_some() || !p.name.starts_with('@'))
                 && p.value.as_deref().is_none_or(|v| {
                     !v.contains(';') && !v.contains('\n') && !v.contains('"') && !v.contains('\'') && !has_comment_hazard(v)
                 })

@@ -30,15 +30,48 @@ pub(crate) fn parse_create_table_text(
         if is_table_constraint_entry(&pup) {
             constraints.push(p);
         } else {
-            let mut toks = p.split_whitespace();
-            let cname = toks.next().unwrap_or("col").to_string();
-            let ctype = toks.next().unwrap_or("TEXT").to_string();
-            let rest: Vec<&str> = toks.collect();
-            let cons = if rest.is_empty() { Vec::new() } else { vec![rest.join(" ")] };
+            let (cname, ctype, cons) = split_sql_col_def(&p);
             columns.push(DbColumn { name: cname, sql_type: ctype, constraints: cons, default: None, trivia: ctr });
         }
     }
     DbSchemaDecl::Table { name, if_not_exists, columns, constraints, options, trivia }
+}
+
+fn scan_sql_col_token(s: &str, start: usize) -> usize {
+    let b = s.as_bytes();
+    let (mut i, mut depth, mut quote, mut in_br) = (start, 0usize, None::<u8>, false);
+    while i < b.len() {
+        let c = b[i];
+        if let Some(q) = quote {
+            if c == b'\\' && i + 1 < b.len() {
+                i += 1 + s[i + 1..].chars().next().map(char::len_utf8).unwrap_or(1);
+            } else if c == q && b.get(i + 1) == Some(&q) { i += 2; }
+            else { if c == q { quote = None; } i += 1; }
+            continue;
+        }
+        if in_br { if c == b']' { in_br = false; } i += 1; continue; }
+        if matches!(c, b'\'' | b'"' | b'`') { quote = Some(c); }
+        else if c == b'[' && depth == 0 && i == start { in_br = true; }
+        else if c == b'(' { depth += 1; }
+        else if c == b')' { depth = depth.saturating_sub(1); }
+        else if c.is_ascii_whitespace() && depth == 0 { break; }
+        i += 1;
+    }
+    i
+}
+
+fn split_sql_col_def(p: &str) -> (String, String, Vec<String>) {
+    let s = p.trim();
+    let name_end = scan_sql_col_token(s, 0);
+    let cname = if name_end == 0 { "col".into() } else { s[..name_end].into() };
+    let after = s[name_end..].trim_start();
+    if after.is_empty() { return (cname, "TEXT".into(), Vec::new()); }
+    let mut ty_end = scan_sql_col_token(after, 0);
+    let ws = after[ty_end..].len() - after[ty_end..].trim_start().len();
+    if after.as_bytes().get(ty_end + ws) == Some(&b'(') { ty_end = scan_sql_col_token(after, ty_end + ws); }
+    let rest = after[ty_end..].trim();
+    let cons = if rest.is_empty() { Vec::new() } else { vec![rest.into()] };
+    (cname, after[..ty_end].into(), cons)
 }
 
 fn is_table_constraint_entry(pup: &str) -> bool {

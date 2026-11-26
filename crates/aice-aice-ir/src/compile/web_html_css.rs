@@ -24,7 +24,20 @@ pub fn compile(module: &AiceModule, target: LanguageId) -> Result<String, Transp
     ec.emit_trivia(&module.module_trivia, CommentStyle::CssBlock);
     for it in &module.items {
         match it {
-            AiceItem::Import(imp) => ec.line(&format!("@import \"{}\";", imp.source)),
+            AiceItem::Import(imp) => {
+                ec.emit_trivia(&imp.trivia, CommentStyle::CssBlock);
+                let s = imp.source.trim();
+                if s.starts_with("url(") || s.starts_with('"') || s.starts_with('\'') {
+                    ec.line(&format!("@import {s};"));
+                } else {
+                    ec.line(&format!("@import \"{s}\";"));
+                }
+            }
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.emit_trivia(trivia, CommentStyle::CssBlock);
+                let t = text.trim();
+                if t.ends_with(';') { ec.line(t); } else { ec.line(&format!("{t};")); }
+            }
             AiceItem::Style(st) => emit_css_rule(&mut ec, st),
             _ => {}
         }
@@ -107,6 +120,10 @@ fn emit_css_rule(ec: &mut EmitCtx, root: &StyleDecl) {
                         "fl-col" if p.value.is_none() => {
                             ec.line("display: flex;");
                             ec.line("flex-direction: column;");
+                        }
+                        other if p.value.is_none() && other.starts_with('@') => {
+                            let t = other.trim();
+                            if t.ends_with(';') { ec.line(t); } else { ec.line(&format!("{t};")); }
                         }
                         other => {
                             let prop = expand_css_prop(other);

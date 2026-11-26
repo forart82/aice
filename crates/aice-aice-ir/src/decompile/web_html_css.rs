@@ -62,18 +62,29 @@ fn decompile_html_elem(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Layou
                     }
                 }
                 let mut child_elems = Vec::new();
-                let mut text = None;
+                let mut text_buf = String::new();
+                let mut prev_end: Option<usize> = None;
                 for ch in named_children(node) {
                     if is_comment_kind(ch.kind()) { continue; }
                     match ch.kind() {
                         "element" | "script_element" | "style_element" => child_elems.push(ch),
-                        "text" | "raw_text" => {
-                            let txt = node_text(ch, src).trim();
-                            if !txt.is_empty() { text = Some(txt.to_string()); }
+                        "text" | "raw_text" | "entity" => {
+                            if let Some(pe) = prev_end && ch.start_byte() > pe {
+                                let gap = &src[pe..ch.start_byte()];
+                                if gap.bytes().all(|b| b.is_ascii_whitespace()) {
+                                    text_buf.push_str(gap);
+                                } else if gap.bytes().any(|b| b.is_ascii_whitespace()) {
+                                    text_buf.push(' ');
+                                }
+                            }
+                            text_buf.push_str(node_text(ch, src));
+                            prev_end = Some(ch.end_byte());
                         }
                         _ => {}
                     }
                 }
+                let trimmed = text_buf.trim();
+                let text = if trimmed.is_empty() { None } else { Some(trimmed.to_string()) };
                 tasks.push(HTask::Finish { tag, attrs, text, len: child_elems.len(), trivia: tr });
                 for ch in child_elems.into_iter().rev() { tasks.push(HTask::Enter(ch)); }
             }
@@ -102,6 +113,12 @@ fn decompile_css(root: Node<'_>, src: &str, opts: &TranspileOpts) -> Result<Aice
             }
             "rule_set" => m.items.push(AiceItem::Style(decompile_css_rule(ch, src, opts, tr))),
             _ if is_css_at_block(ch) => m.items.push(AiceItem::Style(decompile_css_rule(ch, src, opts, tr))),
+            _ if is_css_at_stmt(ch) => {
+                let txt = node_text(ch, src).trim().to_string();
+                if !txt.is_empty() {
+                    m.items.push(AiceItem::Directive { text: txt, trivia: tr, span: node_span(ch) });
+                }
+            }
             _ => {}
         }
     }
@@ -113,6 +130,11 @@ fn is_css_at_block(node: Node<'_>) -> bool {
         node.kind(),
         "media_statement" | "supports_statement" | "scope_statement" | "keyframes_statement" | "at_rule"
     ) && child_by_kind(node, "block").or_else(|| child_by_kind(node, "keyframe_block_list")).is_some()
+}
+
+fn is_css_at_stmt(node: Node<'_>) -> bool {
+    matches!(node.kind(), "charset_statement" | "namespace_statement")
+        || (node.kind() == "at_rule" && !is_css_at_block(node))
 }
 
 fn decompile_css_rule(root: Node<'_>, src: &str, opts: &TranspileOpts, init_tr: Trivia) -> StyleDecl {
@@ -151,6 +173,11 @@ fn decompile_css_rule(root: Node<'_>, src: &str, opts: &TranspileOpts, init_tr: 
                             props.push(StyleProp { name: compress_css_prop(raw_prop).to_string(), value: Some(val), trivia: ptr });
                         } else if matches!(ch.kind(), "rule_set" | "keyframe_block") || is_css_at_block(ch) {
                             child_rules.push((ch, ptr));
+                        } else if is_css_at_stmt(ch) {
+                            let txt = node_text(ch, src).trim().trim_end_matches(';').trim().to_string();
+                            if !txt.is_empty() {
+                                props.push(StyleProp { name: txt, value: None, trivia: ptr });
+                            }
                         }
                     }
                 }

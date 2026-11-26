@@ -80,20 +80,21 @@ fn decompile_xml_elem(root: Node<'_>, src: &str, opts: &TranspileOpts) -> DataNo
                     }
                 }
                 let mut child_elems = Vec::new();
-                let mut text = None;
+                let mut text_buf = String::new();
                 if let Some(content) = child_by_kind(node, "content") {
                     for ch in named_children(content) {
                         if is_comment_kind(ch.kind()) { continue; }
                         match ch.kind() {
                             "element" => child_elems.push(ch),
-                            "CharData" | "CDSect" => {
-                                let txt = node_text(ch, src).trim();
-                                if !txt.is_empty() { text = Some(txt.to_string()); }
+                            "CharData" | "CDSect" | "EntityRef" | "CharRef" => {
+                                text_buf.push_str(node_text(ch, src));
                             }
                             _ => {}
                         }
                     }
                 }
+                let trimmed = text_buf.trim();
+                let text = if trimmed.is_empty() { None } else { Some(trimmed.to_string()) };
                 tasks.push(XTask::Finish { tag, attrs, text, len: child_elems.len(), trivia: tr });
                 for ch in child_elems.into_iter().rev() {
                     tasks.push(XTask::Enter(ch));

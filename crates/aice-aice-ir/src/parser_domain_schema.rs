@@ -30,12 +30,23 @@ pub(crate) fn parse_db_atom(p: &mut Parser<'_>, msg: &str) -> Result<String, Tra
 
 fn split_sql_type_and_constraint(raw: &str) -> (String, Option<String>) {
     let b = raw.as_bytes();
-    let (mut depth, mut i) = (0usize, 0usize);
+    let (mut depth, mut i, mut quote) = (0usize, 0usize, None::<u8>);
     while i < b.len() {
-        match b[i] {
+        let c = b[i];
+        if let Some(q) = quote {
+            if c == b'\\' && i + 1 < b.len() { i += 2; continue; }
+            if c == q {
+                if b.get(i + 1) == Some(&q) { i += 2; continue; }
+                quote = None;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'\'' | b'"' | b'`' => quote = Some(c),
             b'(' => depth += 1,
             b')' => depth = depth.saturating_sub(1),
-            c if c.is_ascii_whitespace() && depth == 0 => {
+            x if x.is_ascii_whitespace() && depth == 0 && !raw[i..].trim_start().starts_with('(') => {
                 let ty = raw[..i].trim().to_string();
                 let rest = raw[i..].trim();
                 return (ty, if rest.is_empty() { None } else { Some(rest.to_string()) });
