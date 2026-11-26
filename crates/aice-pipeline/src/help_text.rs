@@ -18,7 +18,7 @@ pub(crate) fn render_help() -> String {
         "COMMANDS:\n",
         "  read       (context, ctx)          Read files, symbols, intra-blocks, or ranges in AICE IR\n",
         "  search     (grep)                  4-tier ranked search with AICE transformation\n",
-        "  find       (tree)                  Parallel file & symbol discovery\n",
+        "  find       (tree)                  Parallel file discovery\n",
         "  splice     (write)                 Atomic AST/hunk/range write & batch splice\n",
         "  enable                             Enable AICE in aice.config.json\n",
         "  disable                            Disable AICE in aice.config.json\n",

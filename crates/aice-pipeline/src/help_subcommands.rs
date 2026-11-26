@@ -84,7 +84,7 @@ EXAMPLES:
 ";
 
 const FIND_HELP: &str = "\
-aice find - Parallel ignore-aware file and symbol discovery
+aice find - Parallel ignore-aware file discovery
 
 USAGE:
   aice find [OPTIONS] [PATTERN] [TARGETS]...
