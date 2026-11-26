@@ -223,18 +223,21 @@ fn r7_report_schema_and_exact_bpe_verification() {
         let actual_no = count_both(&stdout);
         // Wave 1 (F-01..F-04), Wave 2 (F-17, F-18, F-24) fidelity fixes, Wave 3 (F-33, F-36,
         // F-47, F-50) IR compactness wins (-1925 cl100k / -1905 o200k vs v3 across C-01..C-12),
-        // Wave 5 fidelity fixes (F-56, F-59, Go short_var: +3/+3), & Wave 6 fidelity fixes
+        // Wave 5 fidelity fixes (F-56, F-59, Go short_var: +3/+3), Wave 6 fidelity fixes
         // (F-67 TSX destructured props in C-01 [+19/+21], F-69 Rust trait implements in C-02
         // [+10/+10], F-68 Go struct tags in C-04 [+114/+113], F-65 Kotlin sealed subtypes /
-        // @interface / state field in C-07 [+273/+274], F-72 Twig attr expr in C-08 [+3/+3]).
-        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-6 counts.
+        // @interface / state field in C-07 [+273/+274], F-72 Twig attr expr in C-08 [+3/+3]),
+        // & Wave 7 fidelity fixes (F-74 C# subscript + F-87 Java field initializers in C-05
+        // [+9/+11], F-82 C++ Grid ctor/method prototypes & Body2D& refs in C-06 [+32/+33],
+        // F-77 Dart SubmitPhase enum in C-07 [+20/+20], F-81 PHP concat `<>` in C-08 [+0/+0]).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-7 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
             "C-01" => (2153, 2191),
             "C-02" => (1711, 1684),
             "C-04" => (1603, 1616),
-            "C-05" => (1563, 1584),
-            "C-06" => (1470, 1477),
-            "C-07" => (1490, 1508),
+            "C-05" => (1572, 1595),
+            "C-06" => (1502, 1510),
+            "C-07" => (1510, 1528),
             "C-08" => (1432, 1441),
             "C-09" => (1262, 1264),
             "C-10" => (1415, 1432),
