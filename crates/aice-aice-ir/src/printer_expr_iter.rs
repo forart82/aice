@@ -83,7 +83,8 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
                 return;
             }
             let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator | UnaryOp::Move)
-                && matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
+                && (matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
+                    || (*is_postfix && matches!(operand.as_ref(), Expr::Await(_) | Expr::Unary { is_postfix: false, .. })));
             if *is_postfix {
                 tasks.push(PTask::Lit(unary_op_str(*op)));
                 if wrap { tasks.push(PTask::Lit(")")); }

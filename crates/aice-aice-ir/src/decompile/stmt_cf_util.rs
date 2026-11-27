@@ -161,13 +161,30 @@ pub(crate) fn raw_passthrough_stmt_text(node: Node<'_>, src: &str, lang: Languag
     match (node.kind(), lang) {
         ("global_statement" | "nonlocal_statement", LanguageId::Python)
         | ("do_while_statement", LanguageId::Kotlin) => Some(raw.to_string()),
-        ("function_definition" | "decorated_definition" | "class_definition", LanguageId::Python) => {
+        (
+            "function_definition" | "decorated_definition" | "class_definition"
+            | "with_statement" | "delete_statement" | "assert_statement",
+            LanguageId::Python,
+        ) => Some(dedent_node_text(node, src)),
+        ("for_statement", LanguageId::Python)
+            if (0..node.child_count()).filter_map(|i| node.child(i)).any(|c| !c.is_named() && c.kind() == "async") =>
+        {
             Some(dedent_node_text(node, src))
         }
         ("do_statement", _) => {
             let mut s = raw.to_string();
             if !s.ends_with(';') { s.push(';'); }
             Some(s)
+        }
+        ("loop_expression" | "for_expression" | "while_expression", LanguageId::Rust)
+            if child_by_kind(node, "label").is_some() =>
+        {
+            Some(raw.to_string())
+        }
+        ("break_expression" | "continue_expression", LanguageId::Rust)
+            if named_children(node).iter().any(|c| !is_comment_kind(c.kind())) =>
+        {
+            Some(raw.to_string())
         }
         ("let_declaration", LanguageId::Rust)
             if node.child_by_field_name("alternative").is_some()

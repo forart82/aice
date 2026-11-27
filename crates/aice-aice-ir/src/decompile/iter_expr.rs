@@ -53,6 +53,7 @@ pub(crate) enum ExprFin {
     InlineJsx(bool),
     Tuple(usize),
     Comprehension { kind: CompKind, has_val: bool, clause_specs: Vec<(bool, String, usize)> },
+    TsLiftPostfix(usize),
 }
 
 pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
@@ -111,6 +112,9 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "false" | "boolean_literal" if raw == "false" || raw == "False" => env.exprs.push(Expr::Literal(LiteralVal::Bool(false))),
         "null" | "nil" | "none" | "None" | "null_literal" => env.exprs.push(Expr::Literal(LiteralVal::Nil)),
         k if is_raw_passthrough_expr(k, env.lang) => env.exprs.push(Expr::Raw(raw.to_string())),
+        "block" if env.lang == LanguageId::Rust && child_by_kind(node, "label").is_some() => {
+            env.exprs.push(Expr::Raw(raw.to_string()));
+        }
         "qualified_identifier" if env.lang == LanguageId::Cpp && raw.contains('<') => env.exprs.push(Expr::Raw(raw.to_string())),
         "string" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"
         | "verbatim_string_literal" | "raw_string" | "multiline_string_literal" => {
@@ -156,6 +160,10 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                     || (env.lang == LanguageId::Php && gap.contains("?->"))
                     || is_c_arrow_field(node, gap, env.src, env.lang);
                 let kind = if is_opt { MemberKind::SafeNav } else if gap.contains("::") { MemberKind::Scope } else { MemberKind::Dot };
+                if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Kotlin | LanguageId::Dart) {
+                    let d = crate::decompile::stmt_for::ts_lhs_non_null_depth(kids[0], env.src);
+                    if d > 0 { env.tasks.push(DTask::FinishExpr(ExprFin::TsLiftPostfix(d))); }
+                }
                 env.tasks.push(DTask::FinishExpr(ExprFin::Member { property, kind }));
                 if is_c_paren_unary(kids[0], env.lang) {
                     env.exprs.push(Expr::Raw(node_text(kids[0], env.src).trim().into()));
@@ -164,11 +172,27 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         }
         "generic_function" | "generic_type_with_turbofish" if env.lang == LanguageId::Rust => push_rs_turbofish_task(env, node, raw),
         "subscript_expression" | "index_expression" | "element_access_expression" | "array_access"
-        | "null_aware_index_expression" => push_index_task(env, node, raw),
+        | "null_aware_index_expression" => {
+            if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Kotlin | LanguageId::Dart)
+                && let Some(o) = node.child_by_field_name("object").or_else(|| named_children(node).into_iter().next())
+            {
+                let d = crate::decompile::stmt_for::ts_lhs_non_null_depth(o, env.src);
+                if d > 0 { env.tasks.push(DTask::FinishExpr(ExprFin::TsLiftPostfix(d))); }
+            }
+            push_index_task(env, node, raw);
+        }
         "conditional_access_expression" if child_by_kind(node, "element_binding_expression").is_some() => push_index_task(env, node, raw),
         "call_expression" | "call" | "invocation_expression" | "method_invocation"
         | "function_call_expression" | "member_call_expression" | "object_creation_expression"
-        | "implicit_object_creation_expression" | "new_expression" => push_call_task(env, node, raw),
+        | "implicit_object_creation_expression" | "new_expression" => {
+            if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Kotlin | LanguageId::Dart)
+                && let Some(f) = node.child_by_field_name("function").or_else(|| named_children(node).into_iter().next())
+            {
+                let d = crate::decompile::stmt_for::ts_lhs_non_null_depth(f, env.src);
+                if d > 0 { env.tasks.push(DTask::FinishExpr(ExprFin::TsLiftPostfix(d))); }
+            }
+            push_call_task(env, node, raw);
+        }
         "binary_expression" | "binary_operator" | "boolean_operator" | "comparison_operator"
         | "binary" | "in_expression" | "equality_expression" | "relational_expression"
         | "additive_expression" | "multiplicative_expression" | "logical_and_expression"
@@ -184,6 +208,16 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             } else {
                 env.exprs.push(Expr::Ident(raw.to_string()));
             }
+        }
+        "non_null_expression" | "null_assertion_expression" => {
+            if let Some(arg) = node.child_by_field_name("value").or_else(|| named_children(node).into_iter().next()) {
+                if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Dart) {
+                    let d = crate::decompile::stmt_for::ts_non_null_depth(arg, env.src);
+                    if d > 0 { env.tasks.push(DTask::FinishExpr(ExprFin::TsLiftPostfix(d))); }
+                }
+                env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op: UnaryOp::NonNull, is_postfix: true }));
+                env.tasks.push(DTask::Expr(arg));
+            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }
         "yield_expression" | "yield" if !raw.starts_with("yield from") => push_yield_task(env, node, raw),
         "unary_expression" | "unary_operator" | "not_operator" | "prefix_unary_expression"
@@ -234,8 +268,16 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "type_cast_expression" | "as_expression" => {
             let val = node.child_by_field_name("value").or_else(|| named_children(node).into_iter().next());
             let ty = node.child_by_field_name("type").or_else(|| named_children(node).into_iter().nth(1));
-            if let (Some(v), Some(t)) = (val, ty) {
-                env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: node_text(t, env.src).trim().into(), quote_mode: 0 }));
+            let ty_s = ty.map(|t| node_text(t, env.src).trim().to_string()).or_else(|| {
+                (matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx)
+                    && (0..node.child_count()).filter_map(|i| node.child(i)).next_back().is_some_and(|c| c.kind() == "const"))
+                .then(|| "const".to_string())
+            });
+            if let (Some(v), Some(ty)) = (val, ty_s) {
+                let quote_mode = if matches!(env.lang, LanguageId::Rust | LanguageId::TypeScript | LanguageId::Tsx)
+                    && ty != "const" && !crate::decompile::expr_common::is_simple_cast_ident(&ty)
+                { 1 } else { 0 };
+                env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty, quote_mode }));
                 env.tasks.push(DTask::Expr(v));
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }

@@ -41,6 +41,17 @@ pub(crate) fn step_expr_cont(
                 stack.push(ParseCont::ExprInfix(min_prec));
                 return Ok(());
             }
+            if p.peek_kind() == TokenKind::Bang && min_prec <= 17
+                && p.peek_n(1).kind != TokenKind::In
+                && !(p.peek_n(1).kind == TokenKind::Ident && p.peek_n(1).lexeme == "is")
+            {
+                let end = p.advance().span.end_byte;
+                if p.peek_kind() == TokenKind::Bang && p.peek().span.start_byte == end { p.advance(); }
+                let lhs = pop_expr(vals);
+                vals.push(ParseVal::Expr(Expr::Unary { op: UnaryOp::NonNull, is_postfix: true, operand: Box::new(lhs) }));
+                stack.push(ParseCont::ExprInfix(min_prec));
+                return Ok(());
+            }
             if let Some((op, next_prec)) = try_contextual_infix(p, min_prec) {
                 let lhs = pop_expr(vals);
                 stack.push(ParseCont::ExprInfix(min_prec));
@@ -60,8 +71,7 @@ pub(crate) fn step_expr_cont(
             vals.push(ParseVal::Expr(Expr::Unary { op, is_postfix: false, operand: Box::new(operand) }));
         }
         ParseCont::ExprDblRef { inner_op } => {
-            let operand = pop_expr(vals);
-            let inner = Expr::Unary { op: inner_op, is_postfix: false, operand: Box::new(operand) };
+            let inner = Expr::Unary { op: inner_op, is_postfix: false, operand: Box::new(pop_expr(vals)) };
             vals.push(ParseVal::Expr(Expr::Unary { op: UnaryOp::Ref, is_postfix: false, operand: Box::new(inner) }));
         }
         ParseCont::ExprAwait => { let e = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Await(Box::new(e)))); }
@@ -86,8 +96,7 @@ pub(crate) fn step_expr_cont(
         ParseCont::ExprIndex { object, mut args, is_optional } => {
             args.push(pop_expr(vals));
             if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RBracket && !p.at_eof() {
-                stack.push(ParseCont::ExprIndex { object, args, is_optional });
-                stack.push(ParseCont::Expr(1));
+                stack.push(ParseCont::ExprIndex { object, args, is_optional }); stack.push(ParseCont::Expr(1));
             } else {
                 p.expect(TokenKind::RBracket, "Expected ']'")?;
                 let idx = if args.len() == 1 { args.pop().unwrap() } else {
@@ -99,14 +108,11 @@ pub(crate) fn step_expr_cont(
         ParseCont::ExprTernaryThen { cond, next_prec } => {
             let then_expr = pop_expr(vals);
             p.expect(TokenKind::Colon, "Expected ':' in ternary")?;
-            stack.push(ParseCont::ExprTernaryElse { cond, then_expr });
-            stack.push(ParseCont::Expr(next_prec));
+            stack.push(ParseCont::ExprTernaryElse { cond, then_expr }); stack.push(ParseCont::Expr(next_prec));
         }
         ParseCont::ExprTernaryElse { cond, then_expr } => {
             let else_expr = pop_expr(vals);
-            vals.push(ParseVal::Expr(Expr::Conditional {
-                cond: Box::new(cond), then_expr: Box::new(then_expr), else_expr: Box::new(else_expr),
-            }));
+            vals.push(ParseVal::Expr(Expr::Conditional { cond: Box::new(cond), then_expr: Box::new(then_expr), else_expr: Box::new(else_expr) }));
         }
         ParseCont::ExprAssign { target, op } => {
             let v = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Assign { target: Box::new(target), op, value: Box::new(v) }));
@@ -141,21 +147,18 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
         TokenKind::Amp => {
             p.advance();
             let op = if p.eat(TokenKind::Mut) { UnaryOp::RefMut } else { UnaryOp::Ref };
-            stack.push(ParseCont::ExprUnary { op });
-            stack.push(ParseCont::Expr(16));
+            stack.push(ParseCont::ExprUnary { op }); stack.push(ParseCont::Expr(16));
         }
         TokenKind::AmpAmp => {
             p.advance();
             let inner_op = if p.eat(TokenKind::Mut) { UnaryOp::RefMut } else { UnaryOp::Ref };
-            stack.push(ParseCont::ExprDblRef { inner_op });
-            stack.push(ParseCont::Expr(16));
+            stack.push(ParseCont::ExprDblRef { inner_op }); stack.push(ParseCont::Expr(16));
         }
         TokenKind::Await => { p.advance(); stack.push(ParseCont::ExprAwait); stack.push(ParseCont::Expr(16)); }
         _ if let Some(e) = lit_expr_from_tok(p, &tok) => { p.advance(); vals.push(ParseVal::Expr(e)); }
         TokenKind::TemplateHead => {
             let head = p.advance();
-            stack.push(ParseCont::ExprTemplate { quasis: vec![head.lexeme], exprs: Vec::new() });
-            stack.push(ParseCont::Expr(1));
+            stack.push(ParseCont::ExprTemplate { quasis: vec![head.lexeme], exprs: Vec::new() }); stack.push(ParseCont::Expr(1));
         }
         TokenKind::LParen => step_paren_open(p, stack, vals),
         TokenKind::LBracket => {
@@ -167,8 +170,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
         TokenKind::LBrace => {
             p.advance();
             if p.peek_kind() == TokenKind::RBrace || p.at_eof() {
-                p.expect(TokenKind::RBrace, "Expected '}'")?;
-                vals.push(ParseVal::Expr(Expr::Record(Vec::new())));
+                p.expect(TokenKind::RBrace, "Expected '}'")?; vals.push(ParseVal::Expr(Expr::Record(Vec::new())));
             } else if crate::parser_iter_comp::is_brace_comp_ahead(p) {
                 stack.push(ParseCont::ExprBraceCompKey); stack.push(ParseCont::Expr(1));
             } else { start_record_entry(p, Vec::new(), stack)?; }

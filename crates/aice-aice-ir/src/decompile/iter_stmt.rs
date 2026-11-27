@@ -131,6 +131,10 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             return;
         }
     }
+    if let Some(raw) = raw_passthrough_stmt_text(node, env.src, env.lang) {
+        env.stmts.push(Stmt::Expr { expr: Expr::Raw(raw), trivia: Trivia::default() });
+        return;
+    }
     match node.kind() {
         "jump_expression" => {
             let raw = node_text(node, env.src).trim_start();
@@ -240,9 +244,6 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         | "when_expression" | "expression_switch_statement" | "case" => push_match_task(env, node, false),
         "select_statement" => push_select_task(env, node),
         "type_switch_statement" if env.lang == LanguageId::Go => crate::decompile::go_lang::push_go_type_switch_task(env, node),
-        _ if let Some(raw) = raw_passthrough_stmt_text(node, env.src, env.lang) => {
-            env.stmts.push(Stmt::Expr { expr: Expr::Raw(raw), trivia: Trivia::default() });
-        }
         "lexical_declaration" | "variable_declaration" | "let_declaration"
         | "short_var_declaration" | "local_variable_declaration" | "local_declaration_statement"
         | "initialized_variable_definition" | "property_declaration" | "declaration" => {

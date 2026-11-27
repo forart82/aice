@@ -9,7 +9,7 @@ use crate::compile::iter_expr_fmt::{
     format_closure, format_closure_param, format_js_generator_fn, format_record_entry,
     format_rust_move_closure, format_template, needs_walrus_parens, unary_op_native,
 };
-use crate::ir_code::{BinaryOp, Expr, FnBody, MemberKind, RecordEntry, UnaryOp};
+use crate::ir_code::{BinaryOp, Expr, FnBody, LiteralVal, MemberKind, RecordEntry, UnaryOp};
 
 pub(crate) fn step_expr_task<'a>(
     task: CTask<'a>,
@@ -70,7 +70,7 @@ pub(crate) fn step_expr_task<'a>(
             let raw = st.vals.pop().unwrap();
             if op == UnaryOp::Generator { st.vals.push(format_js_generator_fn(&raw, lang)); return; }
             if op == UnaryOp::Move { st.vals.push(format_rust_move_closure(&raw, lang)); return; }
-            let op_s = unary_op_native(op, lang);
+            let op_s = if op == UnaryOp::NonNull { if lang == LanguageId::Kotlin { "!!" } else { "!" } } else { unary_op_native(op, lang) };
             let inner = if !op_s.is_empty() && wrap { format!("({raw})") } else { raw };
             st.vals.push(if is_postfix { format!("{inner}{op_s}") } else { format!("{op_s}{inner}") });
         }
@@ -222,23 +222,29 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             let lp = crate::printer_expr::needs_binary_parens(left, *op, false) || needs_walrus_parens(left);
             let rp = crate::printer_expr::needs_binary_parens(right, *op, true) || needs_walrus_parens(right);
             tasks.push(CTask::MakeBinary { op: *op, is_str: is_str_like(left) || is_str_like(right) });
-            if rp { tasks.push(CTask::WrapParen); }
-            tasks.push(CTask::EvalExpr(right));
+            if *op == BinaryOp::As
+                && matches!(lang, LanguageId::Rust | LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Kotlin | LanguageId::Dart)
+                && let Expr::Literal(LiteralVal::Str { value, .. }) = right.as_ref()
+            {
+                tasks.push(CTask::EvalLiteralStr(value));
+            } else {
+                if rp { tasks.push(CTask::WrapParen); }
+                tasks.push(CTask::EvalExpr(right));
+            }
             if lp { tasks.push(CTask::WrapParen); }
             tasks.push(CTask::EvalExpr(left));
         }
         Expr::Unary { op, is_postfix, operand } => {
             let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator | UnaryOp::Move)
                 && (matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
+                    || (*is_postfix && matches!(operand.as_ref(), Expr::Await(_) | Expr::Unary { is_postfix: false, .. }))
                     || needs_walrus_parens(operand));
             tasks.push(CTask::MakeUnary { op: *op, is_postfix: *is_postfix, wrap });
             tasks.push(CTask::EvalExpr(operand));
         }
         Expr::Conditional { cond, then_expr, else_expr } => {
-            tasks.push(CTask::MakeCond);
-            tasks.push(CTask::EvalExpr(else_expr));
-            tasks.push(CTask::EvalExpr(then_expr));
-            tasks.push(CTask::EvalExpr(cond));
+            tasks.push(CTask::MakeCond); tasks.push(CTask::EvalExpr(else_expr));
+            tasks.push(CTask::EvalExpr(then_expr)); tasks.push(CTask::EvalExpr(cond));
         }
         Expr::PostfixTry(inner) => { tasks.push(CTask::MakePostfixTry); tasks.push(CTask::EvalExpr(inner)); }
         Expr::Call { callee, args, is_optional, is_tagged, is_new } => push_eval_call(callee, args, (*is_optional, *is_tagged, *is_new), lang, ectx, tasks),
@@ -247,48 +253,38 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             if matches!(object.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
                 || (lang == LanguageId::Php && matches!(object.as_ref(), Expr::Raw(s) if s.starts_with("new ")))
                 || (lang == LanguageId::Rust && matches!(object.as_ref(), Expr::Raw(s) if crate::compile::expr_emit::is_rust_range_raw(s)))
+                || (matches!(lang, LanguageId::TypeScript | LanguageId::Tsx) && matches!(object.as_ref(), Expr::Raw(s) if s.contains(" satisfies ")))
             {
                 tasks.push(CTask::WrapParen);
             }
             tasks.push(CTask::EvalExpr(object));
         }
         Expr::Index { object, index, is_optional } => push_eval_index(object, index, *is_optional, tasks),
-        Expr::Array(items) => {
-            tasks.push(CTask::MakeArray(items.len()));
-            for it in items.iter().rev() { tasks.push(CTask::EvalExpr(it)); }
-        }
+        Expr::Array(items) => { tasks.push(CTask::MakeArray(items.len())); for it in items.iter().rev() { tasks.push(CTask::EvalExpr(it)); } }
         Expr::Record(entries) => {
             if entries.is_empty() { st.vals.push(if lang == LanguageId::Php { "[]" } else { "{}" }.to_string()); return; }
             tasks.push(CTask::MakeRecord { entries, n_vals: entries.len() });
             for en in entries.iter().rev() {
-                let ex = match en { RecordEntry::Spread(x) | RecordEntry::Field { value: x, .. } => x };
-                tasks.push(CTask::EvalExpr(ex));
+                tasks.push(CTask::EvalExpr(match en { RecordEntry::Spread(x) | RecordEntry::Field { value: x, .. } => x }));
             }
         }
         Expr::Closure { is_async, params, ret, body } => {
-            let bk = body_kind_of(body);
-            tasks.push(CTask::MakeClosure { is_async: *is_async, params, ret: ret.as_ref(), body_kind: bk });
+            tasks.push(CTask::MakeClosure { is_async: *is_async, params, ret: ret.as_ref(), body_kind: body_kind_of(body) });
             match body.as_ref() {
                 FnBody::Expr(ex) => tasks.push(CTask::EvalExpr(ex)),
                 FnBody::Block(stmts) if lang == LanguageId::Python => tasks.push(CTask::EvalPyStmtsExpr(stmts)),
                 FnBody::Block(stmts) if lang == LanguageId::Ruby => {
-                    tasks.push(CTask::PopSubCtxToVal);
-                    tasks.push(CTask::RbStmts(stmts));
-                    tasks.push(CTask::PushSubCtx { tab: "  ", indent: 0 });
+                    tasks.push(CTask::PopSubCtxToVal); tasks.push(CTask::RbStmts(stmts)); tasks.push(CTask::PushSubCtx { tab: "  ", indent: 0 });
                 }
                 FnBody::Block(stmts) => {
-                    tasks.push(CTask::PopSubCtxToVal);
-                    tasks.push(CTask::BraceStmts { stmts, tail: lang == LanguageId::Rust });
-                    tasks.push(CTask::PushSubCtx { tab: "  ", indent: 0 });
+                    tasks.push(CTask::PopSubCtxToVal); tasks.push(CTask::BraceStmts { stmts, tail: lang == LanguageId::Rust }); tasks.push(CTask::PushSubCtx { tab: "  ", indent: 0 });
                 }
                 FnBody::SignatureOnly => {}
             }
             for p in params.iter().rev() { if let Some(d) = &p.default { tasks.push(CTask::EvalExpr(d)); } }
         }
         Expr::Assign { target, op, value } => {
-            tasks.push(CTask::MakeAssign(*op));
-            tasks.push(CTask::EvalExpr(value));
-            tasks.push(CTask::EvalExpr(target));
+            tasks.push(CTask::MakeAssign(*op)); tasks.push(CTask::EvalExpr(value)); tasks.push(CTask::EvalExpr(target));
         }
         Expr::Await(inner) => { tasks.push(CTask::MakeAwait); tasks.push(CTask::EvalExpr(inner)); }
         Expr::Match { target, cases } => { tasks.push(CTask::PrepMatchExpr { target, cases }); tasks.push(CTask::EvalExpr(target)); }

@@ -193,6 +193,7 @@ pub enum UnaryOp {
     YieldStar,
     Generator,
     Move,
+    NonNull,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

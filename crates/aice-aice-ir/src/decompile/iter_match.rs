@@ -46,13 +46,21 @@ pub(crate) fn push_match_arms<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, is_ex
     let arm_nodes: Vec<Node<'a>> = named_children(container).into_iter().filter(|ch| matches!(
         ch.kind(),
         "match_arm" | "when_entry" | "switch_case" | "switch_default" | "case_clause"
-            | "expression_case" | "default_case" | "case_statement"
+            | "expression_case" | "default_case" | "case_statement" | "default_statement"
             | "switch_section" | "switch_block_statement_group"
             | "match_conditional_expression" | "match_default_expression"
     ) || (node.kind() == "case" && matches!(ch.kind(), "when" | "else"))).collect();
 
     if node.kind() == "switch_statement" && matches!(env.lang, LanguageId::C | LanguageId::Cpp) {
         push_c_switch_arms(env, &arm_nodes, is_expr, hdr_tr);
+        return;
+    }
+    if (node.kind() == "switch_statement" && env.lang == LanguageId::Php)
+        || (matches!(node.kind(), "switch_statement" | "switch_expression")
+            && matches!(env.lang, LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Java | LanguageId::CSharp)
+            && crate::decompile::expr_lit_esc::has_empty_switch_fallthrough(&arm_nodes, env.src))
+    {
+        crate::decompile::expr_lit_esc::push_grouped_switch_arms(env, &arm_nodes, is_expr, hdr_tr);
         return;
     }
     env.tasks.push(DTask::FinishStmt(StmtFin::Match { is_expr, case_len: arm_nodes.len(), hdr_tr }));
@@ -101,14 +109,8 @@ fn push_rust_arm<'a>(env: &mut DecompEnv<'a>, arm: Node<'a>) {
         pat, has_guard: guard_n.is_some(), trivia: collect_trivia(arm, env.src, env.opts),
     }));
     match val_n {
-        Some(v) if v.kind() == "block" => {
-            env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: false });
-            env.tasks.push(DTask::Block(v));
-        }
-        Some(v) => {
-            env.tasks.push(DTask::FinishFnBodyFromExpr);
-            env.tasks.push(DTask::Expr(v));
-        }
+        Some(v) if v.kind() == "block" => { env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: false }); env.tasks.push(DTask::Block(v)); }
+        Some(v) => { env.tasks.push(DTask::FinishFnBodyFromExpr); env.tasks.push(DTask::Expr(v)); }
         None => env.bodies.push(FnBody::SignatureOnly),
     }
     if let Some(g) = guard_n { env.tasks.push(DTask::Expr(g)); }
@@ -117,21 +119,16 @@ fn push_rust_arm<'a>(env: &mut DecompEnv<'a>, arm: Node<'a>) {
 fn push_ruby_when<'a>(env: &mut DecompEnv<'a>, ch: Node<'a>, is_subjectless: bool) {
     let mut cur = ch.walk();
     let mut pat_nodes: Vec<Node<'a>> = ch.children_by_field_name("pattern", &mut cur).collect();
-    if pat_nodes.is_empty() {
-        for c in named_children(ch) { if c.kind() == "pattern" { pat_nodes.push(c); } }
-    }
+    if pat_nodes.is_empty() { for c in named_children(ch) { if c.kind() == "pattern" { pat_nodes.push(c); } } }
     let unwrapped: Vec<Node<'a>> = pat_nodes.into_iter()
         .map(|p| if p.kind() == "pattern" { named_children(p).into_iter().next().unwrap_or(p) } else { p }).collect();
     let bn = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "then"));
     if is_subjectless && !unwrapped.is_empty() {
-        let len = unwrapped.len();
         env.tasks.push(DTask::FinishStmt(StmtFin::KotlinArm {
-            is_subjectless: true, cond_pats: vec![Err(len)], trivia: collect_trivia(ch, env.src, env.opts),
+            is_subjectless: true, cond_pats: vec![Err(unwrapped.len())], trivia: collect_trivia(ch, env.src, env.opts),
         }));
-        if let Some(b) = bn {
-            env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: true });
-            env.tasks.push(DTask::Block(b));
-        } else { env.bodies.push(FnBody::SignatureOnly); }
+        if let Some(b) = bn { env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: true }); env.tasks.push(DTask::Block(b)); }
+        else { env.bodies.push(FnBody::SignatureOnly); }
         for pn in unwrapped.into_iter().rev() { env.tasks.push(DTask::Expr(pn)); }
         return;
     }

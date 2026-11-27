@@ -23,7 +23,7 @@ pub(crate) enum CTask<'a> {
     PushSubCtx { tab: &'static str, indent: usize },
     PopSubCtxToVal,
     WrapParen,
-    EvalLiteralStr(&'static str),
+    EvalLiteralStr(&'a str),
 
     EvalExpr(&'a Expr),
     MakeBinary { op: BinaryOp, is_str: bool },
@@ -192,9 +192,24 @@ fn run_tasks<'a>(lang: LanguageId, ectx: &ExprEmitCtx, st: &mut EvalState, tasks
             | CTask::BraceThrow | CTask::BraceMatchStmt { .. } | CTask::BraceRustArmHdr(_)
             | CTask::BraceRustArmExpr(_) | CTask::BraceKtArmHdr(_) | CTask::BraceKtArmExpr(_)
             | CTask::BraceCaseHdr(_) | CTask::BraceMatchIfArm { .. } => step_stmt_task(task, lang, st, tasks),
+            CTask::PyExprStmt => {
+                let v = st.vals.pop().unwrap();
+                let ec = st.ctxs.last_mut().expect("active EmitCtx");
+                if v.contains('\n')
+                    && (v.starts_with("def ") || v.starts_with("async def ") || v.starts_with("class ")
+                        || v.starts_with('@') || v.starts_with("with ") || v.starts_with("async with ")
+                        || v.starts_with("async for ") || v.starts_with("assert ") || v.starts_with("del "))
+                {
+                    for line in v.lines() {
+                        if line.trim().is_empty() { ec.out.push('\n'); } else { ec.line(line); }
+                    }
+                } else {
+                    ec.line(&v);
+                }
+            }
             CTask::PyStmts(_) | CTask::PyStmtsOrPass(_) | CTask::PyStmt(_) | CTask::PyPush
             | CTask::PyPop | CTask::PyTrivia(_) | CTask::PyLine(_) | CTask::PyOwnedLine(_)
-            | CTask::PyLet { .. } | CTask::PyAssign(_) | CTask::PyReturn(_) | CTask::PyExprStmt
+            | CTask::PyLet { .. } | CTask::PyAssign(_) | CTask::PyReturn(_)
             | CTask::PyIfHdr | CTask::PyElifHdr | CTask::PyWhileHdr | CTask::PyForHdr(_)
             | CTask::PyThrow | CTask::PyMatchStmt { .. } | CTask::PyMatchIfArm { .. }
             | CTask::PyMatchCaseHdr(_) => step_py_task(task, st, tasks),

@@ -142,9 +142,10 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
             || (lang != LanguageId::Go && is_wrapped_cond_clause(&subj));
         ec.line(&if bare { format!("switch {subj} {{") } else { format!("switch ({subj}) {{") });
         ec.push(); tasks.push(CTask::BraceLine("}")); tasks.push(CTask::BracePop);
-        for mc in cases.iter().rev() {
+        for (idx, mc) in cases.iter().enumerate().rev() {
             tasks.push(CTask::BracePop);
-            if lang != LanguageId::Go && !arm_ends_with_terminator(&mc.body) {
+            let empty_ft = idx + 1 < cases.len() && arm_is_empty(&mc.body);
+            if lang != LanguageId::Go && !empty_ft && !arm_ends_with_terminator(&mc.body) {
                 tasks.push(CTask::BraceOwnedLine(format!("break{semi}")));
             }
             match &mc.body {
@@ -172,6 +173,14 @@ fn go_type_switch_hdr(target: &Expr) -> Option<&str> {
         Some(value.as_str())
     } else {
         None
+    }
+}
+
+fn arm_is_empty(body: &FnBody) -> bool {
+    match body {
+        FnBody::SignatureOnly => true,
+        FnBody::Block(stmts) => stmts.iter().all(|s| matches!(s, Stmt::Pass | Stmt::Comment(_))),
+        FnBody::Expr(_) => false,
     }
 }
 

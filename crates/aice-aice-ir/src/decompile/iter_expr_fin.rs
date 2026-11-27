@@ -122,17 +122,22 @@ pub(crate) fn push_unary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
         let pre = env.src.get(node.start_byte()..arg.start_byte()).unwrap_or("").trim();
         if !pre.is_empty() { pre } else { env.src.get(arg.end_byte()..node.end_byte()).unwrap_or("").trim() }
     });
-    let Some(op) = map_unary_op(op_str, node.kind(), env.lang) else {
-        if env.lang == LanguageId::Go && op_str == "<-" {
-            env.exprs.push(Expr::Raw(raw.to_string()));
-        } else {
-            env.exprs.push(Expr::Ident(raw.to_string()));
+    let is_after = op_node.is_some_and(|o| o.start_byte() >= arg.end_byte())
+        || (op_node.is_none() && env.src.get(arg.end_byte()..node.end_byte()).unwrap_or("").trim() == op_str);
+    if is_after && (op_str == "!!" || (op_str == "!" && matches!(node.kind(), "postfix_unary_expression" | "postfix_expression"))) {
+        if op_str == "!!" {
+            let d = crate::decompile::stmt_for::ts_non_null_depth(arg, env.src);
+            if d > 0 { env.tasks.push(DTask::FinishExpr(ExprFin::TsLiftPostfix(d))); }
         }
+        env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op: UnaryOp::NonNull, is_postfix: true }));
+        env.tasks.push(DTask::Expr(arg));
+        return;
+    }
+    let Some(op) = map_unary_op(op_str, node.kind(), env.lang) else {
+        env.exprs.push(if env.lang == LanguageId::Go && op_str == "<-" { Expr::Raw(raw.to_string()) } else { Expr::Ident(raw.to_string()) });
         return;
     };
-    let is_postfix = matches!(op, UnaryOp::Inc | UnaryOp::Dec)
-        && (op_node.is_some_and(|o| o.start_byte() >= arg.end_byte())
-            || (op_node.is_none() && env.src.get(arg.end_byte()..node.end_byte()).unwrap_or("").trim() == op_str));
+    let is_postfix = matches!(op, UnaryOp::Inc | UnaryOp::Dec) && is_after;
     env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op, is_postfix }));
     env.tasks.push(DTask::Expr(arg));
 }
@@ -140,24 +145,16 @@ pub(crate) fn push_unary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
 pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
     let e = match f {
         ExprFin::Conditional => {
-            let else_expr = Box::new(env.exprs.pop().expect("c else"));
-            let then_expr = Box::new(env.exprs.pop().expect("c then"));
-            let cond = Box::new(env.exprs.pop().expect("c cond"));
-            Expr::Conditional { cond, then_expr, else_expr }
+            let (e, t, c) = (env.exprs.pop().expect("c else"), env.exprs.pop().expect("c then"), env.exprs.pop().expect("c cond"));
+            Expr::Conditional { cond: Box::new(c), then_expr: Box::new(t), else_expr: Box::new(e) }
         }
         ExprFin::Member { property, kind } => Expr::Member { object: Box::new(env.exprs.pop().expect("mem")), property, kind },
         ExprFin::Index { is_optional, argc } => {
-            let index = if argc == 1 {
-                Box::new(env.exprs.pop().expect("idx"))
-            } else {
+            let index = if argc == 1 { Box::new(env.exprs.pop().expect("idx")) } else {
                 let args = env.exprs.split_off(env.exprs.len() - argc);
-                Box::new(Expr::Call {
-                    callee: Box::new(Expr::Ident("\0idx".into())), args,
-                    is_optional: false, is_tagged: false, is_new: false,
-                })
+                Box::new(Expr::Call { callee: Box::new(Expr::Ident("\0idx".into())), args, is_optional: false, is_tagged: false, is_new: false })
             };
-            let object = Box::new(env.exprs.pop().expect("obj"));
-            Expr::Index { object, index, is_optional }
+            Expr::Index { object: Box::new(env.exprs.pop().expect("obj")), index, is_optional }
         }
         ExprFin::EmptyIndex(sep) => {
             let object = Box::new(env.exprs.pop().expect("eidx obj"));
@@ -284,6 +281,7 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
         ExprFin::Comprehension { kind, has_val, clause_specs } => {
             crate::decompile::iter_expr_comp::finish_comp_expr(env, kind, has_val, clause_specs)
         }
+        ExprFin::TsLiftPostfix(d) => crate::decompile::stmt_for::lift_ts_postfix(env.exprs.pop().expect("tslift"), d),
     };
     env.exprs.push(e);
 }

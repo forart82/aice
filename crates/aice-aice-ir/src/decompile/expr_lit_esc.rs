@@ -1,8 +1,12 @@
 use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{named_children, node_text};
-use crate::ir_code::{Expr, LiteralVal};
+use crate::decompile::cst_util::{field_text, named_children, node_text};
+use crate::decompile::iter_env::{DTask, DecompEnv};
+use crate::decompile::iter_stmt::{StmtFin, push_stmt_nodes};
+use crate::decompile::match_cf::parse_simple_pattern;
+use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::ir_code::{Expr, FnBody, LiteralVal, Pattern};
 
 pub(crate) fn is_raw_passthrough_expr(kind: &str, lang: LanguageId) -> bool {
     matches!(
@@ -22,7 +26,8 @@ pub(crate) fn is_raw_passthrough_expr(kind: &str, lang: LanguageId) -> bool {
             | ("text_block", LanguageId::Java)
             | ("switch_expression", LanguageId::Java | LanguageId::CSharp)
             | ("send_statement" | "channel_type" | "composite_literal" | "func_literal", LanguageId::Go)
-            | ("range_expression" | "async_block" | "unsafe_block", LanguageId::Rust)
+            | ("range_expression" | "async_block" | "unsafe_block" | "loop_expression", LanguageId::Rust)
+            | ("satisfies_expression", LanguageId::TypeScript | LanguageId::Tsx)
             | ("compound_literal_expression" | "initializer_list", LanguageId::C | LanguageId::Cpp)
             | ("template_function" | "lambda_expression", LanguageId::Cpp)
     )
@@ -192,4 +197,92 @@ fn decompile_php_str(t: &str, inner: String, multiline: bool) -> Expr {
         return Expr::Literal(LiteralVal::Str { value: inner, multiline });
     }
     Expr::Raw(t.to_string())
+}
+
+fn extract_switch_arm<'a>(ch: Node<'a>, src: &'a str) -> (Vec<Pattern>, bool, Vec<Node<'a>>) {
+    match ch.kind() {
+        "switch_default" | "default_statement" => {
+            let stmts = if ch.kind() == "switch_default" {
+                let mut cur = ch.walk();
+                ch.children_by_field_name("body", &mut cur).filter(|c| !is_comment_kind(c.kind())).collect()
+            } else {
+                named_children(ch).into_iter().filter(|c| !is_comment_kind(c.kind())).collect()
+            };
+            (Vec::new(), true, stmts)
+        }
+        "switch_case" => {
+            let pats = field_text(ch, "value", src).map(|s| vec![parse_simple_pattern(s.trim())]).unwrap_or_default();
+            let mut cur = ch.walk();
+            (pats, false, ch.children_by_field_name("body", &mut cur).filter(|c| !is_comment_kind(c.kind())).collect())
+        }
+        "case_statement" => {
+            let val_n = ch.child_by_field_name("value");
+            let pats = val_n.map(|v| vec![parse_simple_pattern(node_text(v, src).trim())]).unwrap_or_default();
+            (pats, false, named_children(ch).into_iter().filter(|c| Some(*c) != val_n && !is_comment_kind(c.kind())).collect())
+        }
+        "switch_section" => {
+            let last_col = (0..ch.child_count()).filter_map(|i| ch.child(i))
+                .filter(|c| !c.is_named() && c.kind() == ":").map(|c| c.end_byte()).max().unwrap_or(ch.start_byte());
+            let (mut pats, mut is_def, mut stmts) = (Vec::new(), false, Vec::new());
+            for c in (0..ch.child_count()).filter_map(|i| ch.child(i)) {
+                if c.end_byte() <= last_col {
+                    if !c.is_named() && c.kind() == "default" { is_def = true; }
+                    else if c.is_named() && !is_comment_kind(c.kind()) && c.kind() != "when_clause" {
+                        pats.push(parse_simple_pattern(node_text(c, src).trim()));
+                    }
+                } else if c.is_named() && !is_comment_kind(c.kind()) { stmts.push(c); }
+            }
+            (pats, is_def, stmts)
+        }
+        "switch_block_statement_group" => {
+            let (mut pats, mut is_def, mut stmts) = (Vec::new(), false, Vec::new());
+            for c in named_children(ch).into_iter().filter(|c| !is_comment_kind(c.kind())) {
+                if c.kind() == "switch_label" {
+                    if node_text(c, src).trim_start().starts_with("default") { is_def = true; }
+                    else { pats.extend(named_children(c).into_iter().filter(|e| !is_comment_kind(e.kind())).map(|e| parse_simple_pattern(node_text(e, src).trim()))); }
+                } else { stmts.push(c); }
+            }
+            (pats, is_def, stmts)
+        }
+        _ => (Vec::new(), false, Vec::new()),
+    }
+}
+
+pub(crate) fn has_empty_switch_fallthrough(arm_nodes: &[Node<'_>], src: &str) -> bool {
+    arm_nodes.iter().take(arm_nodes.len().saturating_sub(1)).any(|&ch| {
+        let (pats, is_def, stmts) = extract_switch_arm(ch, src);
+        stmts.is_empty() && !is_def && !pats.is_empty()
+    })
+}
+
+pub(crate) fn push_grouped_switch_arms<'a>(env: &mut DecompEnv<'a>, arm_nodes: &[Node<'a>], is_expr: bool, hdr_tr: Option<String>) {
+    let mut groups: Vec<(Vec<Pattern>, bool, Vec<Node<'a>>, Node<'a>)> = Vec::new();
+    let (mut pending_pats, mut pending_first): (Vec<Pattern>, Option<Node<'a>>) = (Vec::new(), None);
+    for &ch in arm_nodes {
+        let (mut pats, is_def, stmts) = extract_switch_arm(ch, env.src);
+        if stmts.is_empty() && !is_def && !pats.is_empty() {
+            if pending_first.is_none() { pending_first = Some(ch); }
+            pending_pats.append(&mut pats);
+            continue;
+        }
+        let first = pending_first.take().unwrap_or(ch);
+        if !pending_pats.is_empty() { let mut m = std::mem::take(&mut pending_pats); m.append(&mut pats); pats = m; }
+        groups.push((pats, is_def, stmts, first));
+    }
+    if !pending_pats.is_empty() && let Some(first) = pending_first { groups.push((pending_pats, false, Vec::new(), first)); }
+    env.tasks.push(DTask::FinishStmt(StmtFin::Match { is_expr, case_len: groups.len(), hdr_tr }));
+    for (mut pats, is_def, body_nodes, first) in groups.into_iter().rev() {
+        let pat = if is_def || pats.is_empty() { Pattern::Wildcard } else if pats.len() == 1 { pats.remove(0) } else { Pattern::Or(pats) };
+        env.tasks.push(DTask::FinishStmt(StmtFin::MatchArm { pat, has_guard: false, trivia: collect_trivia(first, env.src, env.opts) }));
+        if body_nodes.is_empty() { env.bodies.push(FnBody::Block(Vec::new())); }
+        else if body_nodes.len() == 1 && matches!(body_nodes[0].kind(), "statement_block" | "block" | "compound_statement") {
+            env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: false });
+            env.tasks.push(DTask::Block(body_nodes[0]));
+        } else {
+            env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: false });
+            let base = env.stmts.len();
+            env.tasks.push(DTask::FinishBlock(base));
+            push_stmt_nodes(env, body_nodes);
+        }
+    }
 }
