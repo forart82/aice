@@ -230,8 +230,8 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             Expr::Record(build_record_entries(slots, vals))
         }
         ExprFin::Array(n) => Expr::Array(env.exprs.split_off(env.exprs.len() - n)),
-        ExprFin::TypeCast { ty, quote_complex } => {
-            let rhs = if !quote_complex || crate::decompile::expr_common::is_simple_cast_ident(&ty) {
+        ExprFin::TypeCast { ty, quote_mode } => {
+            let rhs = if quote_mode == 0 || (quote_mode == 1 && crate::decompile::expr_common::is_simple_cast_ident(&ty)) {
                 Expr::Ident(ty)
             } else {
                 Expr::Literal(LiteralVal::Str { value: ty, multiline: false })

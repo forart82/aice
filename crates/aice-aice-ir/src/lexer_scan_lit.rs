@@ -53,9 +53,9 @@ impl<'a> Scanner<'a> {
             kind,
             TokenKind::Ident | TokenKind::Number | TokenKind::String | TokenKind::TripleString
                 | TokenKind::Boolean | TokenKind::Nil | TokenKind::HexColor | TokenKind::Regex
-                | TokenKind::TemplateTail | TokenKind::TemplateNoSubst | TokenKind::RParen
-                | TokenKind::RBracket | TokenKind::RBrace | TokenKind::PlusPlus
-                | TokenKind::MinusMinus | TokenKind::Question
+                | TokenKind::TemplateTail | TokenKind::TemplateNoSubst | TokenKind::MacroBody
+                | TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
+                | TokenKind::PlusPlus | TokenKind::MinusMinus | TokenKind::Question
         );
         if matches!(kind, TokenKind::Module | TokenKind::From | TokenKind::Import) {
             self.on_import_line = true;

@@ -260,6 +260,9 @@ fn scan_punct(s: &mut Scanner<'_>, start: usize) -> Result<(), TranspileError> {
         }
     }
     let c = s.b[s.i];
+    if c == b'!' && crate::lexer_macro::try_scan_macro_body(s, start)? {
+        return Ok(());
+    }
     if c == b'{' && let Some(depth) = s.template_stack.last_mut() {
         *depth += 1;
     } else if c == b'}' && let Some(depth) = s.template_stack.last_mut() && *depth > 0 {

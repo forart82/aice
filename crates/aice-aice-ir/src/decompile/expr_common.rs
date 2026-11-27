@@ -133,14 +133,17 @@ pub(crate) fn is_simple_cast_ident(s: &str) -> bool {
 pub(crate) fn push_c_cast_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
     let kids = named_children(node);
     let ty = node.child_by_field_name("type").or_else(|| kids.first().copied());
-    let val = node.child_by_field_name("value").or_else(|| kids.get(1).copied());
+    let val = node.child_by_field_name("value").or_else(|| kids.last().copied().filter(|v| Some(*v) != ty));
     if let (Some(t), Some(v)) = (ty, val) {
-        let ty_s = node_text(t, env.src).split_whitespace().collect::<Vec<_>>().join(" ");
-        env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: ty_s, quote_complex: true }));
+        let raw_t = if env.lang == LanguageId::Java && kids.len() > 2 {
+            env.src.get(t.start_byte()..v.start_byte()).unwrap_or(node_text(t, env.src)).trim().trim_end_matches(')').trim()
+        } else { node_text(t, env.src).trim() };
+        let clean_t = if t.kind() == "cast_type" { raw_t.trim_start_matches('(').trim_end_matches(')').trim() } else { raw_t };
+        let ty_s = clean_t.split_whitespace().collect::<Vec<_>>().join(" ");
+        let quote_mode = if matches!(env.lang, LanguageId::CSharp | LanguageId::Php) { 2 } else { 1 };
+        env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: ty_s, quote_mode }));
         env.tasks.push(DTask::Expr(v));
-    } else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
-    }
+    } else { env.exprs.push(Expr::Ident(raw.to_string())); }
 }
 
 pub(crate) fn push_new_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {

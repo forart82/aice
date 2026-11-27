@@ -130,7 +130,7 @@ pub(crate) fn is_ret_stmt_ahead(p: &Parser<'_>) -> bool {
         || matches!(
             next.kind,
             TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon
-                | TokenKind::ColonEqual | TokenKind::ColonColonEqual
+                | TokenKind::ColonEqual | TokenKind::ColonColonEqual | TokenKind::MacroBody
         )
     {
         return false;
@@ -228,4 +228,47 @@ pub(crate) fn eat_assign_op(p: &mut Parser<'_>) -> Option<AssignOp> {
     let op = crate::parser_expr::assign_op_from_tok(p.peek_kind())?;
     p.advance();
     Some(op)
+}
+
+pub(crate) fn try_parse_let_cond(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>) -> bool {
+    let (mut idx, mut depth, mut eq_idx) = (p.pos + 1, 0usize, None);
+    while idx < p.tokens.len() {
+        match p.tokens[idx].kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                if depth == 0 { break; }
+                depth -= 1;
+            }
+            TokenKind::Equal if depth == 0 && idx > p.pos + 1 => { eq_idx = Some(idx); break; }
+            TokenKind::Colon | TokenKind::Newline | TokenKind::Semicolon | TokenKind::Comma | TokenKind::Eof if depth == 0 => break,
+            _ => {}
+        }
+        idx += 1;
+    }
+    let Some(ei) = eq_idx else { return false; };
+    let pat_start = p.tokens[p.pos + 1].span.start_byte;
+    let pat_end = p.tokens[ei - 1].span.end_byte;
+    let pat = p.src.get(pat_start..pat_end).unwrap_or("").trim();
+    p.pos = ei + 1;
+    stack.push(ParseCont::ExprAssign {
+        target: crate::ir_code::Expr::Ident(format!("let {pat}")),
+        op: AssignOp::Assign,
+    });
+    stack.push(ParseCont::Expr(2));
+    true
+}
+
+pub(crate) fn is_match_brace_body(p: &Parser<'_>, brace_idx: usize) -> bool {
+    let (mut i, mut depth) = (brace_idx + 1, 0usize);
+    while i < p.tokens.len() {
+        match p.tokens[i].kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => { if depth == 0 { return false; } depth -= 1; }
+            TokenKind::FatArrow if depth == 0 => return true,
+            TokenKind::Eof => return false,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
 }

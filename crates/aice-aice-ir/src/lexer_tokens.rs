@@ -6,7 +6,7 @@ pub enum TokenKind {
     Newline, Indent, Dedent, Eof, Comment, RawLine,
     // Identifiers & Literals
     Ident, Number, String, TripleString, Boolean, Nil, HexColor, Regex,
-    TemplateHead, TemplateMiddle, TemplateTail, TemplateNoSubst,
+    TemplateHead, TemplateMiddle, TemplateTail, TemplateNoSubst, MacroBody,
     // Keywords
     Module, From, Import, As, Type, Enum, Struct, Interface, Trait, Class,
     Extends, Implements, Fn, Async, Await, Const, Let, Mut, Val,

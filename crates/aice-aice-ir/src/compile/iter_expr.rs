@@ -24,7 +24,9 @@ pub(crate) fn step_expr_task<'a>(
             let r = st.vals.pop().unwrap();
             let l = st.vals.pop().unwrap();
             if op == BinaryOp::As {
-                if matches!(lang, LanguageId::C | LanguageId::Cpp) {
+                if matches!(lang, LanguageId::C | LanguageId::Cpp | LanguageId::Java | LanguageId::Php)
+                    || (lang == LanguageId::CSharp && r.starts_with('"') && r.ends_with('"'))
+                {
                     let ty_s = r.strip_prefix('"').and_then(|s| s.strip_suffix('"')).unwrap_or(&r);
                     st.vals.push(format!("({ty_s}){l}"));
                     return;

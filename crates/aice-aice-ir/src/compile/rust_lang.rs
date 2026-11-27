@@ -37,7 +37,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                if text.starts_with("#[") || text.starts_with("#![") {
+                if text.starts_with("#[") || text.starts_with("#![") || is_rs_macro_item(text) {
                     ec.line(text);
                 } else {
                     ec.line(&format!("// {text}"));
@@ -121,7 +121,17 @@ fn emit_struct_impl(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     }
     if !cd.methods.is_empty() {
         ec.blank();
-        ec.line(&format!("impl {} {{", cd.name));
+        let tr = cd.implements.first().cloned().or_else(|| {
+            cd.decorators.iter().find_map(|d| {
+                d.strip_prefix("impl(\"").and_then(|s| s.strip_suffix("\")"))
+                    .map(|s| s.replace("\\\"", "\"").replace("\\\\", "\\"))
+            })
+        });
+        let hdr = match tr {
+            Some(t) => format!("impl {t} for {} {{", cd.name),
+            None => format!("impl {} {{", cd.name),
+        };
+        ec.line(&hdr);
         ec.push();
         for m in &cd.methods { emit_method(ec, m, ectx); }
         ec.pop();
@@ -164,13 +174,21 @@ fn emit_rs_body(ec: &mut EmitCtx, body: &FnBody, ectx: &ExprEmitCtx) {
 
 fn emit_rs_params(params: &[ParamDecl]) -> String {
     params.iter().map(|p| {
+        let mt = if p.is_mut && !p.name.starts_with("mut ") && !p.name.starts_with('&') { "mut " } else { "" };
         if p.name == "self" || p.name == "mut self" || p.name.starts_with('&') {
-            p.name.clone()
+            format!("{mt}{}", p.name)
         } else {
             let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Rust)).unwrap_or_else(|| "()".into());
-            format!("{}: {t}", p.name)
+            format!("{mt}{}: {t}", p.name)
         }
     }).collect::<Vec<_>>().join(", ")
+}
+
+fn is_rs_macro_item(text: &str) -> bool {
+    let t = text.trim_start();
+    if t.starts_with("macro_rules!") { return true; }
+    let rest = t.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == ':');
+    rest.len() < t.len() && rest.strip_prefix('!').is_some_and(|r| matches!(r.trim_start().as_bytes().first(), Some(b'(' | b'[' | b'{')))
 }
 
 fn rs_vis(v: Visibility) -> &'static str {

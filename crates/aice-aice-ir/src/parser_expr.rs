@@ -114,7 +114,7 @@ pub(crate) fn infix_prec(kind: TokenKind) -> Option<(u8, bool)> {
         TokenKind::As => Some((15, false)),
         TokenKind::LParen | TokenKind::LBracket | TokenKind::Dot | TokenKind::QuestionDot
         | TokenKind::ColonColon | TokenKind::PlusPlus | TokenKind::MinusMinus
-        | TokenKind::TemplateHead | TokenKind::TemplateNoSubst => Some((17, false)),
+        | TokenKind::TemplateHead | TokenKind::TemplateNoSubst | TokenKind::MacroBody => Some((17, false)),
         _ => None,
     }
 }
@@ -127,7 +127,7 @@ pub(crate) fn can_start_expr_tok(k: TokenKind) -> bool {
                 | TokenKind::Comment | TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
                 | TokenKind::Comma | TokenKind::Semicolon | TokenKind::Colon
                 | TokenKind::ColonEqual | TokenKind::ColonColonEqual | TokenKind::FatArrow
-                | TokenKind::Arrow
+                | TokenKind::Arrow | TokenKind::MacroBody
         )
 }
 
@@ -136,6 +136,7 @@ pub(crate) fn is_elvis_ahead(p: &Parser<'_>) -> bool {
         && p.peek_n(1).kind == TokenKind::Colon
         && p.peek().span.end_byte == p.peek_n(1).span.start_byte
         && can_start_expr_tok(p.peek_n(2).kind)
+        && !(p.peek_n(2).kind == TokenKind::LBrace && crate::parser_stmt::is_match_brace_body(p, p.pos + 2))
 }
 
 pub(crate) fn looks_like_ternary(p: &Parser<'_>) -> bool {

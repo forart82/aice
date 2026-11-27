@@ -8,7 +8,7 @@ use crate::lexer::lex_with_trivia;
 use crate::lexer_tokens::{Token, TokenKind};
 use crate::parser_class::{parse_class_decl, parse_directive_or_decorated};
 use crate::parser_decl::{parse_const_or_var, parse_enum_decl, parse_fn_decl, parse_import, parse_type_decl};
-use crate::parser_iter::resolve_bound_nil_in_module;
+use crate::parser_nil::resolve_bound_nil_in_module;
 use crate::parser_stmt::is_walrus_ahead;
 use crate::parser_domain::{parse_component, parse_style, parse_tokens};
 use crate::parser_domain_data::{parse_data, parse_doc, parse_sh};

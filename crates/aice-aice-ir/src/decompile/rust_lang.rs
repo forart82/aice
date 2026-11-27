@@ -206,15 +206,18 @@ fn decompile_rs_fn(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileO
     if let Some(plist) = node.child_by_field_name("parameters") {
         for ch in named_children(plist) {
             match ch.kind() {
-                "self_parameter" => params.push(ParamDecl {
-                    name: node_text(ch, src).trim().into(), vis: Visibility::Default, is_readonly: false,
-                    is_mut: false, is_optional: false, is_rest: false, ty: None, default: None, trivia: Trivia::default(),
-                }),
-                "parameter" => params.push(ParamDecl {
-                    name: field_text(ch, "pattern", src).unwrap_or("p").trim().to_string(), vis: Visibility::Default,
-                    is_readonly: false, is_mut: false, is_optional: false, is_rest: false,
-                    ty: field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Rust)), default: None, trivia: Trivia::default(),
-                }),
+                "self_parameter" => {
+                    let raw = node_text(ch, src).trim();
+                    let (is_mut, name) = raw.strip_prefix("mut ").map_or((false, raw.to_string()), |r| (true, r.trim().to_string()));
+                    params.push(ParamDecl { name, vis: Visibility::Default, is_readonly: false, is_mut, is_optional: false, is_rest: false, ty: None, default: None, trivia: Trivia::default() });
+                }
+                "parameter" => {
+                    let raw = field_text(ch, "pattern", src).unwrap_or("p").trim();
+                    let is_mut = child_by_kind(ch, "mutable_specifier").is_some() || raw.starts_with("mut ");
+                    let name = raw.strip_prefix("mut ").unwrap_or(raw).trim().to_string();
+                    let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Rust));
+                    params.push(ParamDecl { name, vis: Visibility::Default, is_readonly: false, is_mut, is_optional: false, is_rest: false, ty, default: None, trivia: Trivia::default() });
+                }
                 _ => {}
             }
         }

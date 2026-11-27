@@ -1,5 +1,5 @@
 use crate::ir::TranspileError;
-use crate::ir_code::{BinaryOp, Expr, Stmt, UnaryOp};
+use crate::ir_code::{BinaryOp, Expr, MemberKind, Stmt, UnaryOp};
 use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
 use crate::parser_expr::{
@@ -115,16 +115,11 @@ pub(crate) fn step_expr_cont(
         }
         ParseCont::ExprMatchWrap => {
             let sp = p.peek().span;
-            let mut m = match vals.pop().expect("match stmt") {
-                ParseVal::Stmt(s) => s,
-                _ => unreachable!("expected Stmt"),
-            };
+            let ParseVal::Stmt(mut m) = vals.pop().expect("match stmt") else { unreachable!("expected Stmt") };
             if let Stmt::Match { target, cases, .. } = &mut *m {
                 let tgt = std::mem::replace(target, Expr::Ident(String::new()));
                 vals.push(ParseVal::Expr(Expr::Match { target: Box::new(tgt), cases: std::mem::take(cases) }));
-            } else {
-                return Err(TranspileError::at("Invalid match expression", sp));
-            }
+            } else { return Err(TranspileError::at("Invalid match expression", sp)); }
         }
         _ => unreachable!(),
     }
@@ -214,6 +209,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             stack.push(ParseCont::ExprUnary { op });
             stack.push(ParseCont::Expr(arg_prec));
         }
+        TokenKind::Let if crate::parser_stmt::try_parse_let_cond(p, stack) => {}
         TokenKind::Ident => { p.advance(); vals.push(ParseVal::Expr(Expr::Ident(tok.lexeme))); }
         _ if tok.is_keyword() => { p.advance(); vals.push(ParseVal::Expr(Expr::Ident(tok.lexeme))); }
         _ => return Err(TranspileError::at(format!("Unexpected token {:?} '{}' in expression", tok.kind, tok.lexeme), tok.span)),
@@ -258,6 +254,13 @@ fn step_infix(
             stack.push(ParseCont::ExprTaggedTemplate { callee: lhs });
             stack.push(ParseCont::ExprTemplate { quasis: vec![head.lexeme], exprs: Vec::new() });
             stack.push(ParseCont::Expr(1));
+        }
+        TokenKind::MacroBody => {
+            let tok = p.advance();
+            if !matches!(lhs, Expr::Ident(_) | Expr::Member { kind: MemberKind::Scope, .. }) {
+                return Err(TranspileError::at("Invalid macro invocation target", tok.span));
+            }
+            vals.push(ParseVal::Expr(Expr::Ident(format!("{}{}", crate::printer_expr::print_expr(&lhs), tok.lexeme))));
         }
         TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon => {
             step_member_infix(p, lhs, kind, stack, vals)?;

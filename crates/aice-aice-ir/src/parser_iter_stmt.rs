@@ -177,9 +177,9 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
                 stack.push(ParseCont::Expr(1));
             }
         }
-        TokenKind::If => { p.advance(); stack.push(ParseCont::StmtIfAfterCond); stack.push(ParseCont::Expr(1)); }
+        TokenKind::If if p.peek_n(1).kind != TokenKind::MacroBody => { p.advance(); stack.push(ParseCont::StmtIfAfterCond); stack.push(ParseCont::Expr(1)); }
         TokenKind::Match if is_match_ahead(p, true) => start_match(p, stack)?,
-        TokenKind::For => {
+        TokenKind::For if p.peek_n(1).kind != TokenKind::MacroBody => {
             p.advance();
             let binding = if p.eat(TokenKind::LParen) {
                 let mut parts = Vec::new();
@@ -194,7 +194,7 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             stack.push(ParseCont::StmtForAfterIter { binding });
             stack.push(ParseCont::Expr(1));
         }
-        TokenKind::While => { p.advance(); stack.push(ParseCont::StmtWhileAfterCond); stack.push(ParseCont::Expr(1)); }
+        TokenKind::While if p.peek_n(1).kind != TokenKind::MacroBody => { p.advance(); stack.push(ParseCont::StmtWhileAfterCond); stack.push(ParseCont::Expr(1)); }
         TokenKind::Loop if p.peek_n(1).kind == TokenKind::Colon => {
             p.advance();
             p.expect(TokenKind::Colon, "Expected ':' after loop")?;
@@ -211,13 +211,13 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             });
             push_parse_block(p, stack, vals);
         }
-        TokenKind::Throw => { p.advance(); stack.push(ParseCont::StmtThrow); stack.push(ParseCont::Expr(1)); }
-        TokenKind::Break => {
+        TokenKind::Throw if p.peek_n(1).kind != TokenKind::MacroBody => { p.advance(); stack.push(ParseCont::StmtThrow); stack.push(ParseCont::Expr(1)); }
+        TokenKind::Break if p.peek_n(1).kind != TokenKind::MacroBody => {
             p.advance();
             let label = if p.peek_kind() == TokenKind::Ident { Some(p.advance().lexeme) } else { None };
             vals.push(ParseVal::Stmt(Box::new(Stmt::Break { label, trivia: Trivia::default() })));
         }
-        TokenKind::Continue => {
+        TokenKind::Continue if p.peek_n(1).kind != TokenKind::MacroBody => {
             p.advance();
             let label = if p.peek_kind() == TokenKind::Ident { Some(p.advance().lexeme) } else { None };
             vals.push(ParseVal::Stmt(Box::new(Stmt::Continue { label, trivia: Trivia::default() })));

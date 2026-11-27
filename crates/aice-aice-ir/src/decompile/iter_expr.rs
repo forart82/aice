@@ -43,7 +43,7 @@ pub(crate) enum ExprFin {
     StructExpr { sname: String, slots: Vec<ObjSlot> },
     Object(Vec<ObjSlot>),
     Array(usize),
-    TypeCast { ty: String, quote_complex: bool },
+    TypeCast { ty: String, quote_mode: u8 },
     Await,
     Closure { is_async: bool, is_generator: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, destruct_stmts: Vec<Stmt>, ret: Option<AiceType>, body_kind: u8 },
     RubyBlock { params: Vec<ParamDecl>, has_body: bool },
@@ -274,12 +274,12 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         }
         "arrow_function" | "closure_expression" | "lambda" | "lambda_expression"
         | "function_expression" | "generator_function" | "function_declaration" | "method_definition" => push_lambda_task(env, node),
-        "cast_expression" if matches!(env.lang, LanguageId::C | LanguageId::Cpp) => push_c_cast_task(env, node, raw),
+        "cast_expression" if matches!(env.lang, LanguageId::C | LanguageId::Cpp | LanguageId::Java | LanguageId::CSharp | LanguageId::Php) => push_c_cast_task(env, node, raw),
         "type_cast_expression" | "as_expression" => {
             let val = node.child_by_field_name("value").or_else(|| named_children(node).into_iter().next());
             let ty = node.child_by_field_name("type").or_else(|| named_children(node).into_iter().nth(1));
             if let (Some(v), Some(t)) = (val, ty) {
-                env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: node_text(t, env.src).trim().into(), quote_complex: false }));
+                env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: node_text(t, env.src).trim().into(), quote_mode: 0 }));
                 env.tasks.push(DTask::Expr(v));
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }
