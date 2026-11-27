@@ -38,11 +38,24 @@ pub(crate) fn emit_ident(s: &str, lang: LanguageId) -> String {
         ("this", LanguageId::Python | LanguageId::Rust | LanguageId::Ruby) => "self".into(),
         ("this", LanguageId::Php) => "$this".into(),
         ("self", LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::Java | LanguageId::CSharp | LanguageId::Dart) => "this".into(),
+        ("self" | "parent" | "static", LanguageId::Php) => s.to_string(),
         _ if lang == LanguageId::Php && !s.starts_with('$') && !s.contains("::") && s.chars().next().is_some_and(|c| c.is_ascii_lowercase()) => {
             format!("${s}")
         }
         _ => s.to_string(),
     }
+}
+
+pub(crate) fn is_rust_range_raw(s: &str) -> bool {
+    s.contains("..")
+        && !((s.starts_with('"')
+            || s.starts_with("b\"")
+            || s.starts_with("c\"")
+            || s.starts_with("r\"")
+            || s.starts_with("r#")
+            || s.starts_with("br")
+            || s.starts_with("cr"))
+            && (s.ends_with('"') || s.ends_with('#')))
 }
 
 pub(crate) fn emit_lit(l: &LiteralVal, lang: LanguageId) -> String {

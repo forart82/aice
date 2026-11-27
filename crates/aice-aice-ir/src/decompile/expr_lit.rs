@@ -71,7 +71,7 @@ pub(crate) fn is_py_fstring(raw: &str) -> bool {
     matches!(pfx.as_str(), "f" | "fr" | "rf") && (rest.starts_with('"') || rest.starts_with('\''))
 }
 
-fn unescape_js_str(s: &str) -> String {
+fn try_unescape_js_str(s: &str) -> Option<String> {
     let mut out = String::with_capacity(s.len());
     let mut chars = s.chars().peekable();
     while let Some(c) = chars.next() {
@@ -86,21 +86,16 @@ fn unescape_js_str(s: &str) -> String {
             Some('n') => out.push('\n'),
             Some('r') => out.push('\r'),
             Some('t') => out.push('\t'),
-            Some('0') if chars.peek().is_none_or(|n| !n.is_ascii_digit()) => out.push('\0'),
             Some('\n') => {}
             Some('\r') => {
                 if chars.peek() == Some(&'\n') {
                     chars.next();
                 }
             }
-            Some(other) => {
-                out.push('\\');
-                out.push(other);
-            }
-            None => out.push('\\'),
+            _ => return None,
         }
     }
-    out
+    Some(out)
 }
 
 pub(crate) fn decompile_string_lit(raw: &str, lang: LanguageId) -> Expr {
@@ -122,13 +117,19 @@ pub(crate) fn decompile_string_lit(raw: &str, lang: LanguageId) -> Expr {
     if lang == LanguageId::Python && is_py_fstring(raw) {
         parse_interp_text(&inner, "{", "}", raw)
     } else if matches!(lang, LanguageId::Dart | LanguageId::Kotlin) && raw.contains('$') {
-        parse_dollar_interp(&inner, raw)
+        parse_dollar_interp(&inner, raw, lang)
     } else if lang == LanguageId::Ruby && raw.starts_with('"') && raw.contains("#{") {
         parse_interp_text(&inner, "#{", "}", raw)
     } else if matches!(lang, LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::Tsx) {
         let multiline = inner.contains('\n');
-        let value = if inner.contains('\\') { unescape_js_str(&inner) } else { inner };
-        Expr::Literal(LiteralVal::Str { value, multiline })
+        if inner.contains('\\') {
+            match try_unescape_js_str(&inner) {
+                Some(value) => Expr::Literal(LiteralVal::Str { value, multiline }),
+                None => Expr::Raw(t.to_string()),
+            }
+        } else {
+            Expr::Literal(LiteralVal::Str { value: inner, multiline })
+        }
     } else {
         crate::decompile::expr_lit_esc::decompile_non_js_str(t, inner, lang)
     }
@@ -209,7 +210,7 @@ pub(crate) fn parse_interp_text(s: &str, open: &str, close: &str, raw: &str) -> 
     Expr::Template { quasis, exprs }
 }
 
-pub(crate) fn parse_dollar_interp(s: &str, raw: &str) -> Expr {
+pub(crate) fn parse_dollar_interp(s: &str, raw: &str, lang: LanguageId) -> Expr {
     let mut quasis = Vec::new();
     let mut exprs = Vec::new();
     let mut cur = String::new();
@@ -228,8 +229,12 @@ pub(crate) fn parse_dollar_interp(s: &str, raw: &str) -> Expr {
         if b[i] == b'$' {
             if b.get(i + 1) == Some(&b'{') {
                 if let Some(end_idx) = find_matching_brace(s, i + 2) {
+                    let ex_txt = s[i + 2..end_idx].trim();
+                    if lang == LanguageId::Kotlin && ex_txt.contains('\'') {
+                        return Expr::Raw(raw.trim().to_string());
+                    }
                     quasis.push(std::mem::take(&mut cur));
-                    exprs.push(Expr::Ident(s[i + 2..end_idx].trim().to_string()));
+                    exprs.push(Expr::Ident(ex_txt.to_string()));
                     i = end_idx + 1;
                     continue;
                 }

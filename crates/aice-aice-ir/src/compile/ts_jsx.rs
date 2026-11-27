@@ -53,7 +53,9 @@ fn emit_jsx_node(ec: &mut EmitCtx, root: &LayoutNode, target: LanguageId, ectx: 
                         continue;
                     }
                     match &a.value {
-                        Some(crate::ir_code::Expr::Literal(crate::ir_code::LiteralVal::Str { value, .. })) => {
+                        Some(crate::ir_code::Expr::Literal(crate::ir_code::LiteralVal::Str { value, .. }))
+                            if !value.contains(['"', '\n', '\r']) =>
+                        {
                             attr_s.push_str(&format!(" {}=\"{value}\"", a.name));
                         }
                         Some(ex) => attr_s.push_str(&format!(" {}={{{}}}", a.name, emit_expr(ex, target, ectx))),

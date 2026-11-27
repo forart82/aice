@@ -71,10 +71,12 @@ pub fn demo() -> usize {
     assert!(rs_aice.contains("SIMPLE:\"&str\" = \"simple\""), "{rs_aice}");
     assert!(rs_aice.contains("QUOTED:\"&str\" = \"a \\\"b\\\" c\""), "{rs_aice}");
     assert!(rs_aice.contains("DOUBLE_RAW:\"&str\" = \"has \\\"# inside raw string\""), "{rs_aice}");
-    assert!(rs_aice.contains("BYTES:\"&[u8]\" = \"\\\\x00\\\\xffhello\""), "{rs_aice}");
-    assert!(rs_aice.contains("RAW_BYTES:\"&[u8]\" = \"raw \\\"bytes\\\"\""), "{rs_aice}");
+    assert!(rs_aice.contains("BYTES:\"&[u8]\" = raw \"b\\\"\\\\x00\\\\xffhello\\\"\""), "{rs_aice}");
+    assert!(rs_aice.contains("RAW_BYTES:\"&[u8]\" = raw \"br#\\\"raw \\\"bytes\\\"\\\"#\""), "{rs_aice}");
     assert!(rs_aice.contains("raw := \"hello \\\"quoted\\\" \\\\n // not a comment\""), "{rs_aice}");
     assert!(rs_nat.contains("\"a \\\"b\\\" c\""), "{rs_nat}");
+    assert!(rs_nat.contains("b\"\\x00\\xffhello\""), "{rs_nat}");
+    assert!(rs_nat.contains("br#\"raw \"bytes\"\"#"), "{rs_nat}");
 
     let py = r#####"import re
 
@@ -91,19 +93,20 @@ def fmt(x: int) -> str:
     return fr"val={x}"
 "#####;
     let (py_aice, py_nat) = roundtrip(LanguageId::Python, "raw.py", py);
-    for bad in ["\"r\\\"", "\"r'", "\"r\\\"\\\"\\\"", "\"b\\\"", "\"rb\\\"", "\"br'", "\"u\\\""] {
+    for bad in ["::= \"r\\\"", "::= \"r'", "::= \"r\\\"\\\"\\\"", "::= \"b\\\"", "::= \"rb\\\"", "::= \"br'", "::= \"u\\\""] {
         assert!(!py_aice.contains(bad), "Python string double-wrapped ({bad}):\n{py_aice}");
     }
     assert!(py_aice.contains("re.compile(\"^rgba?\\\\((\\\\d+)\\\\)\")"), "{py_aice}");
     assert!(py_aice.contains("SINGLE_RAW ::= \"single\\\\d+\""), "{py_aice}");
     assert!(py_aice.contains("TRIPLE_RAW ::= \"triple \\\"raw\\\" text\""), "{py_aice}");
     assert!(py_aice.contains("TRIPLE_SQ ::= \"triple 'sq' text\""), "{py_aice}");
-    assert!(py_aice.contains("BYTE_S ::= \"hello\""), "{py_aice}");
-    assert!(py_aice.contains("RB_S ::= \"\\\\s+\""), "{py_aice}");
-    assert!(py_aice.contains("BR_S ::= \"\\\\w+\""), "{py_aice}");
-    assert!(py_aice.contains("UNI_S ::= \"unicode\""), "{py_aice}");
+    assert!(py_aice.contains("BYTE_S ::= raw \"b\\\"hello\\\"\""), "{py_aice}");
+    assert!(py_aice.contains("RB_S ::= raw \"rb\\\"\\\\s+\\\"\""), "{py_aice}");
+    assert!(py_aice.contains("BR_S ::= raw \"br'\\\\w+'\""), "{py_aice}");
+    assert!(py_aice.contains("UNI_S ::= raw \"u\\\"unicode\\\"\""), "{py_aice}");
     assert!(py_aice.contains("`val=${x}`"), "{py_aice}");
     assert!(py_nat.contains("f\"val={x}\""), "{py_nat}");
+    assert!(py_nat.contains("b\"hello\"") && py_nat.contains("rb\"\\s+\"") && py_nat.contains("br'\\w+'") && py_nat.contains("u\"unicode\""), "{py_nat}");
 
     let cs = r#"public class Paths {
     public string GetPath() {

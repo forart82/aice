@@ -122,7 +122,11 @@ pub(crate) fn push_unary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
         if !pre.is_empty() { pre } else { env.src.get(arg.end_byte()..node.end_byte()).unwrap_or("").trim() }
     });
     let Some(op) = map_unary_op(op_str, node.kind(), env.lang) else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        if env.lang == LanguageId::Go && op_str == "<-" {
+            env.exprs.push(Expr::Raw(raw.to_string()));
+        } else {
+            env.exprs.push(Expr::Ident(raw.to_string()));
+        }
         return;
     };
     let is_postfix = matches!(op, UnaryOp::Inc | UnaryOp::Dec)

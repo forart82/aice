@@ -111,10 +111,17 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "true" | "boolean_literal" if raw == "true" || raw == "True" => env.exprs.push(Expr::Literal(LiteralVal::Bool(true))),
         "false" | "boolean_literal" if raw == "false" || raw == "False" => env.exprs.push(Expr::Literal(LiteralVal::Bool(false))),
         "null" | "nil" | "none" | "None" | "null_literal" => env.exprs.push(Expr::Literal(LiteralVal::Nil)),
+        k if crate::decompile::expr_lit_esc::is_raw_passthrough_expr(k, env.lang) => {
+            env.exprs.push(Expr::Raw(raw.to_string()));
+        }
+        "qualified_identifier" if env.lang == LanguageId::Cpp && raw.contains('<') => {
+            env.exprs.push(Expr::Raw(raw.to_string()));
+        }
         "string" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"
-        | "verbatim_string_literal" | "byte_string_literal" | "raw_byte_string_literal"
-        | "c_string_literal" | "raw_c_string_literal" | "raw_string" | "multiline_string_literal"
-        | "char_literal" | "character_literal" => push_string_lit_task(env, node, raw),
+        | "verbatim_string_literal" | "raw_string" | "multiline_string_literal" => {
+            push_string_lit_task(env, node, raw);
+        }
+        "encapsed_string" if env.lang == LanguageId::Php => push_string_lit_task(env, node, raw),
         "interpolated_string_expression" if env.lang == LanguageId::CSharp => push_cs_interp_task(env, node),
         "template_string" => push_template_task(env, node, false),
         "identifier" | "type_identifier" | "property_identifier" | "field_identifier"
@@ -254,8 +261,6 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "array_creation_expression" if env.lang == LanguageId::Php => push_php_array_task(env, node),
         "array_creation_expression" | "implicit_array_creation_expression" if matches!(env.lang, LanguageId::CSharp | LanguageId::Java) => push_new_array_task(env, node, raw),
         "initializer_expression" | "element_binding_expression" | "with_expression" | "anonymous_object_creation_expression" if env.lang == LanguageId::CSharp => push_cs_special_expr(env, node, raw),
-        "object_literal" if env.lang == LanguageId::Kotlin => env.exprs.push(Expr::Raw(raw.to_string())),
-        "anonymous_class" if env.lang == LanguageId::Php => env.exprs.push(Expr::Raw(raw.to_string())),
         "array" | "array_expression" | "list" | "array_literal" | "list_literal" => {
             let xs: Vec<_> = named_children(node).into_iter()
                 .filter(|c| !matches!(c.kind(), "type_arguments" | "type_argument_list")).collect();

@@ -244,6 +244,7 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             tasks.push(CTask::MakeMember { property, kind: *kind });
             if matches!(object.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
                 || (lang == LanguageId::Php && matches!(object.as_ref(), Expr::Raw(s) if s.starts_with("new ")))
+                || (lang == LanguageId::Rust && matches!(object.as_ref(), Expr::Raw(s) if crate::compile::expr_emit::is_rust_range_raw(s)))
             {
                 tasks.push(CTask::WrapParen);
             }

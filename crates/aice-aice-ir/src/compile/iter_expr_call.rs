@@ -55,7 +55,11 @@ pub(crate) fn push_eval_call<'a>(
             for e in ents {
                 match e {
                     RecordEntry::Spread(ex) => attr_exprs.push(ex),
-                    RecordEntry::Field { key: Some(_), value } if !matches!(value, Expr::Literal(LiteralVal::Str { .. })) => attr_exprs.push(value),
+                    RecordEntry::Field { key: Some(_), value }
+                        if !matches!(value, Expr::Literal(LiteralVal::Str { value: s, .. }) if !s.contains(['"', '\n', '\r'])) =>
+                    {
+                        attr_exprs.push(value);
+                    }
                     _ => {}
                 }
             }
@@ -224,8 +228,11 @@ pub(crate) fn make_inline_jsx(
             match e {
                 RecordEntry::Spread(_) => attrs_s.push_str(&format!(" {{...{}}}", av.next().unwrap_or_default())),
                 RecordEntry::Field { key: Some(k), value } => {
-                    if let Expr::Literal(LiteralVal::Str { value: s, .. }) = value { attrs_s.push_str(&format!(" {k}=\"{s}\"")); }
-                    else { attrs_s.push_str(&format!(" {k}={{{}}}", av.next().unwrap_or_default())); }
+                    if let Expr::Literal(LiteralVal::Str { value: s, .. }) = value && !s.contains(['"', '\n', '\r']) {
+                        attrs_s.push_str(&format!(" {k}=\"{s}\""));
+                    } else {
+                        attrs_s.push_str(&format!(" {k}={{{}}}", av.next().unwrap_or_default()));
+                    }
                 }
                 RecordEntry::Field { key: None, value } => {
                     if let Expr::Literal(LiteralVal::Str { value: k, .. }) = value { attrs_s.push_str(&format!(" {k}")); }

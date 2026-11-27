@@ -93,14 +93,15 @@ pub(crate) fn step_member_infix(
     let (mut prop, prop_end) = if kind == TokenKind::Dot && p.eat(TokenKind::Hash) {
         let t = p.expect_ident_or_kw("Expected private member name")?;
         (format!("#{}", t.lexeme), t.span.end_byte)
+    } else if kind == TokenKind::ColonColon && p.eat(TokenKind::Dollar) {
+        let t = p.expect_ident_or_kw("Expected static property name")?;
+        (format!("${}", t.lexeme), t.span.end_byte)
     } else if (kind == TokenKind::Dot && p.peek_kind() == TokenKind::HexColor)
         || matches!(p.peek_kind(), TokenKind::Nil | TokenKind::Boolean)
     {
-        let t = p.advance();
-        (t.lexeme, t.span.end_byte)
+        let t = p.advance(); (t.lexeme, t.span.end_byte)
     } else {
-        let t = p.expect_ident_or_kw("Expected member name")?;
-        (t.lexeme, t.span.end_byte)
+        let t = p.expect_ident_or_kw("Expected member name")?; (t.lexeme, t.span.end_byte)
     };
     if matches!(p.peek_kind(), TokenKind::Question | TokenKind::Bang)
         && p.peek().span.start_byte == prop_end && p.peek_n(1).kind == TokenKind::LParen
