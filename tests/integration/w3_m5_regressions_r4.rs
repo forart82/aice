@@ -132,7 +132,7 @@ fn w3_m5_rust_lifetime_intra_block_cli() {
     let out_if = tw.run_with_empty_path(&["read", "src/lt.rs:pick@if"]);
     assert_eq!(out_if.status.code(), Some(0), "{}", stderr_str(&out_if));
     let txt_if = stdout_str(&out_if);
-    assert!(txt_if.contains("if flag and tag == \"}\":") && txt_if.contains("ret _r"), "{txt_if}");
+    assert!(txt_if.contains("if flag and tag == raw \"'}'\":") && txt_if.contains("ret _r"), "{txt_if}");
     assert!(!txt_if.contains("} else {") && !txt_if.contains("return _r"), "{txt_if}");
 }
 
