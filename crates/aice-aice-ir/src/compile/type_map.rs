@@ -28,12 +28,12 @@ pub(crate) fn emit_type(root: &AiceType, lang: LanguageId) -> String {
                 let t = vals.pop().unwrap();
                 let s = match lang {
                     LanguageId::TypeScript | LanguageId::Tsx => if wrap_ts { format!("({t})[]") } else { format!("{t}[]") },
-                    LanguageId::CSharp => format!("{t}[]"),
+                    LanguageId::CSharp | LanguageId::Java => format!("{t}[]"),
                     LanguageId::Python => format!("list[{t}]"),
                     LanguageId::Rust => format!("Vec<{t}>"),
                     LanguageId::Go => format!("[]{t}"),
                     LanguageId::Cpp => format!("std::vector<{t}>"),
-                    LanguageId::Java | LanguageId::Kotlin | LanguageId::Dart => format!("List<{t}>"),
+                    LanguageId::Kotlin | LanguageId::Dart => format!("List<{t}>"),
                     LanguageId::Php => "array".to_string(),
                     LanguageId::C => format!("{t}*"),
                     _ => format!("{t}[]"),
