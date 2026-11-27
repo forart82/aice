@@ -181,21 +181,23 @@ pub(crate) fn parse_const_or_var(p: &mut Parser<'_>, vis: Visibility, trivia: Tr
         if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
         return Ok(AiceItem::Const(ConstDecl { vis, name, ty, value, trivia: tr, span: sp }));
     }
-    let mut is_mut = false;
+    let (mut is_mut, mut had_kw) = (false, false);
     if !is_walrus_ahead(p) {
         is_mut = p.eat(TokenKind::Mut);
+        had_kw = is_mut;
         if p.eat(TokenKind::Let) {
+            had_kw = true;
             is_mut = p.peek_kind() == TokenKind::Mut
                 && (Parser::is_binding_tok(p.peek_n(1)) || matches!(p.peek_n(1).kind, TokenKind::LBrace | TokenKind::LBracket))
                 && p.eat(TokenKind::Mut);
-        } else { p.eat(TokenKind::Val); }
+        } else if p.eat(TokenKind::Val) { had_kw = true; }
     }
     let name = parse_binding_name(p, "Expected binding name")?;
     let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
-    if p.eat(TokenKind::ColonColonEqual) { is_mut = true; }
-    else if p.eat(TokenKind::ColonEqual) || p.eat(TokenKind::Equal) {}
-    else { return Err(TranspileError::at("Expected ':=', '::=', or '='", p.peek().span)); }
-    let value = parse_expr(p)?;
+    let value = if p.eat(TokenKind::ColonColonEqual) { is_mut = true; Some(parse_expr(p)?) }
+        else if p.eat(TokenKind::ColonEqual) || p.eat(TokenKind::Equal) { Some(parse_expr(p)?) }
+        else if had_kw && matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Semicolon | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) { None }
+        else { return Err(TranspileError::at("Expected ':=', '::=', or '='", p.peek().span)); };
     if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
     Ok(AiceItem::Var(VarDecl { vis, is_mut, name, ty, value, trivia: tr, span: sp }))
 }

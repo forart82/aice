@@ -99,7 +99,7 @@ pub struct VarDecl {
     pub is_mut: bool,
     pub name: String,
     pub ty: Option<AiceType>,
-    pub value: Expr,
+    pub value: Option<Expr>,
     pub trivia: Trivia,
     pub span: Span,
 }

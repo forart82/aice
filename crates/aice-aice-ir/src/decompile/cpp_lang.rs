@@ -111,9 +111,11 @@ fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                             .map(|d| unwrap_c_declarator(d, src))
                             .unwrap_or_else(|| ("f".into(), String::new()));
                         let ty = Some(map_type_str(&prepend_c_type_quals(&quals, raw_ty, &ptrs), LanguageId::Cpp));
+                        let init = ch.child_by_field_name("default_value")
+                            .map(|dv| crate::decompile::expr_common::decompile_expr(dv, src, LanguageId::Cpp));
                         props.push(PropDecl {
                             name: fnm, aliases: Vec::new(), vis: cur_vis, is_static: false, is_readonly: false,
-                            is_mut: true, is_optional: false, ty, init: None, trivia: collect_trivia(ch, src, opts),
+                            is_mut: true, is_optional: false, ty, init, trivia: collect_trivia(ch, src, opts),
                         });
                     }
                 }

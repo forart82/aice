@@ -59,9 +59,11 @@ pub(crate) fn step_stmt_task<'a>(
             let e = st.vals.pop().unwrap();
             if as_tail && lang == LanguageId::Rust { ec.line(&e); } else { ec.line(&format!("return {e}{semi}")); }
         }
-        CTask::BraceExprStmt { as_tail } => {
+        CTask::BraceExprStmt { as_tail, is_raw } => {
             let s = st.vals.pop().unwrap();
-            if as_tail && lang == LanguageId::Rust { ec.line(&s); } else { ec.line(&format!("{s}{semi}")); }
+            let skip_semi = (as_tail && lang == LanguageId::Rust)
+                || (is_raw && (s.ends_with(';') || (lang == LanguageId::Rust && s.ends_with('}'))));
+            if skip_semi { ec.line(&s); } else { ec.line(&format!("{s}{semi}")); }
         }
         CTask::BraceIfHdr => {
             let c = st.vals.pop().unwrap();
@@ -158,7 +160,7 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
         }
         Stmt::Expr { expr, trivia } => {
             ec.emit_trivia(trivia, CommentStyle::Slash);
-            tasks.push(CTask::BraceExprStmt { as_tail });
+            tasks.push(CTask::BraceExprStmt { as_tail, is_raw: matches!(expr, Expr::Raw(_)) });
             tasks.push(CTask::EvalExpr(expr));
         }
         Stmt::If { cond, then_body, elifs, elif_trivias, else_body, else_trivia, trivia } => {
@@ -230,7 +232,7 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
                 let p_raw = cc.param.as_deref().filter(|s| *s != "...");
                 let p = p_raw.and_then(|s| s.split(',').next()).map(str::trim).filter(|s| !s.is_empty()).unwrap_or("e");
                 let hdr = match lang {
-                    LanguageId::Kotlin => format!("}} catch ({p}: Exception) {{"),
+                    LanguageId::Kotlin => format!("}} catch ({p}: {}) {{", cc.ty.as_ref().map(|x| emit_type(x, lang)).unwrap_or_else(|| "Exception".into())),
                     LanguageId::CSharp | LanguageId::Java => format!("}} catch ({} {p}) {{", cc.ty.as_ref().map(|x| emit_type(x, lang)).unwrap_or_else(|| "Exception".into())),
                     LanguageId::Cpp if is_all => "} catch (...) {".into(),
                     LanguageId::Cpp => format!("}} catch ({} {p}) {{", cc.ty.as_ref().map(|x| emit_type(x, lang)).unwrap_or_else(|| "const std::exception&".into())),

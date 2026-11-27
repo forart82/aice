@@ -220,6 +220,8 @@ pub(crate) fn is_single_stmt_node(kind: &str) -> bool {
             | "if_expression"
             | "while_statement"
             | "while_expression"
+            | "do_statement"
+            | "do_while_statement"
             | "for_statement"
             | "for_in_statement"
             | "for_expression"

@@ -141,8 +141,16 @@ pub(crate) fn print_item(c: &mut PrintCtx<'_>, item: &AiceItem, d: usize) {
             let ty = if c.opts.include_types {
                 vd.ty.as_ref().map(|t| format!("{}{}", c.colon_sep(), print_type(t))).unwrap_or_default()
             } else { String::new() };
-            let op = if vd.is_mut { "::=" } else { ":=" };
-            c.line_tr(d, &format!("{}{}{} {} {}", vd.vis.aice_prefix(), vd.name, ty, op, print_expr(&vd.value)), &vd.trivia);
+            match &vd.value {
+                Some(val) => {
+                    let op = if vd.is_mut { "::=" } else { ":=" };
+                    c.line_tr(d, &format!("{}{}{} {} {}", vd.vis.aice_prefix(), vd.name, ty, op, print_expr(val)), &vd.trivia);
+                }
+                None => {
+                    let kw = if vd.is_mut { "mut" } else { "let" };
+                    c.line_tr(d, &format!("{}{kw} {}{}", vd.vis.aice_prefix(), vd.name, ty), &vd.trivia);
+                }
+            }
         }
         AiceItem::Component(comp) => print_component(c, comp, d),
         AiceItem::Style(st) => print_style(c, st, d),

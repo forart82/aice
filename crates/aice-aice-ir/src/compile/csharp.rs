@@ -37,7 +37,10 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Var(vd) => {
                 let t = vd.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "var".into());
-                ec.line(&format!("{}{t} {} = {};", cs_vis(vd.vis), vd.name, emit_expr(&vd.value, LanguageId::CSharp, &ectx)));
+                match &vd.value {
+                    Some(v) => ec.line(&format!("{}{t} {} = {};", cs_vis(vd.vis), vd.name, emit_expr(v, LanguageId::CSharp, &ectx))),
+                    None => ec.line(&format!("{}{t} {};", cs_vis(vd.vis), vd.name)),
+                }
             }
             _ => {}
         }

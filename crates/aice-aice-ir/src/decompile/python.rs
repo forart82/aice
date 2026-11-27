@@ -132,8 +132,7 @@ fn decompile_py_item(
             {
                 let name = field_text(asn, "left", src).unwrap_or("x").to_string();
                 let ty = field_text(asn, "type", src).map(|t| map_type_str(t, LanguageId::Python));
-                let value = asn.child_by_field_name("right").map(|v| decompile_expr(v, src, LanguageId::Python))
-                    .unwrap_or(crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Nil));
+                let value = asn.child_by_field_name("right").map(|v| decompile_expr(v, src, LanguageId::Python));
                 m.items.push(AiceItem::Var(VarDecl { vis: py_vis(&name), is_mut: true, name, ty, value, trivia: tr, span: node_span(node) }));
             } else {
                 let txt = node_text(node, src).trim();

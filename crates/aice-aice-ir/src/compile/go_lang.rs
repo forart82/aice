@@ -48,6 +48,14 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                 let ty = cd.ty.as_ref().map(|t| format!(" {}", emit_type(t, LanguageId::Go))).unwrap_or_default();
                 ec.line(&format!("const {}{ty} = {}", cd.name, emit_expr(&cd.value, LanguageId::Go, &ectx)));
             }
+            AiceItem::Var(vd) => {
+                ec.emit_trivia(&vd.trivia, CommentStyle::Slash);
+                let ty = vd.ty.as_ref().map(|t| format!(" {}", emit_type(t, LanguageId::Go))).unwrap_or_default();
+                match &vd.value {
+                    Some(v) => ec.line(&format!("var {}{ty} = {}", vd.name, emit_expr(v, LanguageId::Go, &ectx))),
+                    None => ec.line(&format!("var {}{}", vd.name, if ty.is_empty() { " any".into() } else { ty })),
+                }
+            }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.blank();
                 ec.emit_trivia(trivia, CommentStyle::Slash);

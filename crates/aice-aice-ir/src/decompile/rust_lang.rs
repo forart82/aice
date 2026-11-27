@@ -3,7 +3,10 @@ use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
-use crate::decompile::rust_helpers::{decompile_struct, extract_rs_fields, rs_vis};
+use crate::decompile::rust_helpers::{
+    decompile_rs_impl_assoc, decompile_rs_trait_assoc, decompile_struct, extract_rs_fields,
+    is_rs_non_tail_raw, rs_generic_attrs_match, rs_vis,
+};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::{normalize_single_line, push_attrs_to_trivia};
@@ -11,7 +14,10 @@ use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts,
 use crate::ir_code::{ClassDecl, ConstDecl, FnBody, FnDecl, MethodDecl, Stmt};
 use crate::ir_types::{AiceType, EnumDecl, EnumVariant, ParamDecl, TypeDecl, TypeKind, TypeParam, VariantPayload};
 
-struct RsImpl { tname: String, trait_nm: Option<String>, tps: Vec<TypeParam>, attrs: Vec<String>, methods: Vec<MethodDecl> }
+struct RsImpl {
+    tname: String, target_args: Option<String>, trait_nm: Option<String>,
+    tps: Vec<TypeParam>, attrs: Vec<String>, assoc_props: Vec<crate::ir_code::PropDecl>, methods: Vec<MethodDecl>,
+}
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     with_ts_root(tree, |root| {
@@ -53,21 +59,30 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                 }
                 "function_item" => m.items.push(AiceItem::Fn(decompile_rs_fn(ch, vis, src, opts, tr))),
                 "impl_item" => {
-                    let tname = ch.child_by_field_name("type").and_then(|n| {
+                    let ty_node = ch.child_by_field_name("type");
+                    let tname = ty_node.and_then(|n| {
                         if n.kind() == "generic_type" { field_text(n, "type", src) } else { Some(node_text(n, src)) }
                     }).unwrap_or("Self").trim().to_string();
+                    let target_args = ty_node
+                        .filter(|n| n.kind() == "generic_type")
+                        .and_then(|n| field_text(n, "type_arguments", src))
+                        .map(normalize_single_line)
+                        .filter(|s| !s.is_empty());
                     let trait_nm = field_text(ch, "trait", src).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
                     let (tps, attrs) = extract_rs_generics(ch, src);
+                    let mut assoc_props = Vec::new();
                     let mut methods = Vec::new();
                     if let Some(body) = ch.child_by_field_name("body") {
                         for mc in named_children(body) {
                             if mc.kind() == "function_item" {
                                 let f = decompile_rs_fn(mc, rs_vis(mc, src), src, opts, collect_trivia(mc, src, opts));
                                 methods.push(rs_fn_to_method(f));
+                            } else if mc.kind() == "type_item" {
+                                assoc_props.push(decompile_rs_impl_assoc(mc, src, collect_trivia(mc, src, opts)));
                             }
                         }
                     }
-                    impls.push(RsImpl { tname, trait_nm, tps, attrs, methods });
+                    impls.push(RsImpl { tname, target_args, trait_nm, tps, attrs, assoc_props, methods });
                 }
                 _ => m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: tr, span: node_span(ch) }),
             }
@@ -78,9 +93,13 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
 }
 
 fn attach_rs_impls(m: &mut AiceModule, impls: Vec<RsImpl>) {
-    for RsImpl { tname, trait_nm, tps, attrs, methods } in impls {
+    for RsImpl { tname, target_args, trait_nm, tps, attrs, assoc_props, methods } in impls {
         if trait_nm.is_none()
-            && let Some(idx) = m.items.iter().position(|it| matches!(it, AiceItem::Type(t) if t.name == tname && t.kind == TypeKind::Struct))
+            && assoc_props.is_empty()
+            && let Some(idx) = m.items.iter().position(|it| {
+                matches!(it, AiceItem::Type(t) if t.name == tname && t.kind == TypeKind::Struct
+                    && t.type_params == tps && rs_generic_attrs_match(&t.trivia, &attrs))
+            })
         {
             if let AiceItem::Type(mut td) = m.items.remove(idx) {
                 let is_tagged = td.trivia.leading.iter().any(|c| {
@@ -93,19 +112,23 @@ fn attach_rs_impls(m: &mut AiceModule, impls: Vec<RsImpl>) {
                     name: f.name, aliases: Vec::new(), vis: f.vis, is_static: false, is_readonly: true,
                     is_mut: false, is_optional: f.is_optional, ty: f.ty, init: f.default, trivia: f.trivia,
                 }).collect();
-                let type_params = if td.type_params.is_empty() { tps } else { td.type_params };
                 m.items.insert(idx, AiceItem::Class(ClassDecl {
-                    vis: td.vis, is_abstract: false, decorators: Vec::new(), name: td.name, type_params,
+                    vis: td.vis, is_abstract: false, decorators: Vec::new(), name: td.name, type_params: td.type_params,
                     primary_ctor: Vec::new(), extends: None, implements: Vec::new(), props, methods,
                     static_blocks: Vec::new(), trivia: td.trivia, span: td.span,
                 }));
             }
         } else if trait_nm.is_none()
-            && let Some(AiceItem::Class(cd)) = m.items.iter_mut().find(|it| matches!(it, AiceItem::Class(c) if c.name == tname && c.implements.is_empty()))
+            && assoc_props.is_empty()
+            && let Some(AiceItem::Class(cd)) = m.items.iter_mut().find(|it| {
+                matches!(it, AiceItem::Class(c) if c.name == tname && c.implements.is_empty()
+                    && c.type_params == tps && rs_generic_attrs_match(&c.trivia, &attrs))
+            })
         {
             cd.methods.extend(methods);
         } else {
             let mut decs: Vec<String> = attrs.into_iter().map(|a| a.trim_start_matches('@').to_string()).collect();
+            if let Some(ta) = target_args { decs.push(format!("self_args(\"{}\")", rs_esc(&ta))); }
             let mut implements = Vec::new();
             if let Some(tn) = trait_nm {
                 if tn.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':') { implements.push(tn); }
@@ -113,14 +136,18 @@ fn attach_rs_impls(m: &mut AiceModule, impls: Vec<RsImpl>) {
             }
             m.items.push(AiceItem::Class(ClassDecl {
                 vis: Visibility::Default, is_abstract: false, decorators: decs, name: tname, type_params: tps,
-                primary_ctor: Vec::new(), extends: None, implements, props: Vec::new(), methods,
+                primary_ctor: Vec::new(), extends: None, implements, props: assoc_props, methods,
                 static_blocks: Vec::new(), trivia: Trivia::default(), span: Default::default(),
             }));
         }
     }
 }
 
-fn rs_fn_to_method(f: FnDecl) -> MethodDecl {
+fn rs_fn_to_method(mut f: FnDecl) -> MethodDecl {
+    if !f.decorators.is_empty() {
+        let attrs = f.decorators.drain(..).map(|d| if d.starts_with('@') || d.starts_with("#[") { d } else { format!("@{d}") }).collect();
+        push_attrs_to_trivia(&mut f.trivia, attrs);
+    }
     MethodDecl {
         vis: f.vis, is_static: false, is_async: f.is_async, is_const: false, accessor: Default::default(),
         name: f.name, type_params: f.type_params, params: f.params, return_type: f.return_type,
@@ -161,17 +188,20 @@ fn decompile_trait(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileO
             .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':'))
             .collect()
     }).unwrap_or_default();
+    let mut fields = Vec::new();
     let mut methods = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
         for ch in named_children(body) {
             if matches!(ch.kind(), "function_item" | "function_signature_item") {
                 methods.push(rs_fn_to_method(decompile_rs_fn(ch, Visibility::Default, src, opts, Trivia::default())));
+            } else if ch.kind() == "associated_type" {
+                fields.push(decompile_rs_trait_assoc(ch, src, collect_trivia(ch, src, opts)));
             }
         }
     }
     TypeDecl {
         vis, kind: TypeKind::Trait, name, type_params, extends,
-        fields: Vec::new(), methods, alias_target: None, trivia: tr, span: node_span(node),
+        fields, methods, alias_target: None, trivia: tr, span: node_span(node),
     }
 }
 
@@ -203,7 +233,7 @@ fn decompile_rs_fn(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileO
     let return_type = field_text(node, "return_type", src).map(|t| map_type_str(t, LanguageId::Rust));
     let body = node.child_by_field_name("body").map(|b| {
         let mut stmts = decompile_block(b, src, LanguageId::Rust, opts);
-        if matches!(stmts.last(), Some(Stmt::Expr { .. }))
+        if matches!(stmts.last(), Some(Stmt::Expr { expr, .. }) if !matches!(expr, crate::ir_code::Expr::Raw(s) if is_rs_non_tail_raw(s)))
             && let Some(mut last_st) = stmts.pop()
             && let Stmt::Expr { expr, trivia } = &mut last_st
         {

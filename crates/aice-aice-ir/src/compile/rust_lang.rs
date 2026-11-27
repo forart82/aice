@@ -2,10 +2,14 @@ use aice_lang_registry::LanguageId;
 
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
+use crate::compile::rust_helpers::{
+    emit_rs_all_hash_attrs, emit_rs_impl_assoc, emit_rs_trait_assoc, format_rs_generics,
+    format_rs_tuple_field_ty, format_rs_type_args, is_rs_assoc_attr, rs_attr_arg,
+};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
+use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::{AiceType, EnumDecl, ParamDecl, TypeDecl, TypeKind, VariantPayload};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -22,7 +26,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                 ec.emit_trivia(&imp.trivia, CommentStyle::Slash);
                 ec.line(&format!("{}use {};", rs_vis(imp.vis), imp.source));
             }
-            AiceItem::Type(td) => emit_type_decl(&mut ec, td),
+            AiceItem::Type(td) => emit_type_decl(&mut ec, td, &ectx),
             AiceItem::Enum(ed) => emit_enum(&mut ec, ed),
             AiceItem::Class(cd) => emit_struct_impl(&mut ec, cd, &ectx),
             AiceItem::Fn(fd) => emit_fn(&mut ec, fd, &ectx),
@@ -33,7 +37,10 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Var(vd) => {
                 let ty = vd.ty.as_ref().map(|t| emit_type(t, LanguageId::Rust)).unwrap_or_else(|| "i64".into());
                 let mt = if vd.is_mut { "mut " } else { "" };
-                ec.line(&format!("{}static {mt}{}: {ty} = {};", rs_vis(vd.vis), vd.name, emit_expr(&vd.value, LanguageId::Rust, &ectx)));
+                match &vd.value {
+                    Some(v) => ec.line(&format!("{}static {mt}{}: {ty} = {};", rs_vis(vd.vis), vd.name, emit_expr(v, LanguageId::Rust, &ectx))),
+                    None => ec.line(&format!("{}static {mt}{}: {ty};", rs_vis(vd.vis), vd.name)),
+                }
             }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
@@ -49,37 +56,41 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
-fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl) {
+fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&td.trivia, CommentStyle::Slash);
-    emit_rs_hash_attrs(ec, &td.trivia);
+    emit_rs_all_hash_attrs(ec, &td.trivia, &[]);
+    let (gp, wh) = format_rs_generics(&td.type_params, &td.trivia, &[]);
     if td.kind == TypeKind::Alias {
         let rhs = td.alias_target.as_ref().map(|t| emit_type(t, LanguageId::Rust)).unwrap_or_else(|| "()".into());
-        ec.line(&format!("{}type {} = {rhs};", rs_vis(td.vis), td.name));
+        ec.line(&format!("{}type {}{gp}{wh} = {rhs};", rs_vis(td.vis), td.name));
         return;
     }
     if td.kind == TypeKind::Struct && has_trivia_attr(&td.trivia, "tuple") {
         let fs: Vec<String> = td.fields.iter().map(|f| format_rs_tuple_field(f.vis, f.ty.as_ref(), &f.trivia)).collect();
-        ec.line(&format!("{}struct {}({});", rs_vis(td.vis), td.name, fs.join(", ")));
+        ec.line(&format!("{}struct {}{gp}({}){wh};", rs_vis(td.vis), td.name, fs.join(", ")));
         return;
     }
     if td.kind == TypeKind::Struct && has_trivia_attr(&td.trivia, "unit") {
-        ec.line(&format!("{}struct {};", rs_vis(td.vis), td.name));
+        ec.line(&format!("{}struct {}{gp}{wh};", rs_vis(td.vis), td.name));
         return;
     }
     let kw = if td.kind == TypeKind::Trait { "trait" } else { "struct" };
-    ec.line(&format!("{}{kw} {} {{", rs_vis(td.vis), td.name));
+    let ext = if td.kind == TypeKind::Trait && !td.extends.is_empty() { format!(": {}", td.extends.join(" + ")) } else { String::new() };
+    ec.line(&format!("{}{kw} {}{gp}{ext}{wh} {{", rs_vis(td.vis), td.name));
     ec.push();
     for f in &td.fields {
         ec.emit_trivia(&f.trivia, CommentStyle::Slash);
-        ec.emit_attrs(&f.trivia);
-        let t = f.ty.as_ref().map(|x| emit_type(x, LanguageId::Rust)).unwrap_or_else(|| "()".into());
-        ec.line(&format!("{}{}: {t},", rs_vis(f.vis), f.name));
+        if td.kind == TypeKind::Trait || is_rs_assoc_attr(&f.trivia) {
+            emit_rs_trait_assoc(ec, f);
+        } else {
+            emit_rs_all_hash_attrs(ec, &f.trivia, &[]);
+            let t = format_rs_tuple_field_ty(f.ty.as_ref());
+            ec.line(&format!("{}{}: {t},", rs_vis(f.vis), f.name));
+        }
     }
     for m in &td.methods {
-        let ps = emit_rs_params(&m.params);
-        let rt = m.return_type.as_ref().map(|t| format!(" -> {}", emit_type(t, LanguageId::Rust))).unwrap_or_default();
-        ec.line(&format!("fn {}({ps}){rt};", m.name));
+        emit_method(ec, m, ectx);
     }
     ec.pop();
     ec.line("}");
@@ -88,8 +99,9 @@ fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl) {
 fn emit_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
     ec.blank();
     ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
-    emit_rs_hash_attrs(ec, &ed.trivia);
-    ec.line(&format!("{}enum {} {{", rs_vis(ed.vis), ed.name));
+    emit_rs_all_hash_attrs(ec, &ed.trivia, &[]);
+    let (gp, wh) = format_rs_generics(&ed.type_params, &ed.trivia, &[]);
+    ec.line(&format!("{}enum {}{gp}{wh} {{", rs_vis(ed.vis), ed.name));
     ec.push();
     for v in &ed.variants {
         match &v.payload {
@@ -115,56 +127,72 @@ fn emit_struct_impl(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     let is_tuple = has_class_attr(cd, "tuple");
     let is_unit = has_class_attr(cd, "unit");
     let is_braced = has_class_attr(cd, "braced");
-    if !cd.props.is_empty() || cd.vis != Visibility::Default || is_tuple || is_unit || is_braced {
+    let struct_props: Vec<&PropDecl> = cd.props.iter().filter(|p| !is_rs_assoc_attr(&p.trivia)).collect();
+    let assoc_props: Vec<&PropDecl> = cd.props.iter().filter(|p| is_rs_assoc_attr(&p.trivia)).collect();
+    let (gp, wh) = format_rs_generics(&cd.type_params, &cd.trivia, &cd.decorators);
+    let emits_struct = !struct_props.is_empty() || cd.vis != Visibility::Default || is_tuple || is_unit || is_braced;
+    if emits_struct {
         ec.blank();
         ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
-        emit_rs_hash_attrs(ec, &cd.trivia);
+        emit_rs_all_hash_attrs(ec, &cd.trivia, &cd.decorators);
         if is_tuple {
-            let fs: Vec<String> = cd.props.iter().map(|p| format_rs_tuple_field(p.vis, p.ty.as_ref(), &p.trivia)).collect();
-            ec.line(&format!("{}struct {}({});", rs_vis(cd.vis), cd.name, fs.join(", ")));
-        } else if is_unit || (cd.props.is_empty() && !is_braced) {
-            ec.line(&format!("{}struct {};", rs_vis(cd.vis), cd.name));
-        } else if cd.props.is_empty() {
-            ec.line(&format!("{}struct {} {{}}", rs_vis(cd.vis), cd.name));
+            let fs: Vec<String> = struct_props.iter().map(|p| format_rs_tuple_field(p.vis, p.ty.as_ref(), &p.trivia)).collect();
+            ec.line(&format!("{}struct {}{gp}({}){wh};", rs_vis(cd.vis), cd.name, fs.join(", ")));
+        } else if is_unit || (struct_props.is_empty() && !is_braced) {
+            ec.line(&format!("{}struct {}{gp}{wh};", rs_vis(cd.vis), cd.name));
+        } else if struct_props.is_empty() {
+            ec.line(&format!("{}struct {}{gp}{wh} {{}}", rs_vis(cd.vis), cd.name));
         } else {
-            ec.line(&format!("{}struct {} {{", rs_vis(cd.vis), cd.name));
+            ec.line(&format!("{}struct {}{gp}{wh} {{", rs_vis(cd.vis), cd.name));
             ec.push();
-            for p in &cd.props {
+            for p in &struct_props {
                 ec.emit_trivia(&p.trivia, CommentStyle::Slash);
-                ec.emit_attrs(&p.trivia);
-                let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Rust)).unwrap_or_else(|| "()".into());
+                emit_rs_all_hash_attrs(ec, &p.trivia, &[]);
+                let t = format_rs_tuple_field_ty(p.ty.as_ref());
                 ec.line(&format!("{}{}: {t},", rs_vis(p.vis), p.name));
             }
             ec.pop();
             ec.line("}");
         }
     }
-    if !cd.methods.is_empty() {
+    let tr = cd.implements.first().cloned().or_else(|| rs_attr_arg(&cd.trivia, &cd.decorators, "impl"));
+    if !cd.methods.is_empty() || !assoc_props.is_empty() || (!emits_struct && tr.is_some()) {
         ec.blank();
-        let tr = cd.implements.first().cloned().or_else(|| {
-            cd.decorators.iter().find_map(|d| {
-                d.strip_prefix("impl(\"").and_then(|s| s.strip_suffix("\")"))
-                    .map(|s| s.replace("\\\"", "\"").replace("\\\\", "\\"))
-            })
+        let target_args = rs_attr_arg(&cd.trivia, &cd.decorators, "self_args").unwrap_or_else(|| {
+            if tr.is_none() { format_rs_type_args(&cd.type_params, &cd.trivia, &cd.decorators) } else { String::new() }
         });
         let hdr = match tr {
-            Some(t) => format!("impl {t} for {} {{", cd.name),
-            None => format!("impl {} {{", cd.name),
+            Some(t) => format!("impl{gp} {t} for {}{target_args}{wh} {{", cd.name),
+            None => format!("impl{gp} {}{target_args}{wh} {{", cd.name),
         };
-        ec.line(&hdr);
-        ec.push();
-        for m in &cd.methods { emit_method(ec, m, ectx); }
-        ec.pop();
-        ec.line("}");
+        if cd.methods.is_empty() && assoc_props.is_empty() {
+            ec.line(&format!("{hdr}}}"));
+        } else {
+            ec.line(&hdr);
+            ec.push();
+            for p in &assoc_props {
+                ec.emit_trivia(&p.trivia, CommentStyle::Slash);
+                emit_rs_impl_assoc(ec, p);
+            }
+            for m in &cd.methods { emit_method(ec, m, ectx); }
+            ec.pop();
+            ec.line("}");
+        }
     }
 }
 
 fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+    emit_rs_all_hash_attrs(ec, &m.trivia, &[]);
     let asy = if m.is_async { "async " } else { "" };
+    let (gp, wh) = format_rs_generics(&m.type_params, &m.trivia, &[]);
     let ps = emit_rs_params(&m.params);
     let rt = m.return_type.as_ref().map(|t| format!(" -> {}", emit_type(t, LanguageId::Rust))).unwrap_or_default();
-    ec.line(&format!("{}{asy}fn {}({ps}){rt} {{", rs_vis(m.vis), m.name));
+    if m.body == FnBody::SignatureOnly {
+        ec.line(&format!("{}{asy}fn {}{gp}({ps}){rt}{wh};", rs_vis(m.vis), m.name));
+        return;
+    }
+    ec.line(&format!("{}{asy}fn {}{gp}({ps}){rt}{wh} {{", rs_vis(m.vis), m.name));
     ec.push();
     emit_rs_body(ec, &m.body, ectx);
     ec.pop();
@@ -174,10 +202,12 @@ fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
 fn emit_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
+    emit_rs_all_hash_attrs(ec, &f.trivia, &f.decorators);
     let asy = if f.is_async { "async " } else { "" };
+    let (gp, wh) = format_rs_generics(&f.type_params, &f.trivia, &f.decorators);
     let ps = emit_rs_params(&f.params);
     let rt = f.return_type.as_ref().map(|t| format!(" -> {}", emit_type(t, LanguageId::Rust))).unwrap_or_default();
-    ec.line(&format!("{}{asy}fn {}({ps}){rt} {{", rs_vis(f.vis), f.name));
+    ec.line(&format!("{}{asy}fn {}{gp}({ps}){rt}{wh} {{", rs_vis(f.vis), f.name));
     ec.push();
     emit_rs_body(ec, &f.body, ectx);
     ec.pop();
@@ -220,14 +250,6 @@ fn has_trivia_attr(tr: &Trivia, name: &str) -> bool {
 fn has_class_attr(cd: &ClassDecl, name: &str) -> bool {
     has_trivia_attr(&cd.trivia, name)
         || cd.decorators.iter().any(|d| d == name || d.strip_prefix('@') == Some(name))
-}
-
-fn emit_rs_hash_attrs(ec: &mut EmitCtx, tr: &Trivia) {
-    for c in &tr.leading {
-        if c.kind == TriviaKind::Attribute && c.text.starts_with("#[") {
-            ec.line(&c.text);
-        }
-    }
 }
 
 fn format_rs_tuple_field(vis: Visibility, ty: Option<&AiceType>, tr: &Trivia) -> String {

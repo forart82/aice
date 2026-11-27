@@ -47,7 +47,18 @@ pub(crate) fn step_py_task<'a>(
             if has_val { let v = st.vals.pop().unwrap(); ec.line(&format!("return {v}")); }
             else { ec.line("return"); }
         }
-        CTask::PyExprStmt => { let v = st.vals.pop().unwrap(); ec.line(&v); }
+        CTask::PyExprStmt => {
+            let v = st.vals.pop().unwrap();
+            if v.contains('\n')
+                && (v.starts_with("def ") || v.starts_with("async def ") || v.starts_with("class ") || v.starts_with('@'))
+            {
+                for line in v.lines() {
+                    if line.trim().is_empty() { ec.out.push('\n'); } else { ec.line(line); }
+                }
+            } else {
+                ec.line(&v);
+            }
+        }
         CTask::PyIfHdr => { let c = st.vals.pop().unwrap(); ec.line(&format!("if {c}:")); }
         CTask::PyElifHdr => { let c = st.vals.pop().unwrap(); ec.line(&format!("elif {c}:")); }
         CTask::PyWhileHdr => { let c = st.vals.pop().unwrap(); ec.line(&format!("while {c}:")); }

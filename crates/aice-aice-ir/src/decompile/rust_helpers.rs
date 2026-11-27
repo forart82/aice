@@ -98,3 +98,80 @@ pub(crate) fn rs_vis(node: Node<'_>, src: &str) -> Visibility {
     let Some(vm) = child_by_kind(node, "visibility_modifier") else { return Visibility::Private; };
     rs_vis_text(node_text(vm, src))
 }
+
+fn rs_esc(s: &str) -> String { s.replace('\\', "\\\\").replace('"', "\\\"") }
+
+pub(crate) fn decompile_rs_trait_assoc(node: Node<'_>, src: &str, mut tr: Trivia) -> FieldDecl {
+    let raw = normalize_single_line(node_text(node, src));
+    let name = field_text(node, "name", src).unwrap_or("Out").trim().to_string();
+    let has_complex = node.child_by_field_name("type_parameters").is_some()
+        || child_by_kind(node, "where_clause").is_some()
+        || raw.contains('=');
+    if has_complex {
+        push_attrs_to_trivia(&mut tr, vec![format!("@assoc_raw(\"{}\")", rs_esc(&raw))]);
+        FieldDecl {
+            name, vis: Visibility::Default, is_readonly: false, is_optional: false,
+            sigil: FieldSigil::None, ty: None, default: None, trivia: tr,
+        }
+    } else {
+        push_attrs_to_trivia(&mut tr, vec!["@assoc_type".into()]);
+        let ty = node.child_by_field_name("bounds").map(|b| {
+            let txt = normalize_single_line(node_text(b, src));
+            let clean = txt.trim_start_matches(':').trim();
+            map_type_str(clean, LanguageId::Rust)
+        });
+        FieldDecl {
+            name, vis: Visibility::Default, is_readonly: false, is_optional: false,
+            sigil: FieldSigil::None, ty, default: None, trivia: tr,
+        }
+    }
+}
+
+pub(crate) fn decompile_rs_impl_assoc(node: Node<'_>, src: &str, mut tr: Trivia) -> crate::ir_code::PropDecl {
+    let raw = normalize_single_line(node_text(node, src));
+    let name = field_text(node, "name", src).unwrap_or("Out").trim().to_string();
+    let has_complex = node.child_by_field_name("type_parameters").is_some()
+        || child_by_kind(node, "where_clause").is_some();
+    let ty = if has_complex {
+        push_attrs_to_trivia(&mut tr, vec![format!("@assoc_raw(\"{}\")", rs_esc(&raw))]);
+        None
+    } else {
+        push_attrs_to_trivia(&mut tr, vec!["@assoc_type".into()]);
+        field_text(node, "type", src).map(|t| map_type_str(t, LanguageId::Rust))
+    };
+    crate::ir_code::PropDecl {
+        name, aliases: Vec::new(), vis: Visibility::Default, is_static: false, is_readonly: false,
+        is_mut: false, is_optional: false, ty, init: None, trivia: tr,
+    }
+}
+
+pub(crate) fn rs_generic_attrs_match(tr: &Trivia, impl_attrs: &[String]) -> bool {
+    let mut a: Vec<&str> = tr.leading.iter()
+        .filter(|c| c.kind == crate::ir::TriviaKind::Attribute)
+        .map(|c| c.text.trim().trim_start_matches('@'))
+        .filter(|s| s.starts_with("lifetimes(") || s.starts_with("where("))
+        .collect();
+    let mut b: Vec<&str> = impl_attrs.iter()
+        .map(|s| s.trim().trim_start_matches('@'))
+        .filter(|s| s.starts_with("lifetimes(") || s.starts_with("where("))
+        .collect();
+    a.sort_unstable();
+    b.sort_unstable();
+    a == b
+}
+
+pub(crate) fn is_rs_non_tail_raw(s: &str) -> bool {
+    let t = s.trim();
+    t.ends_with(';')
+        || t.starts_with("let ")
+        || t.starts_with("fn ")
+        || t.starts_with("pub ")
+        || t.starts_with("const ")
+        || t.starts_with("static ")
+        || t.starts_with("struct ")
+        || t.starts_with("enum ")
+        || t.starts_with("type ")
+        || t.starts_with("use ")
+        || t.starts_with("impl ")
+        || t.starts_with("trait ")
+}

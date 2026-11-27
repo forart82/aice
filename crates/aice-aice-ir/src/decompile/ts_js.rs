@@ -104,10 +104,9 @@ fn decompile_top_item(
                     let raw_name = field_text(d, "name", src).unwrap_or("x");
                     let name = if raw_name.contains('\n') { crate::decompile::ts_helpers::normalize_single_line(raw_name) } else { raw_name.to_string() };
                     let ty = d.child_by_field_name("type").map(|t| map_ts_type_node(t, src, lang));
-                    let value = d.child_by_field_name("value").map(|v| decompile_expr(v, src, lang))
-                        .unwrap_or(crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Nil));
-                    if is_const && ty.is_none() && vis == Visibility::Default {
-                        m.items.push(AiceItem::Const(ConstDecl { vis, name, ty, value, trivia: tr.clone(), span: node_span(d) }));
+                    let value = d.child_by_field_name("value").map(|v| decompile_expr(v, src, lang));
+                    if is_const && ty.is_none() && vis == Visibility::Default && let Some(val) = value {
+                        m.items.push(AiceItem::Const(ConstDecl { vis, name, ty, value: val, trivia: tr.clone(), span: node_span(d) }));
                     } else {
                         m.items.push(AiceItem::Var(VarDecl { vis, is_mut: !is_const, name, ty, value, trivia: tr.clone(), span: node_span(d) }));
                     }

@@ -19,7 +19,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
 }
 
 fn is_kt_type_kind(k: &str) -> bool {
-    matches!(k, "type" | "user_type" | "nullable_type" | "function_type" | "parenthesized_type")
+    matches!(k, "type" | "user_type" | "nullable_type" | "function_type" | "parenthesized_type" | "non_nullable_type" | "dynamic_type")
 }
 
 pub(crate) fn kt_type_node(node: Node<'_>, src: &str) -> Option<AiceType> {
@@ -293,7 +293,7 @@ pub(crate) fn decompile_dart_top_var(node: Node<'_>, src: &str, tr: Trivia, m: &
         if is_const {
             m.items.push(AiceItem::Const(ConstDecl { vis, name, ty: ty.clone(), value, trivia: item_tr, span: node_span(id) }));
         } else {
-            m.items.push(AiceItem::Var(VarDecl { vis, is_mut: !is_final, name, ty: ty.clone(), value, trivia: item_tr, span: node_span(id) }));
+            m.items.push(AiceItem::Var(VarDecl { vis, is_mut: !is_final, name, ty: ty.clone(), value: Some(value), trivia: item_tr, span: node_span(id) }));
         }
         emitted = true;
     }

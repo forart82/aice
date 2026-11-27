@@ -72,7 +72,7 @@ pub(crate) enum CTask<'a> {
     BraceAssign(AssignOp),
     BraceGoReturn(usize),
     BraceReturn { as_tail: bool },
-    BraceExprStmt { as_tail: bool },
+    BraceExprStmt { as_tail: bool, is_raw: bool },
     BraceIfHdr,
     BraceElifHdr,
     BraceWhileHdr,

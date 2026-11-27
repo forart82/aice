@@ -29,12 +29,13 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Var(vd) => {
                 ec.emit_trivia(&vd.trivia, CommentStyle::Slash);
-                let val = emit_expr(&vd.value, LanguageId::Dart, &ectx);
-                match (vd.is_mut, &vd.ty) {
-                    (false, Some(ty)) => ec.line(&format!("final {} {} = {val};", emit_dart_type(ty), vd.name)),
-                    (false, None) => ec.line(&format!("final {} = {val};", vd.name)),
-                    (true, Some(ty)) => ec.line(&format!("{} {} = {val};", emit_dart_type(ty), vd.name)),
-                    (true, None) => ec.line(&format!("var {} = {val};", vd.name)),
+                match (&vd.value, vd.is_mut, &vd.ty) {
+                    (Some(v), false, Some(ty)) => ec.line(&format!("final {} {} = {};", emit_dart_type(ty), vd.name, emit_expr(v, LanguageId::Dart, &ectx))),
+                    (Some(v), false, None) => ec.line(&format!("final {} = {};", vd.name, emit_expr(v, LanguageId::Dart, &ectx))),
+                    (Some(v), true, Some(ty)) => ec.line(&format!("{} {} = {};", emit_dart_type(ty), vd.name, emit_expr(v, LanguageId::Dart, &ectx))),
+                    (Some(v), true, None) => ec.line(&format!("var {} = {};", vd.name, emit_expr(v, LanguageId::Dart, &ectx))),
+                    (None, _, Some(ty)) => ec.line(&format!("{} {};", emit_dart_type(ty), vd.name)),
+                    (None, _, None) => ec.line(&format!("var {};", vd.name)),
                 }
             }
             AiceItem::Directive { text, trivia, .. } => {

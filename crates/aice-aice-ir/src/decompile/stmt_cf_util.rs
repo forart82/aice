@@ -134,3 +134,139 @@ pub(crate) fn insert_updates_before_continue(stmts: &mut Vec<Stmt>, upds: &[Stmt
         }
     }
 }
+
+fn dedent_node_text(node: Node<'_>, src: &str) -> String {
+    let raw = node_text(node, src).trim_end();
+    let col = node.start_position().column;
+    if col == 0 || !raw.contains('\n') {
+        return raw.trim().to_string();
+    }
+    raw.lines()
+        .enumerate()
+        .map(|(i, line)| {
+            if i == 0 {
+                line.trim_start()
+            } else {
+                let strip = line.bytes().take(col).take_while(|b| *b == b' ' || *b == b'\t').count();
+                &line[strip..]
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub(crate) fn raw_passthrough_stmt_text(node: Node<'_>, src: &str, lang: LanguageId) -> Option<String> {
+    let raw = node_text(node, src).trim();
+    if raw.is_empty() { return None; }
+    match (node.kind(), lang) {
+        ("global_statement" | "nonlocal_statement", LanguageId::Python)
+        | ("do_while_statement", LanguageId::Kotlin) => Some(raw.to_string()),
+        ("function_definition" | "decorated_definition" | "class_definition", LanguageId::Python) => {
+            Some(dedent_node_text(node, src))
+        }
+        ("do_statement", _) => {
+            let mut s = raw.to_string();
+            if !s.ends_with(';') { s.push(';'); }
+            Some(s)
+        }
+        ("let_declaration", LanguageId::Rust)
+            if node.child_by_field_name("alternative").is_some()
+                || (0..node.child_count()).filter_map(|i| node.child(i)).any(|c| !c.is_named() && c.kind() == "else") =>
+        {
+            Some(raw.to_string())
+        }
+        (
+            "function_item" | "const_item" | "static_item" | "struct_item" | "enum_item"
+            | "type_item" | "use_declaration" | "impl_item" | "trait_item",
+            LanguageId::Rust,
+        ) => Some(raw.to_string()),
+        _ => None,
+    }
+}
+
+pub(crate) fn is_rs_if_let_expr(node: Node<'_>) -> bool {
+    let mut cur = Some(node);
+    while let Some(n) = cur.take() {
+        if n.child_by_field_name("condition")
+            .is_some_and(|c| matches!(c.kind(), "let_condition" | "let_chain"))
+        {
+            return true;
+        }
+        if let Some(alt) = n.child_by_field_name("alternative") {
+            let inner = if alt.kind() == "else_clause" {
+                named_children(alt).into_iter().find(|c| !is_comment_kind(c.kind()))
+            } else {
+                Some(alt)
+            };
+            if let Some(sub) = inner && sub.kind() == "if_expression" {
+                cur = Some(sub);
+            }
+        }
+    }
+    false
+}
+
+pub(crate) fn unwrap_kt_if_expr_branch<'a>(n: Node<'a>) -> Option<Node<'a>> {
+    if n.kind() != "block" { return Some(n); }
+    let kids: Vec<Node<'a>> = named_children(n).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+    if kids.len() == 1
+        && !matches!(kids[0].kind(), "property_declaration" | "assignment" | "for_statement" | "while_statement" | "do_while_statement")
+    {
+        Some(kids[0])
+    } else {
+        None
+    }
+}
+
+pub(crate) fn push_cond_expr_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    use crate::decompile::iter_expr::ExprFin;
+    use crate::ir_code::{BinaryOp, Expr};
+    if env.lang == LanguageId::Rust && node.kind() == "if_expression" && is_rs_if_let_expr(node) {
+        env.exprs.push(Expr::Raw(raw.to_string()));
+        return;
+    }
+    let kids: Vec<_> = named_children(node).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+    if env.lang == LanguageId::Php
+        && node.kind() == "conditional_expression"
+        && node.child_by_field_name("body").is_none()
+        && kids.len() == 2
+    {
+        env.tasks.push(DTask::FinishExpr(ExprFin::Binary(BinaryOp::Elvis)));
+        env.tasks.push(DTask::Expr(kids[1]));
+        env.tasks.push(DTask::Expr(kids[0]));
+        return;
+    }
+    let (cond, then_n, raw_else) = if env.lang == LanguageId::Python && node.kind() == "conditional_expression" {
+        (kids.get(1).copied(), kids.first().copied(), kids.get(2).copied())
+    } else {
+        (
+            node.child_by_field_name("condition").or_else(|| kids.first().copied()),
+            node.child_by_field_name("consequence")
+                .or_else(|| node.child_by_field_name("body"))
+                .or_else(|| kids.get(1).copied()),
+            node.child_by_field_name("alternative").or_else(|| kids.get(2).copied()),
+        )
+    };
+    let else_n = raw_else.map(|e| {
+        if e.kind() == "else_clause" {
+            named_children(e).into_iter().find(|c| !is_comment_kind(c.kind())).unwrap_or(e)
+        } else { e }
+    });
+    if env.lang == LanguageId::Kotlin && node.kind() == "if_expression" {
+        let t = then_n.and_then(unwrap_kt_if_expr_branch);
+        let e = else_n.and_then(unwrap_kt_if_expr_branch);
+        if let (Some(c), Some(t), Some(e)) = (cond, t, e) {
+            env.tasks.push(DTask::FinishExpr(ExprFin::Conditional));
+            env.tasks.push(DTask::Expr(e));
+            env.tasks.push(DTask::Expr(t));
+            env.tasks.push(DTask::Expr(c));
+        } else { env.exprs.push(Expr::Raw(raw.to_string())); }
+        return;
+    }
+    if let (Some(c), Some(t), Some(e)) = (cond, then_n, else_n) {
+        env.tasks.push(DTask::FinishExpr(ExprFin::Conditional));
+        env.tasks.push(DTask::Expr(e));
+        env.tasks.push(DTask::Expr(t));
+        env.tasks.push(DTask::Expr(c));
+    } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+}

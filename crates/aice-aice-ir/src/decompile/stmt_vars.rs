@@ -128,7 +128,17 @@ pub(crate) fn find_var_decls<'a>(
             .collect();
         if ds.is_empty() { vec![inner_node] } else { ds }
     };
-    let shared_ty = field_text(inner_node, "type", src).map(|t| map_type_str(t, lang));
+    let shared_ty = field_text(inner_node, "type", src)
+        .or_else(|| {
+            (lang == LanguageId::Dart).then(|| {
+                child_by_kind(inner_node, "type")
+                    .or_else(|| child_by_kind(inner_node, "nullable_type"))
+                    .or_else(|| child_by_kind(inner_node, "type_identifier"))
+                    .or_else(|| child_by_kind(inner_node, "function_type"))
+                    .map(|t| node_text(t, src))
+            }).flatten()
+        })
+        .map(|t| map_type_str(t, lang));
     let c_decl_base = (inner_node.kind() == "declaration").then(|| {
         let base = field_text(inner_node, "type", src)?.trim();
         let has_const = named_children(inner_node)
@@ -175,15 +185,7 @@ pub(crate) fn find_var_decls<'a>(
             } else {
                 field_text(decl, "type", src)
                     .map(|t| map_type_str(t, lang))
-                    .or_else(|| {
-                        if is_kt_prop {
-                            child_by_kind(decl, "user_type")
-                                .or_else(|| child_by_kind(decl, "type"))
-                                .map(|t| map_type_str(node_text(t, src), lang))
-                        } else {
-                            None
-                        }
-                    })
+                    .or_else(|| is_kt_prop.then(|| crate::decompile::kotlin_dart::kt_type_node(decl, src)).flatten())
                     .or_else(|| shared_ty.clone())
             };
             let init = decl
@@ -202,12 +204,16 @@ pub(crate) fn find_var_decls<'a>(
                 })
                 .or_else(|| {
                     if is_kt_prop {
-                        named_children(node).into_iter().last().filter(|c| {
-                            c.id() != decl.id()
-                                && !matches!(
-                                    c.kind(),
-                                    "modifiers" | "binding_pattern_kind" | "user_type" | "type"
-                                )
+                        find_eq_rhs(node).or_else(|| {
+                            named_children(node).into_iter().last().filter(|c| {
+                                c.id() != decl.id()
+                                    && !matches!(
+                                        c.kind(),
+                                        "modifiers" | "binding_pattern_kind" | "user_type" | "type"
+                                            | "nullable_type" | "function_type" | "parenthesized_type"
+                                            | "non_nullable_type" | "type_modifiers"
+                                    )
+                            })
                         })
                     } else {
                         find_eq_rhs(decl)
@@ -226,6 +232,12 @@ pub(crate) fn find_catch_parts<'a>(
 ) -> (Option<String>, Option<AiceType>, Trivia, Option<Node<'a>>) {
     let (mut param, mut ty) = if lang == LanguageId::Python && ch.kind() == "except_clause" {
         crate::decompile::stmt_cf_util::extract_py_except_parts(ch, src)
+    } else if lang == LanguageId::Kotlin && ch.kind() == "catch_block" {
+        let p = child_by_kind(ch, "simple_identifier")
+            .or_else(|| child_by_kind(ch, "identifier"))
+            .map(|n| node_text(n, src).trim().to_string())
+            .filter(|s| !s.is_empty());
+        (p, crate::decompile::kotlin_dart::kt_type_node(ch, src))
     } else {
         let p = field_text(ch, "parameter", src)
             .or_else(|| (lang == LanguageId::Php).then(|| field_text(ch, "name", src)).flatten())

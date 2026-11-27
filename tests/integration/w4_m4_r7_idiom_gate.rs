@@ -238,16 +238,18 @@ fn r7_report_schema_and_exact_bpe_verification() {
         // (F-149 Rust range expressions in C-02 [+8/+7], F-150 Go composite literals in C-04
         // [+22/+22]), Wave 18 fidelity fixes (F-154 Go if/switch inits + F-156 Go defer/go in
         // C-04 [+55/+60], F-155 C pointer `rb->...` in C-06 [+31/+31], F-158 Kotlin `try` expr in
-        // C-07 [+3/+3]), & Wave 19 fidelity fixes (F-160 Go `func_literal` in C-04 [+3/+4],
-        // F-161 Kotlin trailing lambdas in C-07 [+39/+40]).
-        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-19 counts.
+        // C-07 [+3/+3]), Wave 19 fidelity fixes (F-160 Go `func_literal` in C-04 [+3/+4],
+        // F-161 Kotlin trailing lambdas in C-07 [+39/+40]), & Wave 20 fidelity fixes
+        // (F-168 Go package-level `var (...)` in C-04 `types.go` [+51/+46], F-165 Kotlin `else`
+        // branch in C-07 `SyncState.kt` [+21/+22]).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-20 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
             "C-01" => (2155, 2193),
             "C-02" => (1713, 1683),
-            "C-04" => (1683, 1702),
+            "C-04" => (1734, 1748),
             "C-05" => (1572, 1595),
             "C-06" => (1541, 1550),
-            "C-07" => (1562, 1581),
+            "C-07" => (1583, 1603),
             "C-08" => (1432, 1441),
             "C-09" => (1262, 1264),
             "C-10" => (1415, 1432),

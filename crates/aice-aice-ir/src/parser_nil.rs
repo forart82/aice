@@ -161,7 +161,7 @@ pub(crate) fn resolve_bound_nil_in_module(m: &mut AiceModule) {
                 }
                 for sb in &mut c.static_blocks { run_nil_tasks(NilTask::Slice(sb)); }
             }
-            AiceItem::Var(v) => run_nil_tasks(NilTask::Expr(&mut v.value)),
+            AiceItem::Var(v) => if let Some(val) = &mut v.value { run_nil_tasks(NilTask::Expr(val)); },
             AiceItem::Const(c) => run_nil_tasks(NilTask::Expr(&mut c.value)),
             AiceItem::Component(comp) => run_nil_tasks(NilTask::Slice(&mut comp.body_stmts)),
             _ => {}

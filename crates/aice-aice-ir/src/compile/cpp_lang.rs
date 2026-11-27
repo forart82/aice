@@ -136,7 +136,17 @@ fn emit_cpp_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
         switch_vis(ec, &mut cur_vis, v);
         ec.push();
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Cpp)).unwrap_or_else(|| "auto".into());
-        ec.line(&format!("{t} {};", p.name));
+        match &p.init {
+            Some(e) => {
+                let val = emit_expr(e, LanguageId::Cpp, ectx);
+                if val.starts_with('{') && val.ends_with('}') {
+                    ec.line(&format!("{t} {}{val};", p.name));
+                } else {
+                    ec.line(&format!("{t} {} = {val};", p.name));
+                }
+            }
+            None => ec.line(&format!("{t} {};", p.name)),
+        }
         ec.pop();
     }
     ec.line("};");

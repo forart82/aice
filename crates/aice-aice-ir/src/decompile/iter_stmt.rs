@@ -7,7 +7,7 @@ use crate::decompile::iter_match::{push_match_task, push_select_task};
 use crate::decompile::iter_stmt_cf::{push_if_task, push_ruby_begin, push_try_task};
 use crate::decompile::iter_stmt_fin::push_for_stmt;
 use crate::decompile::op_map::find_assign_parts;
-use crate::decompile::stmt_cf_util::push_var_decl_stmt;
+use crate::decompile::stmt_cf_util::{push_var_decl_stmt, raw_passthrough_stmt_text};
 use crate::decompile::stmt_common::find_body_node;
 use crate::decompile::stmt_for::{extract_c_for_parts, is_single_stmt_node};
 use crate::decompile::trivia::{collect_header_trailing, collect_trivia, is_comment_kind};
@@ -52,8 +52,15 @@ pub(crate) fn push_block_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
     env.tasks.push(DTask::FinishBlock(base));
     let kids = if node.kind() == "empty_statement" {
         Vec::new()
-    } else if is_single_stmt_node(node.kind()) {
+    } else if is_single_stmt_node(node.kind())
+        || (env.lang == LanguageId::Kotlin
+            && !matches!(node.kind(), "block" | "function_body" | "statements" | "control_structure_body" | "source_file"))
+    {
         vec![node]
+    } else if node.kind() == "control_structure_body"
+        && let Some(blk) = crate::decompile::cst_util::child_by_kind(node, "block")
+    {
+        crate::decompile::iter_env::flatten_block_children(blk)
     } else {
         crate::decompile::iter_env::flatten_block_children(node)
     };
@@ -233,6 +240,9 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         | "when_expression" | "expression_switch_statement" | "case" => push_match_task(env, node, false),
         "select_statement" => push_select_task(env, node),
         "type_switch_statement" if env.lang == LanguageId::Go => crate::decompile::go_lang::push_go_type_switch_task(env, node),
+        _ if let Some(raw) = raw_passthrough_stmt_text(node, env.src, env.lang) => {
+            env.stmts.push(Stmt::Expr { expr: Expr::Raw(raw), trivia: Trivia::default() });
+        }
         "lexical_declaration" | "variable_declaration" | "let_declaration"
         | "short_var_declaration" | "local_variable_declaration" | "local_declaration_statement"
         | "initialized_variable_definition" | "property_declaration" | "declaration" => {

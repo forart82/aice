@@ -40,6 +40,23 @@ pub(crate) fn extract_go_switch_init_hdr(env: &DecompEnv<'_>, node: Node<'_>) ->
     Some(if hdr.contains('\n') { Expr::Raw(hdr.to_string()) } else { Expr::Ident(hdr.to_string()) })
 }
 
+fn extract_kt_if_branches<'a>(node: Node<'a>, cond_n: Option<Node<'a>>) -> (Option<Node<'a>>, Option<Node<'a>>) {
+    let after_cond = cond_n.map_or(node.start_byte(), |c| c.end_byte());
+    let (mut seen_else, mut then_n, mut alt_n) = (false, None, None);
+    let mut cur = node.walk();
+    for ch in node.children(&mut cur) {
+        if ch.start_byte() < after_cond { continue; }
+        if !ch.is_named() {
+            if ch.kind() == "else" { seen_else = true; }
+            continue;
+        }
+        if is_comment_kind(ch.kind()) { continue; }
+        if seen_else { if alt_n.is_none() { alt_n = Some(ch); } }
+        else if then_n.is_none() { then_n = Some(ch); }
+    }
+    (then_n, alt_n)
+}
+
 pub(crate) fn push_if_task<'a>(env: &mut DecompEnv<'a>, root: Node<'a>) {
     let mut cond_nodes: Vec<Option<Node<'a>>> = Vec::new();
     let mut cond_overrides: Vec<Option<Expr>> = Vec::new();
@@ -53,7 +70,11 @@ pub(crate) fn push_if_task<'a>(env: &mut DecompEnv<'a>, root: Node<'a>) {
     let mut is_first = true;
     while let Some(node) = cur.take() {
         let cond_n = node.child_by_field_name("condition");
-        let then_n = find_body_node(node);
+        let (then_n, kt_alt) = if env.lang == LanguageId::Kotlin && node.kind() == "if_expression" {
+            extract_kt_if_branches(node, cond_n)
+        } else {
+            (find_body_node(node), None)
+        };
         let tr = then_n.and_then(|bn| collect_header_trailing(bn, env.src, env.opts));
         if is_first {
             root_trailing = tr;
@@ -72,6 +93,20 @@ pub(crate) fn push_if_task<'a>(env: &mut DecompEnv<'a>, root: Node<'a>) {
             cond_overrides.push(None);
         }
         then_nodes.push(then_n);
+
+        if let Some(alt) = kt_alt {
+            if alt.kind() == "if_expression" {
+                cur = Some(alt);
+            } else if alt.kind() == "control_structure_body"
+                && let Some(sub_if) = named_children(alt).into_iter().find(|k| k.kind() == "if_expression")
+            {
+                cur = Some(sub_if);
+            } else {
+                else_trivia.trailing = collect_header_trailing(alt, env.src, env.opts);
+                else_node = Some(alt);
+            }
+            continue;
+        }
 
         if let Some(alt) = node.child_by_field_name("alternative")
             && !matches!(alt.kind(), "elif_clause" | "else_if_clause")

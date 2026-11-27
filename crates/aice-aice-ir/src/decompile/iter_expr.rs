@@ -18,7 +18,6 @@ use crate::decompile::iter_expr_fin::{
 };
 use crate::decompile::iter_match::push_match_task;
 use crate::decompile::op_map::find_assign_parts;
-use crate::decompile::trivia::is_comment_kind;
 use crate::ir_code::{AssignOp, BinaryOp, CompKind, Expr, LiteralVal, MemberKind, Stmt, UnaryOp};
 use crate::ir_types::{AiceType, ParamDecl};
 
@@ -136,44 +135,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         }
         "regex" => env.exprs.push(Expr::Literal(LiteralVal::Regex(raw.to_string()))),
         "ternary_expression" | "conditional_expression" | "if_expression" | "conditional" => {
-            let kids: Vec<_> = named_children(node)
-                .into_iter()
-                .filter(|c| !is_comment_kind(c.kind()))
-                .collect();
-            if env.lang == LanguageId::Php
-                && node.kind() == "conditional_expression"
-                && node.child_by_field_name("body").is_none()
-                && kids.len() == 2
-            {
-                env.tasks.push(DTask::FinishExpr(ExprFin::Binary(BinaryOp::Elvis)));
-                env.tasks.push(DTask::Expr(kids[1]));
-                env.tasks.push(DTask::Expr(kids[0]));
-                return;
-            }
-            let (cond, then_n, raw_else) = if env.lang == LanguageId::Python && node.kind() == "conditional_expression" {
-                (kids.get(1).copied(), kids.first().copied(), kids.get(2).copied())
-            } else {
-                (
-                    node.child_by_field_name("condition").or_else(|| kids.first().copied()),
-                    node.child_by_field_name("consequence")
-                        .or_else(|| node.child_by_field_name("body"))
-                        .or_else(|| kids.get(1).copied()),
-                    node.child_by_field_name("alternative").or_else(|| kids.get(2).copied()),
-                )
-            };
-            let else_n = raw_else.map(|e| {
-                if e.kind() == "else_clause" {
-                    named_children(e).into_iter().find(|c| !is_comment_kind(c.kind())).unwrap_or(e)
-                } else {
-                    e
-                }
-            });
-            if let (Some(c), Some(t), Some(e)) = (cond, then_n, else_n) {
-                env.tasks.push(DTask::FinishExpr(ExprFin::Conditional));
-                env.tasks.push(DTask::Expr(e));
-                env.tasks.push(DTask::Expr(t));
-                env.tasks.push(DTask::Expr(c));
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            crate::decompile::stmt_cf_util::push_cond_expr_task(env, node, raw);
         }
         "instance_variable" => env.exprs.push(Expr::Member {
             object: Box::new(Expr::Ident("this".into())), property: raw.trim_start_matches('@').into(), kind: MemberKind::Dot,

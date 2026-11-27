@@ -22,7 +22,7 @@ pub(crate) fn is_raw_passthrough_expr(kind: &str, lang: LanguageId) -> bool {
             | ("text_block", LanguageId::Java)
             | ("switch_expression", LanguageId::Java | LanguageId::CSharp)
             | ("send_statement" | "channel_type" | "composite_literal" | "func_literal", LanguageId::Go)
-            | ("range_expression", LanguageId::Rust)
+            | ("range_expression" | "async_block" | "unsafe_block", LanguageId::Rust)
             | ("compound_literal_expression" | "initializer_list", LanguageId::C | LanguageId::Cpp)
             | ("template_function" | "lambda_expression", LanguageId::Cpp)
     )

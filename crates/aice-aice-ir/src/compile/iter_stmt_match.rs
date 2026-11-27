@@ -64,7 +64,7 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
             let hc = case_has_cond(mc, subjectless);
             tasks.push(CTask::BracePop);
             match &mc.body {
-                FnBody::Expr(e) => { tasks.push(CTask::BraceExprStmt { as_tail: false }); tasks.push(CTask::EvalExpr(e)); }
+                FnBody::Expr(e) => { tasks.push(CTask::BraceExprStmt { as_tail: false, is_raw: matches!(e, Expr::Raw(_)) }); tasks.push(CTask::EvalExpr(e)); }
                 FnBody::Block(b) => tasks.push(CTask::BraceStmts { stmts: b, tail: false }),
                 FnBody::SignatureOnly => {}
             }
@@ -126,7 +126,7 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
         for mc in cases.iter().rev() {
             tasks.push(CTask::BracePop);
             match &mc.body {
-                FnBody::Expr(e) => { tasks.push(CTask::BraceExprStmt { as_tail: true }); tasks.push(CTask::EvalExpr(e)); }
+                FnBody::Expr(e) => { tasks.push(CTask::BraceExprStmt { as_tail: true, is_raw: matches!(e, Expr::Raw(_)) }); tasks.push(CTask::EvalExpr(e)); }
                 FnBody::Block(b) => tasks.push(CTask::BraceStmts { stmts: b, tail: false }),
                 FnBody::SignatureOnly => {}
             }
@@ -148,7 +148,7 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
                 tasks.push(CTask::BraceOwnedLine(format!("break{semi}")));
             }
             match &mc.body {
-                FnBody::Expr(e) => { tasks.push(CTask::BraceExprStmt { as_tail: false }); tasks.push(CTask::EvalExpr(e)); }
+                FnBody::Expr(e) => { tasks.push(CTask::BraceExprStmt { as_tail: false, is_raw: matches!(e, Expr::Raw(_)) }); tasks.push(CTask::EvalExpr(e)); }
                 FnBody::Block(b) => tasks.push(CTask::BraceStmts { stmts: b, tail: false }),
                 FnBody::SignatureOnly => {}
             }

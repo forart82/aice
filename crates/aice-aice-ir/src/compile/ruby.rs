@@ -35,7 +35,8 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Var(vd) => {
                 ec.emit_trivia(&vd.trivia, CommentStyle::Hash);
-                ec.line(&format!("{} = {}", vd.name, emit_expr(&vd.value, LanguageId::Ruby, &ectx)));
+                let val = vd.value.as_ref().map(|v| emit_expr(v, LanguageId::Ruby, &ectx)).unwrap_or_else(|| "nil".into());
+                ec.line(&format!("{} = {val}", vd.name));
             }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Hash);

@@ -34,9 +34,12 @@ pub fn compile(module: &AiceModule, target: LanguageId) -> Result<String, Transp
             AiceItem::Var(vd) => {
                 ec.emit_trivia(&vd.trivia, CommentStyle::Slash);
                 let exp = if vd.vis == Visibility::Public { "export " } else { "" };
-                let kw = if vd.is_mut { "let" } else { "const" };
+                let kw = if vd.is_mut || vd.value.is_none() { "let" } else { "const" };
                 let ty = if !is_js { vd.ty.as_ref().map(|t| format!(": {}", emit_type(t, target))).unwrap_or_default() } else { String::new() };
-                ec.line(&format!("{exp}{kw} {}{ty} = {};", vd.name, emit_expr(&vd.value, target, &ectx)));
+                match &vd.value {
+                    Some(v) => ec.line(&format!("{exp}{kw} {}{ty} = {};", vd.name, emit_expr(v, target, &ectx))),
+                    None => ec.line(&format!("{exp}let {}{ty};", vd.name)),
+                }
             }
             AiceItem::Component(comp) => emit_component(&mut ec, comp, target, &ectx),
             AiceItem::Directive { text, trivia, .. } => {
