@@ -29,7 +29,18 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Type(td) => emit_c_struct(&mut ec, td),
             AiceItem::Enum(ed) => emit_c_enum(&mut ec, ed, &ectx),
             AiceItem::Fn(fd) => emit_c_fn(&mut ec, fd, &ectx),
-            AiceItem::Directive { text, .. } => ec.line(text),
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.emit_trivia(trivia, CommentStyle::Slash);
+                let t = text.trim();
+                if (t.starts_with("struct ") || t.starts_with("union ")
+                    || t.starts_with("enum ") || t.starts_with("typedef "))
+                    && !t.ends_with(';')
+                {
+                    ec.line(&format!("{t};"));
+                } else {
+                    ec.line(text);
+                }
+            }
             _ => {}
         }
     }
@@ -70,7 +81,10 @@ fn emit_c_enum(ec: &mut EmitCtx, ed: &EnumDecl, ectx: &ExprEmitCtx) {
 fn emit_c_struct(ec: &mut EmitCtx, td: &TypeDecl) {
     ec.blank();
     ec.emit_trivia(&td.trivia, CommentStyle::Slash);
-    ec.line("typedef struct {");
+    match c_tag_attr(&td.trivia) {
+        Some(tag) if !tag.is_empty() => ec.line(&format!("typedef struct {tag} {{")),
+        _ => ec.line("typedef struct {"),
+    }
     ec.push();
     for f in &td.fields {
         let raw_t = f.ty.as_ref().map(|x| emit_type(x, LanguageId::C)).unwrap_or_else(|| "int".into());

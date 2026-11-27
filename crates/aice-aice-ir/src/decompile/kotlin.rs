@@ -23,20 +23,16 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
             match ch.kind() {
                 "package_header" => m.module_name = node_text(ch, src).trim().trim_start_matches("package ").trim().to_string(),
                 "import" | "import_header" => push_kt_import(ch, src, tr, &mut m),
-                "import_list" => {
-                    for ich in named_children(ch) {
-                        if matches!(ich.kind(), "import" | "import_header") {
-                            push_kt_import(ich, src, collect_trivia(ich, src, opts), &mut m);
-                        }
+                "import_list" => for ich in named_children(ch) {
+                    if matches!(ich.kind(), "import" | "import_header") {
+                        push_kt_import(ich, src, collect_trivia(ich, src, opts), &mut m);
                     }
-                }
+                },
                 "class_declaration" | "object_declaration" => decompile_kt_class_into(ch, src, opts, tr, None, &mut m.items),
                 "function_declaration" => m.items.push(AiceItem::Fn(decompile_kt_fn(ch, src, opts, tr))),
                 _ => {
                     let txt = node_text(ch, src).trim();
-                    if !txt.is_empty() {
-                        m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(ch) });
-                    }
+                    if !txt.is_empty() { m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(ch) }); }
                 }
             }
         }
@@ -98,15 +94,11 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
             match ch.kind() {
                 "enum_entry" => props.push(decompile_kt_enum_entry(ch, &name, src, mtr)),
                 "function_declaration" => methods.push(kt_fn_to_method(decompile_kt_fn(ch, src, opts, mtr), false)),
-                "property_declaration" => {
-                    if let Some(p) = decompile_kt_prop(ch, src, mtr, false, None) { props.push(p); }
-                }
+                "property_declaration" => if let Some(p) = decompile_kt_prop(ch, src, mtr, false, None) { props.push(p); },
                 "class_declaration" | "object_declaration" => {
                     let start = nested_items.len();
                     decompile_kt_class_into(ch, src, opts, mtr, Some(&cur_path), &mut nested_items);
-                    if let Some(AiceItem::Class(nc)) = nested_items.get(start) {
-                        direct_nested.push((nc.name.clone(), nc.vis));
-                    }
+                    if let Some(AiceItem::Class(nc)) = nested_items.get(start) { direct_nested.push((nc.name.clone(), nc.vis)); }
                 }
                 "companion_object" => decompile_kt_companion(ch, src, opts, &cur_path, &mut props, &mut methods, &mut nested_items),
                 _ => {}
@@ -161,25 +153,18 @@ fn decompile_kt_companion(
     node: Node<'_>, src: &str, opts: &TranspileOpts, parent_path: &str,
     props: &mut Vec<PropDecl>, methods: &mut Vec<MethodDecl>, nested_out: &mut Vec<AiceItem>,
 ) {
-    let tag = match kt_ident(node, src) {
-        Some(n) => format!("@companion({n})"),
-        None => "@companion".to_string(),
-    };
+    let tag = kt_ident(node, src).map(|n| format!("@companion({n})")).unwrap_or_else(|| "@companion".into());
     let Some(body) = child_by_kind(node, "class_body") else { return; };
     for ch in named_children(body) {
         if is_comment_kind(ch.kind()) { continue; }
         let mut mtr = collect_trivia(ch, src, opts);
         match ch.kind() {
-            "property_declaration" => {
-                if let Some(p) = decompile_kt_prop(ch, src, mtr, true, Some(&tag)) { props.push(p); }
-            }
+            "property_declaration" => if let Some(p) = decompile_kt_prop(ch, src, mtr, true, Some(&tag)) { props.push(p); },
             "function_declaration" => {
                 push_attrs_to_trivia(&mut mtr, vec![tag.clone()]);
                 methods.push(kt_fn_to_method(decompile_kt_fn(ch, src, opts, mtr), true));
             }
-            "class_declaration" | "object_declaration" => {
-                decompile_kt_class_into(ch, src, opts, mtr, Some(parent_path), nested_out);
-            }
+            "class_declaration" | "object_declaration" => decompile_kt_class_into(ch, src, opts, mtr, Some(parent_path), nested_out),
             _ => {}
         }
     }
@@ -189,8 +174,7 @@ fn decompile_kt_prop(node: Node<'_>, src: &str, mut tr: Trivia, is_static: bool,
     let vd = child_by_kind(node, "variable_declaration")?;
     let name = kt_ident(vd, src)?;
     let is_mut = has_anon_kw(node, "var");
-    let mut attrs = Vec::new();
-    if let Some(a) = extra_attr { attrs.push(a.to_string()); }
+    let mut attrs: Vec<String> = extra_attr.map(str::to_string).into_iter().collect();
     attrs.extend(kt_member_attrs(node, src));
     push_attrs_to_trivia(&mut tr, attrs);
     let init = named_children(node).into_iter()
@@ -202,7 +186,11 @@ fn decompile_kt_prop(node: Node<'_>, src: &str, mut tr: Trivia, is_static: bool,
     })
 }
 
-fn kt_fn_to_method(f: FnDecl, is_static: bool) -> MethodDecl {
+fn kt_fn_to_method(mut f: FnDecl, is_static: bool) -> MethodDecl {
+    if !f.decorators.is_empty() {
+        let attrs = f.decorators.drain(..).map(|d| if d.starts_with('@') { d } else { format!("@{d}") }).collect();
+        push_attrs_to_trivia(&mut f.trivia, attrs);
+    }
     MethodDecl {
         vis: f.vis, is_static, is_async: f.is_async, is_const: false,
         accessor: Default::default(), name: f.name, type_params: f.type_params,
@@ -210,9 +198,26 @@ fn kt_fn_to_method(f: FnDecl, is_static: bool) -> MethodDecl {
     }
 }
 
+fn kt_fn_receiver(node: Node<'_>, src: &str) -> Option<String> {
+    let name_start = node.child_by_field_name("name")?.start_byte();
+    let (mut start, mut end) = (None, 0usize);
+    for i in 0..node.child_count() {
+        let Some(c) = node.child(i) else { continue };
+        if c.start_byte() >= name_start { break; }
+        if matches!(c.kind(), "receiver_type" | "type_modifiers" | "user_type" | "nullable_type" | "parenthesized_type" | "type")
+            || (!c.is_named() && c.kind() == "dynamic")
+        {
+            if start.is_none() { start = Some(c.start_byte()); }
+            end = c.end_byte();
+        }
+    }
+    src.get(start?..end).map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+}
+
 fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, mut tr: Trivia) -> FnDecl {
     let name = kt_ident(node, src).unwrap_or_else(|| "fn_anon".into());
     push_attrs_to_trivia(&mut tr, kt_member_attrs(node, src));
+    let decorators = kt_fn_receiver(node, src).map(|r| vec![format!("receiver({r})")]).unwrap_or_default();
     let type_params = extract_kt_type_params(node, src);
     let mut params = Vec::new();
     if let Some(pl) = child_by_kind(node, "function_value_parameters") {
@@ -255,7 +260,7 @@ fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, mut tr: Triv
     }).unwrap_or(FnBody::SignatureOnly);
     FnDecl {
         vis: kt_vis(node, src), is_async: node_text(node, src).contains("suspend "), is_static: false,
-        decorators: Vec::new(), name, type_params, params,
+        decorators, name, type_params, params,
         return_type: kt_return_type(node, src), body, trivia: tr, span: node_span(node),
     }
 }
@@ -265,9 +270,7 @@ fn kt_value_expr(node: Node<'_>, src: &str) -> crate::ir_code::Expr {
     if matches!(node.kind(), "number_literal" | "long_literal" | "integer_literal" | "unsigned_literal")
         && let Some(stripped) = txt.strip_suffix(['L', 'l', 'u', 'U'])
         && stripped.replace('_', "").parse::<i64>().is_ok()
-    {
-        return crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Int(stripped.to_string()));
-    }
+    { return crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Int(stripped.to_string())); }
     decompile_expr(node, src, LanguageId::Kotlin)
 }
 
@@ -284,10 +287,8 @@ fn kt_default_expr(node: Node<'_>, src: &str) -> Option<crate::ir_code::Expr> {
 fn kt_param_vis(node: Node<'_>, src: &str) -> Visibility {
     let Some(mods) = child_by_kind(node, "modifiers") else { return Visibility::Default; };
     let t = node_text(mods, src);
-    if t.contains("private") { Visibility::Private }
-    else if t.contains("protected") { Visibility::Protected }
-    else if t.contains("internal") { Visibility::Package }
-    else if t.contains("public") { Visibility::Public }
+    if t.contains("private") { Visibility::Private } else if t.contains("protected") { Visibility::Protected }
+    else if t.contains("internal") { Visibility::Package } else if t.contains("public") { Visibility::Public }
     else { Visibility::Default }
 }
 

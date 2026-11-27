@@ -1,5 +1,7 @@
 use aice_lang_registry::LanguageId;
+use tree_sitter::Node;
 
+use crate::decompile::cst_util::{named_children, node_text};
 use crate::ir_code::{Expr, LiteralVal};
 
 pub(crate) fn is_raw_passthrough_expr(kind: &str, lang: LanguageId) -> bool {
@@ -15,7 +17,7 @@ pub(crate) fn is_raw_passthrough_expr(kind: &str, lang: LanguageId) -> bool {
             | "raw_c_string_literal"
     ) || matches!(
         (kind, lang),
-        ("object_literal", LanguageId::Kotlin)
+        ("object_literal" | "try_expression", LanguageId::Kotlin)
             | ("anonymous_class" | "arrow_function", LanguageId::Php)
             | ("text_block", LanguageId::Java)
             | ("switch_expression", LanguageId::Java | LanguageId::CSharp)
@@ -23,6 +25,36 @@ pub(crate) fn is_raw_passthrough_expr(kind: &str, lang: LanguageId) -> bool {
             | ("range_expression", LanguageId::Rust)
             | ("template_function", LanguageId::Cpp)
     )
+}
+
+pub(crate) fn is_cs_mod_arg(node: Node<'_>) -> bool {
+    node.child_by_field_name("name").is_some()
+        || (0..node.child_count())
+            .filter_map(|i| node.child(i))
+            .any(|c| {
+                (!c.is_named() && matches!(c.kind(), "ref" | "out" | "in"))
+                    || c.kind() == "declaration_expression"
+            })
+}
+
+pub(crate) fn is_c_arrow_field(node: Node<'_>, gap: &str, src: &str, lang: LanguageId) -> bool {
+    matches!(lang, LanguageId::C | LanguageId::Cpp)
+        && (node.child_by_field_name("operator").is_some_and(|o| node_text(o, src).trim() == "->")
+            || gap.contains("->"))
+}
+
+pub(crate) fn is_c_raw_member(node: Node<'_>, last: Node<'_>, src: &str, lang: LanguageId) -> bool {
+    matches!(lang, LanguageId::C | LanguageId::Cpp)
+        && (matches!(last.kind(), "template_method" | "destructor_name" | "qualified_identifier" | "dependent_name")
+            || node.child_by_field_name("operator").is_some_and(|o| node_text(o, src).trim() == ".*"))
+}
+
+pub(crate) fn is_c_paren_unary(node: Node<'_>, lang: LanguageId) -> bool {
+    matches!(lang, LanguageId::C | LanguageId::Cpp)
+        && node.kind() == "parenthesized_expression"
+        && named_children(node).first().is_some_and(|c| {
+            matches!(c.kind(), "pointer_expression" | "unary_expression" | "update_expression")
+        })
 }
 
 pub(crate) fn is_rust_prefixed_raw_str(t: &str) -> bool {

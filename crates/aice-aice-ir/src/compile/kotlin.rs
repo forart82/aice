@@ -209,23 +209,33 @@ fn emit_kt_typed_expr(e: &crate::ir_code::Expr, ty: &str, ectx: &ExprEmitCtx) ->
     emit_expr(e, LanguageId::Kotlin, ectx)
 }
 
+fn kt_receiver_prefix(decs: &[String], tr: &Trivia) -> String {
+    let from_dec = decs.iter().find_map(|d| d.trim_start_matches('@').strip_prefix("receiver(")?.strip_suffix(')'));
+    let from_tr = tr.leading.iter().find_map(|c| {
+        if c.kind != TriviaKind::Attribute { return None; }
+        c.text.trim_start_matches('@').strip_prefix("receiver(")?.strip_suffix(')')
+    });
+    from_dec.or(from_tr).filter(|s| !s.is_empty()).map(|s| format!("{s}.")).unwrap_or_default()
+}
+
 fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, cls_abs: bool, is_iface: bool, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let (tps, wh) = emit_kt_type_params(&m.type_params);
     let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };
+    let recv = kt_receiver_prefix(&[], &m.trivia);
     let ps = emit_kt_params(&m.params, ectx);
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
     let ovr = if has_attr(&m.trivia, "override") { "override " } else { "" };
     let opn = if has_attr(&m.trivia, "open") { "open " } else { "" };
     if is_iface && matches!(m.body, FnBody::SignatureOnly) {
-        ec.line(&format!("{}{ovr}fun {tps_sp}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
+        ec.line(&format!("{}{ovr}fun {tps_sp}{recv}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
         return;
     }
     if has_attr(&m.trivia, "abstract") || (cls_abs && matches!(m.body, FnBody::SignatureOnly)) {
-        ec.line(&format!("{}{ovr}abstract fun {tps_sp}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
+        ec.line(&format!("{}{ovr}abstract fun {tps_sp}{recv}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
         return;
     }
-    ec.line(&format!("{}{ovr}{opn}fun {tps_sp}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
+    ec.line(&format!("{}{ovr}{opn}fun {tps_sp}{recv}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
     ec.push();
     match &m.body {
         FnBody::SignatureOnly => {}
@@ -241,9 +251,10 @@ fn emit_kt_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
     let (tps, wh) = emit_kt_type_params(&f.type_params);
     let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };
+    let recv = kt_receiver_prefix(&f.decorators, &f.trivia);
     let ps = emit_kt_params(&f.params, ectx);
     let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
-    ec.line(&format!("{}fun {tps_sp}{}({ps}){rt}{wh} {{", kt_vis(f.vis), f.name));
+    ec.line(&format!("{}fun {tps_sp}{recv}{}({ps}){rt}{wh} {{", kt_vis(f.vis), f.name));
     ec.push();
     match &f.body {
         FnBody::SignatureOnly => {}

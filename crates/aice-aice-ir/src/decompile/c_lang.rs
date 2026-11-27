@@ -36,9 +36,19 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                         let mut etr = tr;
                         if let Some(tg) = tag { push_attrs_to_trivia(&mut etr, vec![format!("@tag({tg})")]); }
                         m.items.push(AiceItem::Enum(extract_c_enum(en, nm, src, etr, LanguageId::C)));
-                    } else if let Some(st) = child_by_kind(ch, "struct_specifier").or_else(|| ch.child_by_field_name("type")) {
-                        let nm = field_text(ch, "declarator", src).unwrap_or("Struct").trim().to_string();
-                        m.items.push(AiceItem::Type(extract_c_struct(st, nm, src, tr)));
+                    } else if let Some(st) = child_by_kind(ch, "struct_specifier").filter(|s| s.child_by_field_name("body").is_some()) {
+                        let tag = field_text(st, "name", src).map(str::trim).filter(|s| !s.is_empty());
+                        let nm = field_text(ch, "declarator", src).map(str::trim).filter(|s| !s.is_empty())
+                            .or(tag).unwrap_or("Struct").to_string();
+                        let mut str_tr = tr;
+                        if let Some(tg) = tag { push_attrs_to_trivia(&mut str_tr, vec![format!("@tag({tg})")]); }
+                        if let Some(td) = extract_c_struct(st, nm, src, str_tr.clone()) {
+                            m.items.push(AiceItem::Type(td));
+                        } else {
+                            m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: str_tr, span: node_span(ch) });
+                        }
+                    } else {
+                        m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: tr, span: node_span(ch) });
                     }
                 }
                 "enum_specifier" if ch.child_by_field_name("body").is_some() => {
@@ -59,9 +69,15 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     if let Some(tg) = tag { push_attrs_to_trivia(&mut etr, vec![format!("@tag({tg})")]); }
                     m.items.push(AiceItem::Enum(extract_c_enum(en, nm, src, etr, LanguageId::C)));
                 }
-                "struct_specifier" => {
-                    let nm = field_text(ch, "name", src).unwrap_or("Struct").to_string();
-                    m.items.push(AiceItem::Type(extract_c_struct(ch, nm, src, tr)));
+                "declaration"
+                    if child_by_kind(ch, "struct_specifier").is_some_and(|s| s.child_by_field_name("body").is_some())
+                        && ch.child_by_field_name("declarator").is_none() =>
+                {
+                    let st = child_by_kind(ch, "struct_specifier").expect("struct_specifier");
+                    push_named_c_struct(ch, st, src, tr, &mut m);
+                }
+                "struct_specifier" if ch.child_by_field_name("body").is_some() => {
+                    push_named_c_struct(ch, ch, src, tr, &mut m);
                 }
                 "function_definition" => m.items.push(AiceItem::Fn(decompile_c_fn(ch, src, opts, tr))),
                 _ => m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: tr, span: node_span(ch) }),
@@ -101,24 +117,47 @@ pub(crate) fn extract_cpp_enum(node: Node<'_>, src: &str, mut tr: Trivia) -> Enu
     extract_c_enum(node, nm, src, tr, LanguageId::Cpp)
 }
 
-fn extract_c_struct(node: Node<'_>, name: String, src: &str, tr: Trivia) -> TypeDecl {
+fn push_named_c_struct(outer: Node<'_>, st: Node<'_>, src: &str, tr: Trivia, m: &mut AiceModule) {
+    let tag = field_text(st, "name", src).map(str::trim).filter(|s| !s.is_empty());
+    let nm = tag.unwrap_or("Struct").to_string();
+    let mut str_tr = tr.clone();
+    if let Some(tg) = tag { push_attrs_to_trivia(&mut str_tr, vec![format!("@tag({tg})")]); }
+    if let Some(td) = extract_c_struct(st, nm, src, str_tr) {
+        m.items.push(AiceItem::Type(td));
+    } else {
+        m.items.push(AiceItem::Directive { text: node_text(outer, src).trim().into(), trivia: tr, span: node_span(outer) });
+    }
+}
+
+fn is_c_simple_ident(s: &str) -> bool {
+    !s.is_empty() && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') && !s.as_bytes()[0].is_ascii_digit()
+}
+
+fn extract_c_struct(node: Node<'_>, name: String, src: &str, tr: Trivia) -> Option<TypeDecl> {
     let mut fields = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
         for ch in named_children(body) {
-            if ch.kind() == "field_declaration" {
-                let fnm = field_text(ch, "declarator", src).unwrap_or("f").trim().to_string();
-                let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::C));
-                fields.push(FieldDecl {
-                    name: fnm, vis: Visibility::Public, is_readonly: false, is_optional: false,
-                    sigil: FieldSigil::None, ty, default: None, trivia: Trivia::default(),
-                });
-            }
+            if is_comment_kind(ch.kind()) { continue; }
+            if ch.kind() != "field_declaration" { return None; }
+            let mut cur = ch.walk();
+            let decls: Vec<Node<'_>> = ch.children_by_field_name("declarator", &mut cur).collect();
+            if decls.len() != 1 || child_by_kind(ch, "bitfield_clause").is_some() { return None; }
+            let raw_ty = field_text(ch, "type", src)?.trim();
+            let quals = extract_c_type_quals(ch, src);
+            let (fnm, ptrs) = unwrap_c_declarator(decls[0], src);
+            if !is_c_simple_ident(&fnm) { return None; }
+            let full_ty = prepend_c_type_quals(&quals, raw_ty, &ptrs);
+            let ty = Some(map_type_str(&full_ty, LanguageId::C));
+            fields.push(FieldDecl {
+                name: fnm, vis: Visibility::Public, is_readonly: false, is_optional: false,
+                sigil: FieldSigil::None, ty, default: None, trivia: Trivia::default(),
+            });
         }
     }
-    TypeDecl {
+    Some(TypeDecl {
         vis: Visibility::Public, kind: TypeKind::Struct, name, type_params: Vec::new(),
         extends: Vec::new(), fields, methods: Vec::new(), alias_target: None, trivia: tr, span: node_span(node),
-    }
+    })
 }
 
 fn decompile_c_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {

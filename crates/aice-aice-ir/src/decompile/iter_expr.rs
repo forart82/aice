@@ -7,6 +7,7 @@ use crate::decompile::expr_common::{
     push_template_task, push_yield_task,
 };
 use crate::decompile::expr_interp::{push_cs_interp_task, push_string_lit_task};
+use crate::decompile::expr_lit_esc::{is_c_arrow_field, is_c_paren_unary, is_c_raw_member, is_cs_mod_arg, is_raw_passthrough_expr};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task, push_rs_turbofish_task};
 use crate::decompile::iter_expr_comp::{
@@ -59,17 +60,16 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
     loop {
         match node.kind() {
             "parenthesized_expression" | "expression_statement" | "argument" => {
+                if node.kind() == "argument" && env.lang == LanguageId::CSharp && is_cs_mod_arg(node) {
+                    env.exprs.push(Expr::Raw(node_text(node, env.src).trim().into())); return;
+                }
                 if let Some(ch) = named_children(node).into_iter().next() {
                     if node.kind() == "parenthesized_expression" && ch.kind() == "named_expression" {
-                        let txt = crate::decompile::ts_helpers::normalize_single_line(node_text(node, env.src));
-                        env.exprs.push(Expr::Ident(txt));
+                        env.exprs.push(Expr::Ident(crate::decompile::ts_helpers::normalize_single_line(node_text(node, env.src))));
                         return;
                     }
                     node = ch;
-                } else {
-                    env.exprs.push(Expr::Ident(node_text(node, env.src).trim().into()));
-                    return;
-                }
+                } else { env.exprs.push(Expr::Ident(node_text(node, env.src).trim().into())); return; }
             }
             "value_argument" if named_children(node).len() == 1 && !node_text(node, env.src).trim_start().starts_with('*') => {
                 node = named_children(node)[0];
@@ -111,12 +111,8 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "true" | "boolean_literal" if raw == "true" || raw == "True" => env.exprs.push(Expr::Literal(LiteralVal::Bool(true))),
         "false" | "boolean_literal" if raw == "false" || raw == "False" => env.exprs.push(Expr::Literal(LiteralVal::Bool(false))),
         "null" | "nil" | "none" | "None" | "null_literal" => env.exprs.push(Expr::Literal(LiteralVal::Nil)),
-        k if crate::decompile::expr_lit_esc::is_raw_passthrough_expr(k, env.lang) => {
-            env.exprs.push(Expr::Raw(raw.to_string()));
-        }
-        "qualified_identifier" if env.lang == LanguageId::Cpp && raw.contains('<') => {
-            env.exprs.push(Expr::Raw(raw.to_string()));
-        }
+        k if is_raw_passthrough_expr(k, env.lang) => env.exprs.push(Expr::Raw(raw.to_string())),
+        "qualified_identifier" if env.lang == LanguageId::Cpp && raw.contains('<') => env.exprs.push(Expr::Raw(raw.to_string())),
         "string" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"
         | "verbatim_string_literal" | "raw_string" | "multiline_string_literal" => {
             push_string_lit_task(env, node, raw);
@@ -189,16 +185,19 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 .filter(|c| c.kind() != "optional_chain").collect();
             if kids.len() >= 2 {
                 let last = kids[kids.len() - 1];
+                if is_c_raw_member(node, last, env.src, env.lang) { env.exprs.push(Expr::Raw(raw.to_string())); return; }
                 let property = node_text(last, env.src).trim().trim_start_matches('.').to_string();
                 let gap = env.src.get(kids[0].end_byte()..last.start_byte()).unwrap_or("");
                 let is_opt = node.kind() == "null_aware_member_expression"
-                    || child_by_kind(node, "optional_chain").is_some()
-                    || gap.contains("?.")
+                    || child_by_kind(node, "optional_chain").is_some() || gap.contains("?.")
                     || (env.lang == LanguageId::Ruby && gap.contains("&."))
-                    || (env.lang == LanguageId::Php && gap.contains("?->"));
+                    || (env.lang == LanguageId::Php && gap.contains("?->"))
+                    || is_c_arrow_field(node, gap, env.src, env.lang);
                 let kind = if is_opt { MemberKind::SafeNav } else if gap.contains("::") { MemberKind::Scope } else { MemberKind::Dot };
                 env.tasks.push(DTask::FinishExpr(ExprFin::Member { property, kind }));
-                env.tasks.push(DTask::Expr(kids[0]));
+                if is_c_paren_unary(kids[0], env.lang) {
+                    env.exprs.push(Expr::Raw(node_text(kids[0], env.src).trim().into()));
+                } else { env.tasks.push(DTask::Expr(kids[0])); }
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }
         "generic_function" | "generic_type_with_turbofish" if env.lang == LanguageId::Rust => push_rs_turbofish_task(env, node, raw),

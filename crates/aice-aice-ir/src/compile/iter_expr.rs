@@ -141,6 +141,7 @@ pub(crate) fn step_expr_task<'a>(
             let sep = match kind {
                 MemberKind::SafeNav if lang == LanguageId::Ruby => "&.",
                 MemberKind::SafeNav if lang == LanguageId::Php => "?->",
+                MemberKind::SafeNav if matches!(lang, LanguageId::C | LanguageId::Cpp) => "->",
                 MemberKind::SafeNav => "?.",
                 MemberKind::Scope if matches!(lang, LanguageId::Rust | LanguageId::Cpp | LanguageId::Php) => "::",
                 MemberKind::Dot if lang == LanguageId::Php => "->",

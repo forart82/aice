@@ -225,7 +225,19 @@ fn cs_params(pl: Node<'_>, src: &str) -> Vec<ParamDecl> {
     for ch in named_children(pl) {
         if ch.kind() == "parameter" {
             let name = field_text(ch, "name", src).unwrap_or("p").to_string();
-            let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::CSharp));
+            let mods: Vec<&str> = (0..ch.child_count())
+                .filter_map(|i| ch.child(i))
+                .filter(|c| c.kind() == "modifier" || (!c.is_named() && c.kind() == "params"))
+                .map(|c| node_text(c, src).trim())
+                .filter(|s| matches!(*s, "ref" | "out" | "in" | "readonly" | "scoped" | "this" | "params"))
+                .collect();
+            let ty = field_text(ch, "type", src).map(|t| {
+                if mods.is_empty() {
+                    map_type_str(t, LanguageId::CSharp)
+                } else {
+                    crate::ir_types::AiceType::Raw(format!("{} {}", mods.join(" "), t.trim()))
+                }
+            });
             let default = cs_init_expr(ch, src);
             out.push(ParamDecl {
                 name, vis: Visibility::Default, is_readonly: false, is_mut: false,

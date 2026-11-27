@@ -105,8 +105,12 @@ fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                     if let Some((fn_decl, ret_quals)) = find_c_fn_declarator(ch, src) {
                         methods.push(decompile_cpp_method_proto(ch, &name, cur_vis, fn_decl, &ret_quals, Vec::new(), src, opts));
                     } else if ch.kind() == "field_declaration" {
-                        let fnm = field_text(ch, "declarator", src).unwrap_or("f").trim().to_string();
-                        let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Cpp));
+                        let raw_ty = field_text(ch, "type", src).unwrap_or("auto").trim();
+                        let quals = extract_c_type_quals(ch, src);
+                        let (fnm, ptrs) = ch.child_by_field_name("declarator")
+                            .map(|d| unwrap_c_declarator(d, src))
+                            .unwrap_or_else(|| ("f".into(), String::new()));
+                        let ty = Some(map_type_str(&prepend_c_type_quals(&quals, raw_ty, &ptrs), LanguageId::Cpp));
                         props.push(PropDecl {
                             name: fnm, aliases: Vec::new(), vis: cur_vis, is_static: false, is_readonly: false,
                             is_mut: true, is_optional: false, ty, init: None, trivia: collect_trivia(ch, src, opts),
