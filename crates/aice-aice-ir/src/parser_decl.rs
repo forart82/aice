@@ -232,7 +232,7 @@ fn is_field_mod_next(p: &Parser<'_>) -> bool {
 fn parse_field_decl(p: &mut Parser<'_>, trivia: Trivia) -> Result<FieldDecl, TranspileError> {
     let vis = if is_field_mod_next(p) { p.parse_visibility() } else { Visibility::Default };
     let is_readonly = p.peek().lexeme == "readonly" && is_field_mod_next(p) && { p.advance(); true };
-    let name = p.expect_ident_or_kw("Expected field name")?.lexeme;
+    let name = p.expect_field_name("Expected field name")?.lexeme;
     let sigil = if p.peek_kind() == TokenKind::Sigil {
         match p.advance().lexeme.as_str() {
             "!s" => FieldSigil::RequiredStr, "!i" => FieldSigil::RequiredInt,

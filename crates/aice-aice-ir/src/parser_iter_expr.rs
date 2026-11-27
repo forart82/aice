@@ -5,7 +5,7 @@ use crate::parser::Parser;
 use crate::parser_expr::{
     assign_op_from_tok, binary_op_from_tok, infix_prec, is_elvis_ahead, is_new_prefix_start,
     lit_expr_from_tok, looks_like_gen_closure, looks_like_ternary, step_member_infix,
-    try_contextual_infix, try_contextual_unary,
+    step_paren_close, step_paren_open, try_contextual_infix, try_contextual_unary,
 };
 use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_lit::{looks_like_closure_after_fn, start_record_entry, step_closure_params, step_lit_cont};
@@ -65,7 +65,7 @@ pub(crate) fn step_expr_cont(
             vals.push(ParseVal::Expr(Expr::Unary { op: UnaryOp::Ref, is_postfix: false, operand: Box::new(inner) }));
         }
         ParseCont::ExprAwait => { let e = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Await(Box::new(e)))); }
-        ParseCont::ExprParenClose => { p.expect(TokenKind::RParen, "Expected ')'")?; }
+        ParseCont::ExprParenClose => step_paren_close(p, stack, vals)?,
         ParseCont::ExprCallArg { callee, mut args, is_optional, is_new } => {
             args.push(pop_expr(vals));
             if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RParen && !p.at_eof() {
@@ -156,7 +156,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             stack.push(ParseCont::ExprTemplate { quasis: vec![head.lexeme], exprs: Vec::new() });
             stack.push(ParseCont::Expr(1));
         }
-        TokenKind::LParen => { p.advance(); stack.push(ParseCont::ExprParenClose); stack.push(ParseCont::Expr(1)); }
+        TokenKind::LParen => step_paren_open(p, stack, vals),
         TokenKind::LBracket => {
             p.advance();
             if p.peek_kind() == TokenKind::RBracket || p.at_eof() {
@@ -262,7 +262,7 @@ fn step_infix(
             }
             vals.push(ParseVal::Expr(Expr::Ident(format!("{}{}", crate::printer_expr::print_expr(&lhs), tok.lexeme))));
         }
-        TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon => {
+        TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon | TokenKind::Turbofish => {
             step_member_infix(p, lhs, kind, stack, vals)?;
         }
         TokenKind::PlusPlus | TokenKind::MinusMinus => {

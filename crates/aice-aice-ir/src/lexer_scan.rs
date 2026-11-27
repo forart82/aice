@@ -254,6 +254,9 @@ fn scan_punct(s: &mut Scanner<'_>, start: usize) -> Result<(), TranspileError> {
             {
                 continue;
             }
+            if kind == TokenKind::ColonColon && crate::lexer_macro::try_scan_turbofish(s, start)? {
+                return Ok(());
+            }
             s.i += pat.len();
             s.push_tok(kind, pat.to_string(), start, s.i);
             return Ok(());

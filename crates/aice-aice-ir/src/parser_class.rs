@@ -125,7 +125,7 @@ fn parse_member_name(p: &mut Parser<'_>, msg: &str) -> Result<String, TranspileE
     } else if p.eat(TokenKind::Tilde) {
         Ok(format!("~{}", p.expect_ident_or_kw(msg)?.lexeme))
     } else {
-        Ok(p.expect_ident_or_kw(msg)?.lexeme)
+        Ok(p.expect_field_name(msg)?.lexeme)
     }
 }
 
@@ -202,6 +202,25 @@ pub(crate) fn parse_directive_or_decorated(p: &mut Parser<'_>, vis: Visibility, 
             let mut item = parse_class_decl(p, vis2, is_abs, trivia)?;
             if let AiceItem::Class(ref mut c) = item { c.decorators = decs; }
             Ok(item)
+        }
+        TokenKind::Type | TokenKind::Struct | TokenKind::Interface | TokenKind::Trait => {
+            for d in decs {
+                let text = if d.starts_with("#[") || d.starts_with('@') { d } else { format!("@{d}") };
+                trivia.leading.push(crate::ir::TriviaComment { kind: crate::ir::TriviaKind::Attribute, text });
+            }
+            let dk = match p.peek_kind() {
+                TokenKind::Interface => crate::ir_types::TypeKind::Interface,
+                TokenKind::Trait => crate::ir_types::TypeKind::Trait,
+                _ => crate::ir_types::TypeKind::Struct,
+            };
+            crate::parser_decl::parse_type_decl(p, vis2, dk, trivia)
+        }
+        TokenKind::Enum => {
+            for d in decs {
+                let text = if d.starts_with("#[") || d.starts_with('@') { d } else { format!("@{d}") };
+                trivia.leading.push(crate::ir::TriviaComment { kind: crate::ir::TriviaKind::Attribute, text });
+            }
+            crate::parser_decl::parse_enum_decl(p, vis2, trivia)
         }
         _ => {
             let text = decs.into_iter().map(|d| if d.starts_with("#[") { d } else { format!("@{d}") }).collect::<Vec<_>>().join(" ");

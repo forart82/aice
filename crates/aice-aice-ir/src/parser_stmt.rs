@@ -130,7 +130,7 @@ pub(crate) fn is_ret_stmt_ahead(p: &Parser<'_>) -> bool {
         || matches!(
             next.kind,
             TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon
-                | TokenKind::ColonEqual | TokenKind::ColonColonEqual | TokenKind::MacroBody
+                | TokenKind::ColonEqual | TokenKind::ColonColonEqual | TokenKind::MacroBody | TokenKind::Turbofish
         )
     {
         return false;

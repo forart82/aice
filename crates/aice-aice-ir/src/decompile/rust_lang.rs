@@ -3,12 +3,13 @@ use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
+use crate::decompile::rust_helpers::{decompile_struct, extract_rs_fields, rs_vis};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::{normalize_single_line, push_attrs_to_trivia};
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{ClassDecl, ConstDecl, FnBody, FnDecl, MethodDecl, Stmt};
-use crate::ir_types::{AiceType, EnumDecl, EnumVariant, FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind, TypeParam, VariantPayload};
+use crate::ir_types::{AiceType, EnumDecl, EnumVariant, ParamDecl, TypeDecl, TypeKind, TypeParam, VariantPayload};
 
 struct RsImpl { tname: String, trait_nm: Option<String>, tps: Vec<TypeParam>, attrs: Vec<String>, methods: Vec<MethodDecl> }
 
@@ -25,7 +26,10 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     vis, source: field_text(ch, "argument", src).unwrap_or("").trim().to_string(),
                     specifiers: Vec::new(), is_type_only: false, trivia: tr, span: node_span(ch),
                 })),
-                "struct_item" => m.items.push(AiceItem::Type(decompile_struct(ch, vis, src, opts, tr))),
+                "struct_item" => {
+                    let (tps, attrs) = extract_rs_generics(ch, src);
+                    m.items.push(AiceItem::Type(decompile_struct(ch, vis, src, opts, tr, tps, attrs)));
+                }
                 "enum_item" => m.items.push(AiceItem::Enum(decompile_enum(ch, vis, src, opts, tr))),
                 "trait_item" => m.items.push(AiceItem::Type(decompile_trait(ch, vis, src, opts, tr))),
                 "type_item" => {
@@ -78,7 +82,13 @@ fn attach_rs_impls(m: &mut AiceModule, impls: Vec<RsImpl>) {
         if trait_nm.is_none()
             && let Some(idx) = m.items.iter().position(|it| matches!(it, AiceItem::Type(t) if t.name == tname && t.kind == TypeKind::Struct))
         {
-            if let AiceItem::Type(td) = m.items.remove(idx) {
+            if let AiceItem::Type(mut td) = m.items.remove(idx) {
+                let is_tagged = td.trivia.leading.iter().any(|c| {
+                    c.kind == crate::ir::TriviaKind::Attribute && matches!(c.text.as_str(), "@unit" | "@tuple" | "unit" | "tuple")
+                });
+                if td.fields.is_empty() && !is_tagged {
+                    push_attrs_to_trivia(&mut td.trivia, vec!["@braced".into()]);
+                }
                 let props = td.fields.into_iter().map(|f| crate::ir_code::PropDecl {
                     name: f.name, aliases: Vec::new(), vis: f.vis, is_static: false, is_readonly: true,
                     is_mut: false, is_optional: f.is_optional, ty: f.ty, init: f.default, trivia: f.trivia,
@@ -116,38 +126,6 @@ fn rs_fn_to_method(f: FnDecl) -> MethodDecl {
         name: f.name, type_params: f.type_params, params: f.params, return_type: f.return_type,
         body: f.body, trivia: f.trivia, span: f.span,
     }
-}
-
-fn decompile_struct(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileOpts, mut tr: Trivia) -> TypeDecl {
-    let name = field_text(node, "name", src).unwrap_or("Struct").to_string();
-    let (type_params, attrs) = extract_rs_generics(node, src);
-    push_attrs_to_trivia(&mut tr, attrs);
-    let fields = node.child_by_field_name("body").map(|b| extract_rs_fields(b, src, opts, true)).unwrap_or_default();
-    TypeDecl {
-        vis, kind: TypeKind::Struct, name, type_params, extends: Vec::new(),
-        fields, methods: Vec::new(), alias_target: None, trivia: tr, span: node_span(node),
-    }
-}
-
-fn extract_rs_fields(body: Node<'_>, src: &str, opts: &TranspileOpts, is_struct: bool) -> Vec<FieldDecl> {
-    let (mut fields, mut pending_attrs) = (Vec::new(), Vec::new());
-    for ch in named_children(body) {
-        if is_comment_kind(ch.kind()) { continue; }
-        if ch.kind() == "attribute_item" {
-            pending_attrs.push(normalize_single_line(node_text(ch, src)));
-        } else if ch.kind() == "field_declaration" {
-            let mut ftr = collect_trivia(ch, src, opts);
-            push_attrs_to_trivia(&mut ftr, std::mem::take(&mut pending_attrs));
-            fields.push(FieldDecl {
-                name: field_text(ch, "name", src).unwrap_or("f").to_string(),
-                vis: if is_struct { rs_vis(ch, src) } else { Visibility::Default },
-                is_readonly: is_struct, is_optional: false, sigil: FieldSigil::None,
-                ty: field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Rust)),
-                default: None, trivia: ftr,
-            });
-        } else { pending_attrs.clear(); }
-    }
-    fields
 }
 
 fn decompile_enum(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileOpts, mut tr: Trivia) -> EnumDecl {
@@ -288,10 +266,3 @@ fn rs_bound_type(b: Node<'_>, src: &str) -> AiceType {
 }
 
 fn rs_esc(s: &str) -> String { s.replace('\\', "\\\\").replace('"', "\\\"") }
-
-fn rs_vis(node: Node<'_>, src: &str) -> Visibility {
-    let Some(vm) = child_by_kind(node, "visibility_modifier") else { return Visibility::Private; };
-    match node_text(vm, src).trim() {
-        "pub" => Visibility::Public, "pub(super)" => Visibility::Protected, _ => Visibility::Package,
-    }
-}

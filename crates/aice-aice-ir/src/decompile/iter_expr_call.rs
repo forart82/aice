@@ -7,8 +7,20 @@ use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::{ExprFin, ObjSlot};
 use crate::decompile::trivia::is_comment_kind;
 use crate::ir::Trivia;
-use crate::ir_code::Expr;
+use crate::ir_code::{Expr, MemberKind};
 use crate::ir_types::ParamDecl;
+
+pub(crate) fn push_rs_turbofish_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    let base = node.child_by_field_name("function").or_else(|| node.child_by_field_name("type"));
+    if let (Some(bn), Some(ta_n)) = (base, node.child_by_field_name("type_arguments")) {
+        let ta = crate::decompile::ts_helpers::normalize_single_line(node_text(ta_n, env.src));
+        let property = ta.strip_prefix("::").unwrap_or(&ta).trim().to_string();
+        env.tasks.push(DTask::FinishExpr(ExprFin::Member { property, kind: MemberKind::Scope }));
+        env.tasks.push(DTask::Expr(bn));
+    } else {
+        env.exprs.push(Expr::Ident(raw.to_string()));
+    }
+}
 
 pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
     if node.kind() == "implicit_object_creation_expression" {

@@ -53,7 +53,7 @@ impl<'a> Scanner<'a> {
             kind,
             TokenKind::Ident | TokenKind::Number | TokenKind::String | TokenKind::TripleString
                 | TokenKind::Boolean | TokenKind::Nil | TokenKind::HexColor | TokenKind::Regex
-                | TokenKind::TemplateTail | TokenKind::TemplateNoSubst | TokenKind::MacroBody
+                | TokenKind::TemplateTail | TokenKind::TemplateNoSubst | TokenKind::MacroBody | TokenKind::Turbofish
                 | TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
                 | TokenKind::PlusPlus | TokenKind::MinusMinus | TokenKind::Question
         );

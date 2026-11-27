@@ -8,7 +8,7 @@ use crate::decompile::expr_common::{
 };
 use crate::decompile::expr_interp::{push_cs_interp_task, push_string_lit_task};
 use crate::decompile::iter_env::{DTask, DecompEnv};
-use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task};
+use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task, push_rs_turbofish_task};
 use crate::decompile::iter_expr_fin::{
     push_binary_task, push_lambda_task, push_unary_task,
 };
@@ -187,12 +187,9 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 env.tasks.push(DTask::Expr(kids[0]));
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }
-        "subscript_expression" | "index_expression" | "element_access_expression" | "array_access" => {
-            push_index_task(env, node, raw);
-        }
-        "conditional_access_expression" if child_by_kind(node, "element_binding_expression").is_some() => {
-            push_index_task(env, node, raw);
-        }
+        "generic_function" | "generic_type_with_turbofish" if env.lang == LanguageId::Rust => push_rs_turbofish_task(env, node, raw),
+        "subscript_expression" | "index_expression" | "element_access_expression" | "array_access" => push_index_task(env, node, raw),
+        "conditional_access_expression" if child_by_kind(node, "element_binding_expression").is_some() => push_index_task(env, node, raw),
         "call_expression" | "call" | "invocation_expression" | "method_invocation"
         | "function_call_expression" | "member_call_expression" | "object_creation_expression"
         | "implicit_object_creation_expression" | "new_expression" => push_call_task(env, node, raw),

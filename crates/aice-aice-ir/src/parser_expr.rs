@@ -11,6 +11,34 @@ pub(crate) fn parse_expr(p: &mut Parser<'_>) -> Result<Expr, TranspileError> {
     }
 }
 
+pub(crate) fn step_paren_open(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<ParseVal>) {
+    p.advance();
+    if p.eat(TokenKind::RParen) {
+        vals.push(ParseVal::Expr(Expr::Call {
+            callee: Box::new(Expr::Ident(String::new())), args: Vec::new(), is_optional: false, is_tagged: false, is_new: false,
+        }));
+    } else {
+        stack.push(ParseCont::ExprParenClose);
+        stack.push(ParseCont::Expr(1));
+    }
+}
+
+pub(crate) fn step_paren_close(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<ParseVal>) -> Result<(), TranspileError> {
+    if !p.eat(TokenKind::Comma) { p.expect(TokenKind::RParen, "Expected ')'")?; return Ok(()); }
+    let ParseVal::Expr(first) = vals.pop().expect("paren expr") else { unreachable!() };
+    let callee = Expr::Ident(String::new());
+    if p.peek_kind() == TokenKind::RParen || p.at_eof() {
+        p.expect(TokenKind::RParen, "Expected ')'")?;
+        vals.push(ParseVal::Expr(Expr::Call {
+            callee: Box::new(callee), args: vec![first, Expr::Ident(String::new())], is_optional: false, is_tagged: false, is_new: false,
+        }));
+    } else {
+        stack.push(ParseCont::ExprCallArg { callee, args: vec![first], is_optional: false, is_new: false });
+        stack.push(ParseCont::Expr(1));
+    }
+    Ok(())
+}
+
 pub(crate) fn step_member_infix(
     p: &mut Parser<'_>,
     lhs: Expr,
@@ -18,6 +46,12 @@ pub(crate) fn step_member_infix(
     stack: &mut Vec<ParseCont>,
     vals: &mut Vec<ParseVal>,
 ) -> Result<(), TranspileError> {
+    if kind == TokenKind::Turbofish {
+        let t = p.advance();
+        let prop = t.lexeme.strip_prefix("::").unwrap_or(&t.lexeme).to_string();
+        vals.push(ParseVal::Expr(Expr::Member { object: Box::new(lhs), property: prop, kind: MemberKind::Scope }));
+        return Ok(());
+    }
     p.advance();
     if kind == TokenKind::QuestionDot && p.eat(TokenKind::LParen) {
         if p.peek_kind() == TokenKind::RParen || p.at_eof() {
@@ -35,6 +69,17 @@ pub(crate) fn step_member_infix(
         stack.push(ParseCont::ExprIndex { object: lhs, args: Vec::new(), is_optional: true });
         stack.push(ParseCont::Expr(1));
         return Ok(());
+    }
+    if kind == TokenKind::Dot && p.peek_kind() == TokenKind::Number {
+        let t = p.advance();
+        if t.lexeme.split('.').all(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit())) {
+            let expr = t.lexeme.split('.').fold(lhs, |obj, seg| Expr::Member {
+                object: Box::new(obj), property: seg.to_string(), kind: MemberKind::Dot,
+            });
+            vals.push(ParseVal::Expr(expr));
+            return Ok(());
+        }
+        return Err(TranspileError::at(format!("Invalid tuple index '{}'", t.lexeme), t.span));
     }
     let mk = match kind {
         TokenKind::QuestionDot => MemberKind::SafeNav,
@@ -70,9 +115,7 @@ pub(crate) fn is_new_prefix_start(p: &Parser<'_>, tok: &Token) -> bool {
 }
 
 pub(crate) fn looks_like_gen_closure(p: &Parser<'_>, star_offset: usize) -> bool {
-    if p.peek_n(star_offset).kind != TokenKind::Star
-        || p.peek_n(star_offset + 1).kind != TokenKind::LParen
-    {
+    if p.peek_n(star_offset).kind != TokenKind::Star || p.peek_n(star_offset + 1).kind != TokenKind::LParen {
         return false;
     }
     let (mut idx, mut depth) = (p.pos + star_offset + 2, 1usize);
@@ -92,9 +135,7 @@ pub(crate) fn looks_like_gen_closure(p: &Parser<'_>, star_offset: usize) -> bool
 }
 
 pub(crate) fn infix_prec(kind: TokenKind) -> Option<(u8, bool)> {
-    if assign_op_from_tok(kind).is_some() {
-        return Some((2, true));
-    }
+    if assign_op_from_tok(kind).is_some() { return Some((2, true)); }
     match kind {
         TokenKind::Question => Some((3, true)),
         TokenKind::Or | TokenKind::PipePipe => Some((3, false)),
@@ -114,7 +155,8 @@ pub(crate) fn infix_prec(kind: TokenKind) -> Option<(u8, bool)> {
         TokenKind::As => Some((15, false)),
         TokenKind::LParen | TokenKind::LBracket | TokenKind::Dot | TokenKind::QuestionDot
         | TokenKind::ColonColon | TokenKind::PlusPlus | TokenKind::MinusMinus
-        | TokenKind::TemplateHead | TokenKind::TemplateNoSubst | TokenKind::MacroBody => Some((17, false)),
+        | TokenKind::TemplateHead | TokenKind::TemplateNoSubst | TokenKind::MacroBody
+        | TokenKind::Turbofish => Some((17, false)),
         _ => None,
     }
 }
@@ -127,7 +169,7 @@ pub(crate) fn can_start_expr_tok(k: TokenKind) -> bool {
                 | TokenKind::Comment | TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace
                 | TokenKind::Comma | TokenKind::Semicolon | TokenKind::Colon
                 | TokenKind::ColonEqual | TokenKind::ColonColonEqual | TokenKind::FatArrow
-                | TokenKind::Arrow | TokenKind::MacroBody
+                | TokenKind::Arrow | TokenKind::MacroBody | TokenKind::Turbofish
         )
 }
 
@@ -140,12 +182,8 @@ pub(crate) fn is_elvis_ahead(p: &Parser<'_>) -> bool {
 }
 
 pub(crate) fn looks_like_ternary(p: &Parser<'_>) -> bool {
-    if is_elvis_ahead(p) {
-        return true;
-    }
-    if p.peek_n(1).kind == TokenKind::Colon {
-        return false;
-    }
+    if is_elvis_ahead(p) { return true; }
+    if p.peek_n(1).kind == TokenKind::Colon { return false; }
     let (mut idx, mut depth) = (p.pos + 1, 0usize);
     while idx < p.tokens.len() {
         match p.tokens[idx].kind {
@@ -164,56 +202,39 @@ pub(crate) fn looks_like_ternary(p: &Parser<'_>) -> bool {
 }
 
 pub(crate) fn try_contextual_infix(p: &mut Parser<'_>, min_prec: u8) -> Option<(BinaryOp, u8)> {
-    let k0 = p.peek_kind();
-    let k1 = p.peek_n(1).kind;
+    let (k0, k1) = (p.peek_kind(), p.peek_n(1).kind);
     if min_prec <= 15 && k0 == TokenKind::Ident && p.peek().lexeme == "with" && k1 == TokenKind::LBrace {
         p.advance();
         return Some((BinaryOp::With, 16));
     }
-    if min_prec > 10 {
-        return None;
-    }
+    if min_prec > 10 { return None; }
     if k0 == TokenKind::Ident && p.peek().lexeme == "is" {
         if k1 == TokenKind::Not && can_start_expr_tok(p.peek_n(2).kind) {
-            p.advance();
-            p.advance();
+            p.advance(); p.advance();
             return Some((BinaryOp::IsNot, 11));
         }
-        if can_start_expr_tok(k1) {
-            p.advance();
-            return Some((BinaryOp::Is, 11));
-        }
+        if can_start_expr_tok(k1) { p.advance(); return Some((BinaryOp::Is, 11)); }
     } else if matches!(k0, TokenKind::Not | TokenKind::Bang) && k1 == TokenKind::In {
-        p.advance();
-        p.advance();
+        p.advance(); p.advance();
         return Some((BinaryOp::NotIn, 11));
     } else if k0 == TokenKind::Bang && k1 == TokenKind::Ident && p.peek_n(1).lexeme == "is" {
-        p.advance();
-        p.advance();
+        p.advance(); p.advance();
         return Some((BinaryOp::IsNot, 11));
     }
     None
 }
 
 pub(crate) fn try_contextual_unary(p: &Parser<'_>, tok: &Token) -> Option<UnaryOp> {
-    if tok.kind != TokenKind::Ident {
-        return None;
-    }
+    if tok.kind != TokenKind::Ident { return None; }
     if tok.lexeme == "yield" && p.peek_n(1).kind == TokenKind::Star {
         return can_start_expr_tok(p.peek_n(2).kind).then_some(UnaryOp::YieldStar);
     }
     let op = match tok.lexeme.as_str() {
-        "typeof" => UnaryOp::Typeof,
-        "void" => UnaryOp::Void,
-        "delete" => UnaryOp::Delete,
-        "yield" => UnaryOp::Yield,
-        _ => return None,
+        "typeof" => UnaryOp::Typeof, "void" => UnaryOp::Void,
+        "delete" => UnaryOp::Delete, "yield" => UnaryOp::Yield, _ => return None,
     };
     let next = p.peek_n(1);
-    if !can_start_expr_tok(next.kind) {
-        return None;
-    }
-    if next.kind == TokenKind::LParen && tok.span.end_byte == next.span.start_byte {
+    if !can_start_expr_tok(next.kind) || (next.kind == TokenKind::LParen && tok.span.end_byte == next.span.start_byte) {
         return None;
     }
     Some(op)
@@ -221,14 +242,11 @@ pub(crate) fn try_contextual_unary(p: &Parser<'_>, tok: &Token) -> Option<UnaryO
 
 pub(crate) fn lit_expr_from_tok(p: &Parser<'_>, tok: &Token) -> Option<Expr> {
     Some(match tok.kind {
-        TokenKind::Number => {
-            let lit = if tok.lexeme.contains('.') || tok.lexeme.contains('e') || tok.lexeme.contains('E') {
-                LiteralVal::Float(tok.lexeme.clone())
-            } else {
-                LiteralVal::Int(tok.lexeme.clone())
-            };
-            Expr::Literal(lit)
-        }
+        TokenKind::Number => Expr::Literal(if tok.lexeme.contains(['.', 'e', 'E']) {
+            LiteralVal::Float(tok.lexeme.clone())
+        } else {
+            LiteralVal::Int(tok.lexeme.clone())
+        }),
         TokenKind::String => Expr::Literal(LiteralVal::Str { value: tok.lexeme.clone(), multiline: false }),
         TokenKind::TripleString => Expr::Literal(LiteralVal::Str { value: tok.lexeme.clone(), multiline: true }),
         TokenKind::Boolean => Expr::Literal(LiteralVal::Bool(tok.lexeme == "true")),
@@ -236,11 +254,7 @@ pub(crate) fn lit_expr_from_tok(p: &Parser<'_>, tok: &Token) -> Option<Expr> {
             let k1 = p.peek_n(1).kind;
             if assign_op_from_tok(k1).is_some()
                 || matches!(k1, TokenKind::LParen | TokenKind::LBracket | TokenKind::PlusPlus | TokenKind::MinusMinus)
-            {
-                Expr::Ident(tok.lexeme.clone())
-            } else {
-                Expr::Literal(LiteralVal::Nil)
-            }
+            { Expr::Ident(tok.lexeme.clone()) } else { Expr::Literal(LiteralVal::Nil) }
         }
         TokenKind::HexColor => Expr::Literal(LiteralVal::HexColor(tok.lexeme.clone())),
         TokenKind::Regex => Expr::Literal(LiteralVal::Regex(tok.lexeme.clone())),
@@ -260,29 +274,22 @@ pub(crate) fn assign_op_from_tok(kind: TokenKind) -> Option<AssignOp> {
         TokenKind::CaretEq => AssignOp::BitXorAssign, TokenKind::ShlEq => AssignOp::ShlAssign,
         TokenKind::ShrEq => AssignOp::ShrAssign, TokenKind::UshrEq => AssignOp::UshrAssign,
         TokenKind::QuestionQuestionEq => AssignOp::CoalesceAssign, TokenKind::AmpAmpEq => AssignOp::AndAssign,
-        TokenKind::PipePipeEq => AssignOp::OrAssign, TokenKind::DotEq => AssignOp::ConcatAssign,
-        _ => return None,
+        TokenKind::PipePipeEq => AssignOp::OrAssign, TokenKind::DotEq => AssignOp::ConcatAssign, _ => return None,
     })
 }
 
 pub(crate) fn binary_op_from_tok(kind: TokenKind) -> BinaryOp {
     match kind {
-        TokenKind::Plus => BinaryOp::Add, TokenKind::Concat => BinaryOp::Concat,
-        TokenKind::Minus => BinaryOp::Sub,
-        TokenKind::Star => BinaryOp::Mul, TokenKind::Slash => BinaryOp::Div,
-        TokenKind::TildeSlash => BinaryOp::FloorDiv,
+        TokenKind::Plus => BinaryOp::Add, TokenKind::Concat => BinaryOp::Concat, TokenKind::Minus => BinaryOp::Sub,
+        TokenKind::Star => BinaryOp::Mul, TokenKind::Slash => BinaryOp::Div, TokenKind::TildeSlash => BinaryOp::FloorDiv,
         TokenKind::Percent => BinaryOp::Mod, TokenKind::StarStar => BinaryOp::Pow,
         TokenKind::EqEq => BinaryOp::Eq, TokenKind::NotEq => BinaryOp::NotEq,
-        TokenKind::Lt => BinaryOp::Lt, TokenKind::LtEq => BinaryOp::LtEq,
-        TokenKind::Gt => BinaryOp::Gt, TokenKind::GtEq => BinaryOp::GtEq,
-        TokenKind::Spaceship => BinaryOp::Spaceship,
-        TokenKind::And | TokenKind::AmpAmp => BinaryOp::And,
-        TokenKind::Or | TokenKind::PipePipe => BinaryOp::Or,
-        TokenKind::QuestionQuestion => BinaryOp::Coalesce,
-        TokenKind::Amp => BinaryOp::BitAnd, TokenKind::AmpCaret => BinaryOp::BitClear,
-        TokenKind::Pipe => BinaryOp::BitOr, TokenKind::Caret => BinaryOp::BitXor,
+        TokenKind::Lt => BinaryOp::Lt, TokenKind::LtEq => BinaryOp::LtEq, TokenKind::Gt => BinaryOp::Gt,
+        TokenKind::GtEq => BinaryOp::GtEq, TokenKind::Spaceship => BinaryOp::Spaceship,
+        TokenKind::And | TokenKind::AmpAmp => BinaryOp::And, TokenKind::Or | TokenKind::PipePipe => BinaryOp::Or,
+        TokenKind::QuestionQuestion => BinaryOp::Coalesce, TokenKind::Amp => BinaryOp::BitAnd,
+        TokenKind::AmpCaret => BinaryOp::BitClear, TokenKind::Pipe => BinaryOp::BitOr, TokenKind::Caret => BinaryOp::BitXor,
         TokenKind::Shl => BinaryOp::Shl, TokenKind::Shr => BinaryOp::Shr, TokenKind::Ushr => BinaryOp::Ushr,
-        TokenKind::In => BinaryOp::In, TokenKind::As => BinaryOp::As,
-        _ => BinaryOp::Instanceof,
+        TokenKind::In => BinaryOp::In, TokenKind::As => BinaryOp::As, _ => BinaryOp::Instanceof,
     }
 }

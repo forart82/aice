@@ -132,6 +132,18 @@ impl<'a> Parser<'a> {
         }
     }
 
+    pub fn expect_field_name(&mut self, msg: &str) -> Result<Token, TranspileError> {
+        let t = self.peek().clone();
+        if Self::is_binding_tok(&t)
+            || (t.kind == TokenKind::Number && t.lexeme.bytes().all(|b| b.is_ascii_digit()))
+        {
+            self.advance();
+            Ok(t)
+        } else {
+            Err(TranspileError::at(format!("{msg} (got {:?} '{}')", t.kind, t.lexeme), t.span))
+        }
+    }
+
     pub fn line_rest_raw(&mut self) -> String {
         let (mut start, mut end) = (None, 0usize);
         while !matches!(self.peek_kind(), TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) {

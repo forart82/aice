@@ -4,9 +4,9 @@ use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
-use crate::ir_types::{EnumDecl, ParamDecl, TypeDecl, TypeKind, VariantPayload};
+use crate::ir_types::{AiceType, EnumDecl, ParamDecl, TypeDecl, TypeKind, VariantPayload};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     if module.items.is_empty() && !module.raw_fallback.is_empty() {
@@ -52,9 +52,19 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
 fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl) {
     ec.blank();
     ec.emit_trivia(&td.trivia, CommentStyle::Slash);
+    emit_rs_hash_attrs(ec, &td.trivia);
     if td.kind == TypeKind::Alias {
         let rhs = td.alias_target.as_ref().map(|t| emit_type(t, LanguageId::Rust)).unwrap_or_else(|| "()".into());
         ec.line(&format!("{}type {} = {rhs};", rs_vis(td.vis), td.name));
+        return;
+    }
+    if td.kind == TypeKind::Struct && has_trivia_attr(&td.trivia, "tuple") {
+        let fs: Vec<String> = td.fields.iter().map(|f| format_rs_tuple_field(f.vis, f.ty.as_ref(), &f.trivia)).collect();
+        ec.line(&format!("{}struct {}({});", rs_vis(td.vis), td.name, fs.join(", ")));
+        return;
+    }
+    if td.kind == TypeKind::Struct && has_trivia_attr(&td.trivia, "unit") {
+        ec.line(&format!("{}struct {};", rs_vis(td.vis), td.name));
         return;
     }
     let kw = if td.kind == TypeKind::Trait { "trait" } else { "struct" };
@@ -78,6 +88,7 @@ fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl) {
 fn emit_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
     ec.blank();
     ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
+    emit_rs_hash_attrs(ec, &ed.trivia);
     ec.line(&format!("{}enum {} {{", rs_vis(ed.vis), ed.name));
     ec.push();
     for v in &ed.variants {
@@ -101,11 +112,20 @@ fn emit_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
 }
 
 fn emit_struct_impl(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
-    if !cd.props.is_empty() || cd.vis != Visibility::Default {
+    let is_tuple = has_class_attr(cd, "tuple");
+    let is_unit = has_class_attr(cd, "unit");
+    let is_braced = has_class_attr(cd, "braced");
+    if !cd.props.is_empty() || cd.vis != Visibility::Default || is_tuple || is_unit || is_braced {
         ec.blank();
         ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
-        if cd.props.is_empty() {
+        emit_rs_hash_attrs(ec, &cd.trivia);
+        if is_tuple {
+            let fs: Vec<String> = cd.props.iter().map(|p| format_rs_tuple_field(p.vis, p.ty.as_ref(), &p.trivia)).collect();
+            ec.line(&format!("{}struct {}({});", rs_vis(cd.vis), cd.name, fs.join(", ")));
+        } else if is_unit || (cd.props.is_empty() && !is_braced) {
             ec.line(&format!("{}struct {};", rs_vis(cd.vis), cd.name));
+        } else if cd.props.is_empty() {
+            ec.line(&format!("{}struct {} {{}}", rs_vis(cd.vis), cd.name));
         } else {
             ec.line(&format!("{}struct {} {{", rs_vis(cd.vis), cd.name));
             ec.push();
@@ -189,6 +209,38 @@ fn is_rs_macro_item(text: &str) -> bool {
     if t.starts_with("macro_rules!") { return true; }
     let rest = t.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == ':');
     rest.len() < t.len() && rest.strip_prefix('!').is_some_and(|r| matches!(r.trim_start().as_bytes().first(), Some(b'(' | b'[' | b'{')))
+}
+
+fn has_trivia_attr(tr: &Trivia, name: &str) -> bool {
+    tr.leading.iter().any(|c| {
+        c.kind == TriviaKind::Attribute && (c.text == name || c.text.strip_prefix('@') == Some(name))
+    })
+}
+
+fn has_class_attr(cd: &ClassDecl, name: &str) -> bool {
+    has_trivia_attr(&cd.trivia, name)
+        || cd.decorators.iter().any(|d| d == name || d.strip_prefix('@') == Some(name))
+}
+
+fn emit_rs_hash_attrs(ec: &mut EmitCtx, tr: &Trivia) {
+    for c in &tr.leading {
+        if c.kind == TriviaKind::Attribute && c.text.starts_with("#[") {
+            ec.line(&c.text);
+        }
+    }
+}
+
+fn format_rs_tuple_field(vis: Visibility, ty: Option<&AiceType>, tr: &Trivia) -> String {
+    let mut s = String::new();
+    for c in &tr.leading {
+        if c.kind == TriviaKind::Attribute && c.text.starts_with("#[") {
+            s.push_str(&c.text);
+            s.push(' ');
+        }
+    }
+    s.push_str(rs_vis(vis));
+    s.push_str(&ty.map(|x| emit_type(x, LanguageId::Rust)).unwrap_or_else(|| "()".into()));
+    s
 }
 
 fn rs_vis(v: Visibility) -> &'static str {

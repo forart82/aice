@@ -32,6 +32,7 @@ pub mod php_ruby;
 pub mod prisma_gql_cypher;
 pub mod python;
 pub mod ruby;
+mod rust_helpers;
 pub mod rust_lang;
 pub mod shell_md;
 pub mod sql_db;
