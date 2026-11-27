@@ -24,6 +24,10 @@ pub(crate) fn step_paren_open(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, va
 }
 
 pub(crate) fn step_paren_close(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<ParseVal>) -> Result<(), TranspileError> {
+    if crate::parser_iter_comp::is_comp_for_ahead(p) {
+        let ParseVal::Expr(first) = vals.pop().expect("paren expr") else { unreachable!() };
+        return crate::parser_iter_comp::start_comp_clauses(p, crate::ir_code::CompKind::Generator, first, None, Vec::new(), None, stack);
+    }
     if !p.eat(TokenKind::Comma) { p.expect(TokenKind::RParen, "Expected ')'")?; return Ok(()); }
     let ParseVal::Expr(first) = vals.pop().expect("paren expr") else { unreachable!() };
     let callee = Expr::Ident(String::new());

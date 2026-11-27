@@ -118,7 +118,11 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
         env.tasks.push(DTask::Expr(o));
         return;
     }
-    let arg_nodes = args_node.map(named_children).unwrap_or_default();
+    let arg_nodes = match args_node {
+        Some(an) if an.kind() == "generator_expression" => vec![an],
+        Some(an) => named_children(an),
+        None => Vec::new(),
+    };
     let ruby_blk = (env.lang == LanguageId::Ruby).then(|| {
         node.child_by_field_name("block").or_else(|| child_by_kind(node, "block")).or_else(|| child_by_kind(node, "do_block"))
     }).flatten();

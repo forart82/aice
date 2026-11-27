@@ -130,8 +130,7 @@ pub(crate) fn decompile_string_lit(raw: &str, lang: LanguageId) -> Expr {
         let value = if inner.contains('\\') { unescape_js_str(&inner) } else { inner };
         Expr::Literal(LiteralVal::Str { value, multiline })
     } else {
-        let multiline = inner.contains('\n');
-        Expr::Literal(LiteralVal::Str { value: inner, multiline })
+        crate::decompile::expr_lit_esc::decompile_non_js_str(t, inner, lang)
     }
 }
 

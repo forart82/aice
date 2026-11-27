@@ -42,6 +42,22 @@ pub enum RecordEntry {
     Field { key: Option<String>, value: Expr },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CompKind {
+    List,
+    Set,
+    Dict,
+    Generator,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct CompClause {
+    pub is_async: bool,
+    pub target: String,
+    pub iter: Expr,
+    pub filters: Vec<Expr>,
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum Expr {
     Literal(LiteralVal),
@@ -101,6 +117,12 @@ pub enum Expr {
     Match {
         target: Box<Expr>,
         cases: Vec<MatchCase>,
+    },
+    Comprehension {
+        kind: CompKind,
+        body: Box<Expr>,
+        value: Option<Box<Expr>>,
+        clauses: Vec<CompClause>,
     },
 }
 

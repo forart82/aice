@@ -1,10 +1,10 @@
-use crate::ir_code::{Expr, FnBody, MemberKind, Pattern, RecordEntry, Stmt, UnaryOp};
+use crate::ir_code::{CompKind, Expr, FnBody, MemberKind, Pattern, RecordEntry, Stmt, UnaryOp};
 use crate::ir_types::AiceType;
 use crate::printer::assign_op_str;
 use crate::printer_domain::format_ident_or_quoted;
 use crate::printer_expr::{
     bin_op_str, escape_template, format_raw_expr, needs_binary_parens, print_lit,
-    push_new_tagged_print, unary_op_str,
+    push_comp_print, push_new_tagged_print, unary_op_str,
 };
 use crate::printer_stmt_inline::push_inline_stmt;
 use crate::printer_types::{push_pattern, push_type};
@@ -119,10 +119,26 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
                 tasks.push(PTask::Expr(callee));
                 return;
             }
+            let is_empty_callee = matches!(callee.as_ref(), Expr::Ident(s) if s.is_empty());
+            if is_empty_callee && !*is_optional && !*is_new && args.len() == 2
+                && matches!(&args[1], Expr::Ident(s) if s.is_empty())
+            {
+                tasks.push(PTask::Lit(",)"));
+                tasks.push(PTask::Expr(&args[0]));
+                out.push('(');
+                return;
+            }
             tasks.push(PTask::Lit(")"));
-            for (i, a) in args.iter().enumerate().rev() {
-                tasks.push(PTask::Expr(a));
-                if i > 0 { tasks.push(PTask::Lit(", ")); }
+            if !is_empty_callee && !*is_optional && !*is_new && args.len() == 1
+                && let Expr::Comprehension { kind: CompKind::Generator, body, value, clauses } = &args[0]
+            {
+                let mut dummy = String::new();
+                push_comp_print(tasks, &mut dummy, CompKind::Generator, body, value.as_deref(), clauses, true);
+            } else {
+                for (i, a) in args.iter().enumerate().rev() {
+                    tasks.push(PTask::Expr(a));
+                    if i > 0 { tasks.push(PTask::Lit(", ")); }
+                }
             }
             tasks.push(PTask::Lit(if *is_optional { "?.(" } else { "(" }));
             tasks.push(PTask::Expr(callee));
@@ -216,6 +232,9 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             tasks.push(PTask::Lit(": { "));
             tasks.push(PTask::Expr(target));
             out.push_str("match ");
+        }
+        Expr::Comprehension { kind, body, value, clauses } => {
+            push_comp_print(tasks, out, *kind, body, value.as_deref(), clauses, false);
         }
     }
 }

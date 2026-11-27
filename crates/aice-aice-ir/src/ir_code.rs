@@ -1,6 +1,7 @@
 use crate::ir::{Span, Trivia, Visibility};
 pub use crate::ir_expr::{
-    AssignOp, BinaryOp, Expr, LiteralVal, MatchCase, MemberKind, Pattern, RecordEntry, UnaryOp,
+    AssignOp, BinaryOp, CompClause, CompKind, Expr, LiteralVal, MatchCase, MemberKind, Pattern,
+    RecordEntry, UnaryOp,
 };
 use crate::ir_types::{AiceType, ParamDecl, TypeParam};
 

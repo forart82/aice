@@ -166,3 +166,40 @@ pub(crate) fn push_new_tagged_print<'a>(
     while let Expr::Index { object, .. } = e { e = object; }
     out.push_str(if matches!(e, Expr::Ident(s) if s.is_empty()) { "new" } else { "new " });
 }
+
+pub(crate) fn push_comp_print<'a>(
+    tasks: &mut Vec<PTask<'a>>,
+    out: &mut String,
+    kind: crate::ir_code::CompKind,
+    body: &'a Expr,
+    value: Option<&'a Expr>,
+    clauses: &'a [crate::ir_code::CompClause],
+    bare: bool,
+) {
+    use crate::ir_code::CompKind;
+    let (open, close) = if bare {
+        ("", "")
+    } else {
+        match kind {
+            CompKind::List => ("[", "]"),
+            CompKind::Set | CompKind::Dict => ("{", "}"),
+            CompKind::Generator => ("(", ")"),
+        }
+    };
+    if !close.is_empty() { tasks.push(PTask::Lit(close)); }
+    for cl in clauses.iter().rev() {
+        for f in cl.filters.iter().rev() {
+            tasks.push(PTask::Expr(f));
+            tasks.push(PTask::Lit(" if "));
+        }
+        tasks.push(PTask::Expr(&cl.iter));
+        let pfx = if cl.is_async { " async for " } else { " for " };
+        tasks.push(PTask::Str(format!("{pfx}{} in ", cl.target)));
+    }
+    if let Some(v) = value {
+        tasks.push(PTask::Expr(v));
+        tasks.push(PTask::Lit(": "));
+    }
+    tasks.push(PTask::Expr(body));
+    if !open.is_empty() { out.push_str(open); }
+}

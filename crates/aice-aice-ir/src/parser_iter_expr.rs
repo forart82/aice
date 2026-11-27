@@ -67,15 +67,16 @@ pub(crate) fn step_expr_cont(
         ParseCont::ExprAwait => { let e = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Await(Box::new(e)))); }
         ParseCont::ExprParenClose => step_paren_close(p, stack, vals)?,
         ParseCont::ExprCallArg { callee, mut args, is_optional, is_new } => {
-            args.push(pop_expr(vals));
+            let a = pop_expr(vals);
+            if args.is_empty() && crate::parser_iter_comp::is_comp_for_ahead(p) {
+                return crate::parser_iter_comp::start_comp_clauses(p, crate::ir_code::CompKind::Generator, a, None, Vec::new(), Some((callee, is_optional, is_new)), stack);
+            }
+            args.push(a);
             if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RParen && !p.at_eof() {
-                stack.push(ParseCont::ExprCallArg { callee, args, is_optional, is_new });
-                stack.push(ParseCont::Expr(1));
+                stack.push(ParseCont::ExprCallArg { callee, args, is_optional, is_new }); stack.push(ParseCont::Expr(1));
             } else {
                 p.expect(TokenKind::RParen, "Expected ')'")?;
-                vals.push(ParseVal::Expr(Expr::Call {
-                    callee: Box::new(callee), args, is_optional, is_tagged: false, is_new,
-                }));
+                vals.push(ParseVal::Expr(Expr::Call { callee: Box::new(callee), args, is_optional, is_tagged: false, is_new }));
             }
         }
         ParseCont::ExprTaggedTemplate { callee } => {
@@ -160,21 +161,17 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
         TokenKind::LBracket => {
             p.advance();
             if p.peek_kind() == TokenKind::RBracket || p.at_eof() {
-                p.expect(TokenKind::RBracket, "Expected ']'")?;
-                vals.push(ParseVal::Expr(Expr::Array(Vec::new())));
-            } else {
-                stack.push(ParseCont::ExprArray(Vec::new()));
-                stack.push(ParseCont::Expr(1));
-            }
+                p.expect(TokenKind::RBracket, "Expected ']'")?; vals.push(ParseVal::Expr(Expr::Array(Vec::new())));
+            } else { stack.push(ParseCont::ExprArray(Vec::new())); stack.push(ParseCont::Expr(1)); }
         }
         TokenKind::LBrace => {
             p.advance();
             if p.peek_kind() == TokenKind::RBrace || p.at_eof() {
                 p.expect(TokenKind::RBrace, "Expected '}'")?;
                 vals.push(ParseVal::Expr(Expr::Record(Vec::new())));
-            } else {
-                start_record_entry(p, Vec::new(), stack)?;
-            }
+            } else if crate::parser_iter_comp::is_brace_comp_ahead(p) {
+                stack.push(ParseCont::ExprBraceCompKey); stack.push(ParseCont::Expr(1));
+            } else { start_record_entry(p, Vec::new(), stack)?; }
         }
         TokenKind::Fn if looks_like_closure_after_fn(p) || looks_like_gen_closure(p, 1) => {
             p.advance();

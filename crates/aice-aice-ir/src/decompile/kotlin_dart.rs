@@ -1,12 +1,14 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_text};
+use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text};
 use crate::decompile::dart;
+use crate::decompile::dart_params::extract_dart_field_init;
 use crate::decompile::kotlin;
 use crate::decompile::trivia::is_comment_kind;
 use crate::decompile::ts_helpers::normalize_single_line;
-use crate::ir::{AiceModule, TranspileError, TranspileOpts};
+use crate::ir::{AiceItem, AiceModule, TranspileError, TranspileOpts, Trivia, Visibility};
+use crate::ir_code::{ConstDecl, VarDecl};
 use crate::ir_types::{AiceType, PrimitiveType, TypeParam};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -226,4 +228,47 @@ pub(crate) fn kt_supertypes(node: Node<'_>, src: &str) -> (Option<String>, Vec<S
         }
     }
     (extends, implements)
+}
+
+pub(crate) fn decompile_dart_top_var(node: Node<'_>, src: &str, tr: Trivia, m: &mut AiceModule) {
+    let ty = child_by_kind(node, "type")
+        .or_else(|| child_by_kind(node, "type_identifier"))
+        .or_else(|| child_by_kind(node, "nullable_type"))
+        .or_else(|| named_children(node).into_iter().find(|c| c.kind().contains("type")))
+        .map(|t| map_type_str(node_text(t, src), LanguageId::Dart));
+    let list_node = child_by_kind(node, "initialized_identifier_list")
+        .or_else(|| child_by_kind(node, "static_final_declaration_list"));
+    let hdr_end = list_node.map_or(node.end_byte(), |l| l.start_byte());
+    let hdr = src.get(node.start_byte()..hdr_end).unwrap_or("");
+    let is_const = hdr.split_whitespace().any(|w| w == "const");
+    let is_final = hdr.split_whitespace().any(|w| w == "final");
+    let is_late = hdr.split_whitespace().any(|w| w == "late");
+    let ids: Vec<Node<'_>> = list_node.map(named_children).unwrap_or_else(|| vec![node]);
+    if is_late || ids.is_empty() {
+        m.items.push(AiceItem::Directive { text: node_text(node, src).trim().into(), trivia: tr, span: node_span(node) });
+        return;
+    }
+    let mut emitted = false;
+    for id in ids {
+        let name = field_text(id, "name", src)
+            .or_else(|| child_by_kind(id, "identifier").map(|n| node_text(n, src)))
+            .unwrap_or_else(|| node_text(id, src).split('=').next().unwrap_or("v"))
+            .trim()
+            .to_string();
+        let init = id.child_by_field_name("value")
+            .map(|v| crate::decompile::expr_common::decompile_expr(v, src, LanguageId::Dart))
+            .or_else(|| extract_dart_field_init(id, src));
+        let Some(value) = init else {
+            m.items.push(AiceItem::Directive { text: node_text(node, src).trim().into(), trivia: tr, span: node_span(node) });
+            return;
+        };
+        let vis = if name.starts_with('_') { Visibility::Private } else { Visibility::Public };
+        let item_tr = if emitted { Trivia::default() } else { tr.clone() };
+        if is_const {
+            m.items.push(AiceItem::Const(ConstDecl { vis, name, ty: ty.clone(), value, trivia: item_tr, span: node_span(id) }));
+        } else {
+            m.items.push(AiceItem::Var(VarDecl { vis, is_mut: !is_final, name, ty: ty.clone(), value, trivia: item_tr, span: node_span(id) }));
+        }
+        emitted = true;
+    }
 }

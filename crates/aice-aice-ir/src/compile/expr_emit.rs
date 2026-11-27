@@ -126,3 +126,57 @@ pub(crate) fn format_in_op(op: BinaryOp, l: &str, r: &str, lang: LanguageId) -> 
         (_, true) => format!("!contains({r}, {l})"),
     }
 }
+
+pub(crate) fn format_comp(
+    kind: crate::ir_code::CompKind,
+    has_val: bool,
+    clauses: &[crate::ir_code::CompClause],
+    bare: bool,
+    vals: &mut Vec<String>,
+) -> String {
+    use crate::ir_code::CompKind;
+    let mut parts = Vec::with_capacity(clauses.len());
+    for cl in clauses.iter().rev() {
+        let start = vals.len() - cl.filters.len();
+        let filters: Vec<String> = vals.drain(start..).collect();
+        let iter = vals.pop().unwrap();
+        let pfx = if cl.is_async { "async for" } else { "for" };
+        let mut s = format!("{pfx} {} in {iter}", cl.target);
+        for f in filters {
+            s.push_str(" if ");
+            s.push_str(&f);
+        }
+        parts.push(s);
+    }
+    parts.reverse();
+    let val = has_val.then(|| vals.pop().unwrap());
+    let body = vals.pop().unwrap();
+    let tail = parts.join(" ");
+    if bare {
+        return format!("{body} {tail}");
+    }
+    match kind {
+        CompKind::List => format!("[{body} {tail}]"),
+        CompKind::Set => format!("{{{body} {tail}}}"),
+        CompKind::Dict => format!("{{{body}: {} {tail}}}", val.unwrap_or_default()),
+        CompKind::Generator => format!("({body} {tail})"),
+    }
+}
+
+pub(crate) fn push_eval_comp<'a>(
+    kind: crate::ir_code::CompKind,
+    body: &'a Expr,
+    value: Option<&'a Expr>,
+    clauses: &'a [crate::ir_code::CompClause],
+    bare: bool,
+    tasks: &mut Vec<crate::compile::iter_emit::CTask<'a>>,
+) {
+    use crate::compile::iter_emit::CTask;
+    tasks.push(CTask::MakeComp { kind, has_val: value.is_some(), clauses, bare });
+    for cl in clauses.iter().rev() {
+        for f in cl.filters.iter().rev() { tasks.push(CTask::EvalExpr(f)); }
+        tasks.push(CTask::EvalExpr(&cl.iter));
+    }
+    if let Some(v) = value { tasks.push(CTask::EvalExpr(v)); }
+    tasks.push(CTask::EvalExpr(body));
+}

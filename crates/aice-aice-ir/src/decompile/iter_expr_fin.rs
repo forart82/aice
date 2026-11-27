@@ -63,9 +63,29 @@ pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
 }
 
 pub(crate) fn push_binary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
-    let kids = named_children(node);
+    let op_node = node.child_by_field_name("operator");
+    let kids: Vec<Node<'a>> = named_children(node)
+        .into_iter()
+        .filter(|c| {
+            Some(*c) != op_node
+                && !(env.lang == LanguageId::Dart
+                    && matches!(
+                        c.kind(),
+                        "additive_operator"
+                            | "equality_operator"
+                            | "multiplicative_operator"
+                            | "relational_operator"
+                            | "shift_operator"
+                            | "bitwise_operator"
+                    ))
+        })
+        .collect();
     if kids.len() < 2 { env.exprs.push(Expr::Ident(raw.to_string())); return; }
-    let op_str = node.child_by_field_name("operator").map(|o| node_text(o, env.src).trim())
+    if env.lang == LanguageId::Dart && kids.len() > 2 {
+        crate::decompile::iter_expr_comp::push_dart_chained_binary(env, &kids, raw);
+        return;
+    }
+    let op_str = op_node.map(|o| node_text(o, env.src).trim())
         .unwrap_or_else(|| {
             let (l_end, r_start) = (kids[0].end_byte(), kids[kids.len() - 1].start_byte());
             if l_end <= r_start { env.src[l_end..r_start].trim() } else { "+" }
@@ -90,56 +110,24 @@ pub(crate) fn push_binary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw:
 
 pub(crate) fn push_unary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
     let op_node = node.child_by_field_name("operator");
-    let arg = node
-        .child_by_field_name("argument")
-        .or_else(|| node.child_by_field_name("operand"))
-        .or_else(|| {
-            named_children(node).into_iter().find(|c| {
-                Some(*c) != op_node
-                    && !matches!(
-                        c.kind(),
-                        "prefix_operator" | "negation_operator" | "increment_operator"
-                    )
-            })
-        });
-    let Some(arg) = arg else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
-        return;
-    };
-    if op_node.is_none() && arg.kind() == "await_expression" {
-        env.tasks.push(DTask::Expr(arg));
-        return;
-    }
-    let op_str = op_node
-        .map(|o| node_text(o, env.src).trim())
-        .unwrap_or_else(|| {
-            let pre = env
-                .src
-                .get(node.start_byte()..arg.start_byte())
-                .unwrap_or("")
-                .trim();
-            if !pre.is_empty() {
-                pre
-            } else {
-                env.src
-                    .get(arg.end_byte()..node.end_byte())
-                    .unwrap_or("")
-                    .trim()
-            }
-        });
+    let arg = node.child_by_field_name("argument").or_else(|| node.child_by_field_name("operand")).or_else(|| {
+        named_children(node).into_iter().find(|c| {
+            Some(*c) != op_node && !matches!(c.kind(), "prefix_operator" | "negation_operator" | "increment_operator")
+        })
+    });
+    let Some(arg) = arg else { env.exprs.push(Expr::Ident(raw.to_string())); return; };
+    if op_node.is_none() && arg.kind() == "await_expression" { env.tasks.push(DTask::Expr(arg)); return; }
+    let op_str = op_node.map(|o| node_text(o, env.src).trim()).unwrap_or_else(|| {
+        let pre = env.src.get(node.start_byte()..arg.start_byte()).unwrap_or("").trim();
+        if !pre.is_empty() { pre } else { env.src.get(arg.end_byte()..node.end_byte()).unwrap_or("").trim() }
+    });
     let Some(op) = map_unary_op(op_str, node.kind(), env.lang) else {
         env.exprs.push(Expr::Ident(raw.to_string()));
         return;
     };
     let is_postfix = matches!(op, UnaryOp::Inc | UnaryOp::Dec)
         && (op_node.is_some_and(|o| o.start_byte() >= arg.end_byte())
-            || (op_node.is_none()
-                && env
-                    .src
-                    .get(arg.end_byte()..node.end_byte())
-                    .unwrap_or("")
-                    .trim()
-                    == op_str));
+            || (op_node.is_none() && env.src.get(arg.end_byte()..node.end_byte()).unwrap_or("").trim() == op_str));
     env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op, is_postfix }));
     env.tasks.push(DTask::Expr(arg));
 }
@@ -285,12 +273,16 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             env.tasks.push(DTask::LayoutToExpr(ln, force));
             return;
         }
+        ExprFin::Tuple(n) => crate::decompile::iter_expr_comp::finish_tuple_expr(env, n),
+        ExprFin::Comprehension { kind, has_val, clause_specs } => {
+            crate::decompile::iter_expr_comp::finish_comp_expr(env, kind, has_val, clause_specs)
+        }
     };
     env.exprs.push(e);
 }
 
 fn build_record_entries(slots: Vec<ObjSlot>, vals: Vec<Expr>) -> Vec<RecordEntry> {
-    slots.into_iter().zip(vals).map(|(slot, value)| match slot {
+    slots.into_iter().zip(vals).map(|(s, value)| match s {
         ObjSlot::Field(k) => RecordEntry::Field { key: Some(k), value },
         ObjSlot::Shorthand => RecordEntry::Field { key: None, value },
         ObjSlot::Spread => RecordEntry::Spread(value),

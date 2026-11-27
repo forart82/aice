@@ -139,11 +139,12 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                 "property_declaration" => {
                     push_attrs_to_trivia(&mut mtr, extract_php_attrs(ch, src));
                     let ty = ch.child_by_field_name("type").map(|t| map_type_str(node_text(t, src), LanguageId::Php));
+                    let is_st = child_by_kind(ch, "static_modifier").is_some();
                     for el in named_children(ch) {
                         if el.kind() == "property_element" {
                             let pnm = node_text(el, src).trim().trim_start_matches('$').split('=').next().unwrap_or("p").trim().to_string();
                             props.push(PropDecl {
-                                name: pnm, aliases: Vec::new(), vis: mvis, is_static: false, is_readonly: false,
+                                name: pnm, aliases: Vec::new(), vis: mvis, is_static: is_st, is_readonly: false,
                                 is_mut: true, is_optional: false, ty: ty.clone(), init: None, trivia: mtr.clone(),
                             });
                         }

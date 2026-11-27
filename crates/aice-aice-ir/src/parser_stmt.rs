@@ -272,3 +272,24 @@ pub(crate) fn is_match_brace_body(p: &Parser<'_>, brace_idx: usize) -> bool {
     }
     false
 }
+
+pub(crate) fn parse_binding_name(p: &mut Parser<'_>, msg: &str) -> Result<String, TranspileError> {
+    if matches!(p.peek_kind(), TokenKind::LBrace | TokenKind::LBracket) {
+        let open = p.peek_kind();
+        let close = if open == TokenKind::LBrace { TokenKind::RBrace } else { TokenKind::RBracket };
+        let start_tok = p.advance();
+        let start = start_tok.span.start_byte;
+        let mut end = start_tok.span.end_byte;
+        let mut depth = 1usize;
+        while !p.at_eof() && depth > 0 {
+            let tok = p.advance();
+            if tok.kind == open { depth += 1; } else if tok.kind == close { depth -= 1; }
+            if tok.span.end_byte > tok.span.start_byte { end = tok.span.end_byte; }
+        }
+        if depth != 0 {
+            return Err(TranspileError::at("Unclosed destructuring pattern", start_tok.span));
+        }
+        return Ok(p.src[start..end].trim().to_string());
+    }
+    Ok(p.expect_ident_or_kw(msg)?.lexeme)
+}

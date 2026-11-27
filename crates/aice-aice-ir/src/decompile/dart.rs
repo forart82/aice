@@ -6,7 +6,7 @@ use crate::decompile::dart_params::{
     dart_params, decompile_dart_enum, decompile_dart_extension, decompile_dart_mixin,
     extract_dart_field_init,
 };
-use crate::decompile::kotlin_dart::{extract_dart_heritage, extract_dart_type_params};
+use crate::decompile::kotlin_dart::{decompile_dart_top_var, extract_dart_heritage, extract_dart_type_params};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
@@ -59,11 +59,18 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     if body_node.is_some() { i += 1; }
                     m.items.push(AiceItem::Fn(decompile_dart_fn_sig(ch, body_node, src, opts, tr)));
                 }
+                "top_level_variable_declaration" | "initialized_variable_definition" => {
+                    decompile_dart_top_var(ch, src, tr, &mut m);
+                }
                 "declaration" => {
                     if let Some(sig) = child_by_kind(ch, "function_signature") {
                         let body_node = children.get(i + 1).filter(|n| n.kind() == "function_body").copied();
                         if body_node.is_some() { i += 1; }
                         m.items.push(AiceItem::Fn(decompile_dart_fn_sig(sig, body_node, src, opts, tr)));
+                    } else if child_by_kind(ch, "initialized_identifier_list").is_some()
+                        || child_by_kind(ch, "static_final_declaration_list").is_some()
+                    {
+                        decompile_dart_top_var(ch, src, tr, &mut m);
                     }
                 }
                 _ => {}

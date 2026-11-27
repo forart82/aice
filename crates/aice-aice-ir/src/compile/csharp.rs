@@ -107,17 +107,18 @@ fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.line(&format!("{}{st}{abs}{kw} {}{tps}{ctor}{bases}{wh} {{", cs_vis(cd.vis), cd.name));
     ec.push();
     for p in &cd.props {
+        let st = if p.is_static { "static " } else { "" };
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "object".into());
         if let Some(ref init) = p.init {
             let rhs = emit_expr(init, LanguageId::CSharp, ectx);
             if p.is_readonly {
-                ec.line(&format!("{}{t} {} => {rhs};", cs_vis(p.vis), p.name));
+                ec.line(&format!("{}{st}{t} {} => {rhs};", cs_vis(p.vis), p.name));
             } else {
-                ec.line(&format!("{}{t} {} {{ get; set; }} = {rhs};", cs_vis(p.vis), p.name));
+                ec.line(&format!("{}{st}{t} {} {{ get; set; }} = {rhs};", cs_vis(p.vis), p.name));
             }
         } else {
             let acc = if p.is_readonly { "{ get; }" } else { "{ get; set; }" };
-            ec.line(&format!("{}{t} {} {acc}", cs_vis(p.vis), p.name));
+            ec.line(&format!("{}{st}{t} {} {acc}", cs_vis(p.vis), p.name));
         }
     }
     for m in &cd.methods { emit_cs_method(ec, m, &cd.name, cd.is_abstract, ectx); }

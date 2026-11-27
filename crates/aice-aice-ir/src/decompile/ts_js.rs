@@ -101,7 +101,8 @@ fn decompile_top_item(
             let is_const = raw.trim_start().starts_with("const ");
             for d in named_children(node) {
                 if d.kind() == "variable_declarator" {
-                    let name = field_text(d, "name", src).unwrap_or("x").to_string();
+                    let raw_name = field_text(d, "name", src).unwrap_or("x");
+                    let name = if raw_name.contains('\n') { crate::decompile::ts_helpers::normalize_single_line(raw_name) } else { raw_name.to_string() };
                     let ty = d.child_by_field_name("type").map(|t| map_ts_type_node(t, src, lang));
                     let value = d.child_by_field_name("value").map(|v| decompile_expr(v, src, lang))
                         .unwrap_or(crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Nil));

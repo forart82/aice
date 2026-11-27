@@ -1,7 +1,7 @@
 use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
+use crate::decompile::cst_util::{child_by_kind, named_children, node_text};
 use crate::decompile::expr_common::{
     push_c_cast_task, push_cs_special_expr, push_index_task, push_new_array_task,
     push_template_task, push_yield_task,
@@ -9,13 +9,16 @@ use crate::decompile::expr_common::{
 use crate::decompile::expr_interp::{push_cs_interp_task, push_string_lit_task};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task, push_rs_turbofish_task};
+use crate::decompile::iter_expr_comp::{
+    push_dart_type_test_task, push_py_comp_task, push_py_set_task, push_struct_expr_task, push_tuple_task,
+};
 use crate::decompile::iter_expr_fin::{
     push_binary_task, push_lambda_task, push_unary_task,
 };
 use crate::decompile::iter_match::push_match_task;
 use crate::decompile::op_map::find_assign_parts;
 use crate::decompile::trivia::is_comment_kind;
-use crate::ir_code::{AssignOp, BinaryOp, Expr, LiteralVal, MemberKind, Stmt, UnaryOp};
+use crate::ir_code::{AssignOp, BinaryOp, CompKind, Expr, LiteralVal, MemberKind, Stmt, UnaryOp};
 use crate::ir_types::{AiceType, ParamDecl};
 
 pub(crate) enum ObjSlot {
@@ -48,6 +51,8 @@ pub(crate) enum ExprFin {
     Closure { is_async: bool, is_generator: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, destruct_stmts: Vec<Stmt>, ret: Option<AiceType>, body_kind: u8 },
     RubyBlock { params: Vec<ParamDecl>, has_body: bool },
     InlineJsx(bool),
+    Tuple(usize),
+    Comprehension { kind: CompKind, has_val: bool, clause_specs: Vec<(bool, String, usize)> },
 }
 
 pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
@@ -108,7 +113,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "null" | "nil" | "none" | "None" | "null_literal" => env.exprs.push(Expr::Literal(LiteralVal::Nil)),
         "string" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"
         | "verbatim_string_literal" | "byte_string_literal" | "raw_byte_string_literal"
-        | "c_string_literal" | "raw_c_string_literal" | "raw_string"
+        | "c_string_literal" | "raw_c_string_literal" | "raw_string" | "multiline_string_literal"
         | "char_literal" | "character_literal" => push_string_lit_task(env, node, raw),
         "interpolated_string_expression" if env.lang == LanguageId::CSharp => push_cs_interp_task(env, node),
         "template_string" => push_template_task(env, node, false),
@@ -171,14 +176,16 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             object: Box::new(Expr::Ident("this".into())), property: raw.trim_start_matches('@').into(), kind: MemberKind::Dot,
         }),
         "member_expression" | "field_expression" | "attribute" | "navigation_expression"
-        | "selector_expression" | "scoped_identifier" | "member_access_expression" => {
+        | "selector_expression" | "scoped_identifier" | "member_access_expression"
+        | "null_aware_member_expression" => {
             let kids: Vec<_> = named_children(node).into_iter()
                 .filter(|c| c.kind() != "optional_chain").collect();
             if kids.len() >= 2 {
                 let last = kids[kids.len() - 1];
                 let property = node_text(last, env.src).trim().trim_start_matches('.').to_string();
                 let gap = env.src.get(kids[0].end_byte()..last.start_byte()).unwrap_or("");
-                let is_opt = child_by_kind(node, "optional_chain").is_some()
+                let is_opt = node.kind() == "null_aware_member_expression"
+                    || child_by_kind(node, "optional_chain").is_some()
                     || gap.contains("?.")
                     || (env.lang == LanguageId::Ruby && gap.contains("&."))
                     || (env.lang == LanguageId::Php && gap.contains("?->"));
@@ -188,15 +195,20 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }
         "generic_function" | "generic_type_with_turbofish" if env.lang == LanguageId::Rust => push_rs_turbofish_task(env, node, raw),
-        "subscript_expression" | "index_expression" | "element_access_expression" | "array_access" => push_index_task(env, node, raw),
+        "subscript_expression" | "index_expression" | "element_access_expression" | "array_access"
+        | "null_aware_index_expression" => push_index_task(env, node, raw),
         "conditional_access_expression" if child_by_kind(node, "element_binding_expression").is_some() => push_index_task(env, node, raw),
         "call_expression" | "call" | "invocation_expression" | "method_invocation"
         | "function_call_expression" | "member_call_expression" | "object_creation_expression"
         | "implicit_object_creation_expression" | "new_expression" => push_call_task(env, node, raw),
         "binary_expression" | "binary_operator" | "boolean_operator" | "comparison_operator"
-        | "binary" | "in_expression" => {
+        | "binary" | "in_expression" | "equality_expression" | "relational_expression"
+        | "additive_expression" | "multiplicative_expression" | "logical_and_expression"
+        | "logical_or_expression" | "if_null_expression" | "bitwise_or_expression"
+        | "bitwise_xor_expression" | "bitwise_and_expression" | "shift_expression" => {
             push_binary_task(env, node, raw);
         }
+        "type_test_expression" if env.lang == LanguageId::Dart => push_dart_type_test_task(env, node, raw),
         "try_expression" if env.lang == LanguageId::Rust => {
             if let Some(inner) = named_children(node).into_iter().next() {
                 env.tasks.push(DTask::FinishExpr(ExprFin::PostfixTry));
@@ -228,35 +240,16 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 env.tasks.push(DTask::Expr(tgt));
             } else { env.exprs.push(Expr::Ident(raw.to_string())); }
         }
-        "struct_expression" => {
-            let sname = field_text(node, "name", env.src).unwrap_or("Struct").trim().to_string();
-            let (mut slots, mut vals) = (Vec::new(), Vec::new());
-            if let Some(body) = node.child_by_field_name("body") {
-                for ch in named_children(body) {
-                    match ch.kind() {
-                        "field_initializer" => {
-                            let k = field_text(ch, "field", env.src).or_else(|| field_text(ch, "name", env.src)).map(strip_quotes);
-                            let vn = ch.child_by_field_name("value").or_else(|| named_children(ch).into_iter().last());
-                            if let (Some(key), Some(v)) = (k, vn) { slots.push(ObjSlot::Field(key)); vals.push(v); }
-                        }
-                        "shorthand_field_initializer" => {
-                            let id = child_by_kind(ch, "identifier").unwrap_or(ch);
-                            slots.push(ObjSlot::Shorthand);
-                            vals.push(id);
-                        }
-                        "base_field_initializer" => {
-                            if let Some(base) = named_children(ch).into_iter().last() {
-                                slots.push(ObjSlot::Spread);
-                                vals.push(base);
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-            env.tasks.push(DTask::FinishExpr(ExprFin::StructExpr { sname, slots }));
-            for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }
+        "struct_expression" => push_struct_expr_task(env, node),
+        "tuple" | "tuple_expression" => push_tuple_task(env, node, raw),
+        "expression_list" if env.lang == LanguageId::Python && named_children(node).len() >= 2 => {
+            push_tuple_task(env, node, raw);
         }
+        "set" if env.lang == LanguageId::Python => push_py_set_task(env, node),
+        "list_comprehension" if env.lang == LanguageId::Python => push_py_comp_task(env, node, CompKind::List, raw),
+        "dictionary_comprehension" if env.lang == LanguageId::Python => push_py_comp_task(env, node, CompKind::Dict, raw),
+        "set_comprehension" if env.lang == LanguageId::Python => push_py_comp_task(env, node, CompKind::Set, raw),
+        "generator_expression" if env.lang == LanguageId::Python => push_py_comp_task(env, node, CompKind::Generator, raw),
         "object" | "dictionary" | "hash" | "set_or_map_literal" => push_object_task(env, node, raw),
         "array_creation_expression" if env.lang == LanguageId::Php => push_php_array_task(env, node),
         "array_creation_expression" | "implicit_array_creation_expression" if matches!(env.lang, LanguageId::CSharp | LanguageId::Java) => push_new_array_task(env, node, raw),

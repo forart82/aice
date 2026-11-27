@@ -123,6 +123,14 @@ fn run_nil_tasks<'a>(init: NilTask<'a>) {
                     }
                     tasks.push(NilTask::Expr(target));
                 }
+                Expr::Comprehension { body, value, clauses, .. } => {
+                    for cl in clauses.iter_mut().rev() {
+                        for f in cl.filters.iter_mut().rev() { tasks.push(NilTask::Expr(f)); }
+                        tasks.push(NilTask::Expr(&mut cl.iter));
+                    }
+                    if let Some(v) = value { tasks.push(NilTask::Expr(v)); }
+                    tasks.push(NilTask::Expr(body));
+                }
                 _ => {}
             },
         }

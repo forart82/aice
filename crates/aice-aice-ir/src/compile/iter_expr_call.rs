@@ -102,7 +102,15 @@ pub(crate) fn push_eval_call<'a>(
     let callee_lit = if lang == LanguageId::Php && let Expr::Ident(fn_name) = callee { Some(fn_name.clone()) } else { None };
     let need_eval = callee_lit.is_none();
     tasks.push(CTask::MakeCall { callee_lit, class_new: None, n_args: args.len(), is_optional, is_new });
-    for a in args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
+    if !is_optional && !is_new && !matches!(callee, Expr::Ident(s) if s.is_empty()) && args.len() == 1
+        && let Expr::Comprehension { kind: crate::ir_code::CompKind::Generator, body, value, clauses } = &args[0]
+    {
+        crate::compile::expr_emit::push_eval_comp(
+            crate::ir_code::CompKind::Generator, body, value.as_deref(), clauses, true, tasks,
+        );
+    } else {
+        for a in args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
+    }
     if need_eval { tasks.push(CTask::EvalExpr(callee)); }
 }
 
@@ -186,6 +194,10 @@ pub(crate) fn finish_make_call(
     }
     if let Some(nm) = class_new { st.vals.push(format!("new {nm}({})", ps.join(", "))); return; }
     let cs = match callee_lit { Some(s) => s, None => st.vals.pop().unwrap() };
+    if cs.is_empty() && !is_optional && !is_new && ps.len() == 2 && ps[1].is_empty() {
+        st.vals.push(format!("({},)", ps[0]));
+        return;
+    }
     let op = if is_optional && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) { "?." } else { "" };
     let pfx = if is_new && matches!(lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript | LanguageId::CSharp | LanguageId::Java | LanguageId::Php | LanguageId::Cpp) {
         "new "

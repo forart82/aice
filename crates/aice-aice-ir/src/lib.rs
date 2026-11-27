@@ -38,6 +38,7 @@ mod parser_domain_xml;
 pub mod parser_expr;
 mod parser_iter;
 mod parser_iter_cf;
+mod parser_iter_comp;
 mod parser_iter_expr;
 mod parser_iter_lit;
 mod parser_iter_match;

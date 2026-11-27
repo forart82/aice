@@ -9,7 +9,9 @@ use crate::compile::iter_py::step_py_task;
 use crate::compile::iter_rb::step_rb_task;
 use crate::compile::iter_stmt::step_stmt_task;
 use crate::ir::Trivia;
-use crate::ir_code::{AssignOp, BinaryOp, Expr, FnBody, MatchCase, MemberKind, Pattern, RecordEntry, Stmt, UnaryOp};
+use crate::ir_code::{
+    AssignOp, BinaryOp, CompClause, CompKind, Expr, FnBody, MatchCase, MemberKind, Pattern, RecordEntry, Stmt, UnaryOp,
+};
 use crate::ir_types::{AiceType, ParamDecl};
 
 pub(crate) struct EvalState {
@@ -40,6 +42,7 @@ pub(crate) enum CTask<'a> {
     MakeRustStructCall,
     MakeRubyBlock { params: &'a [ParamDecl], body_kind: u8, n_prefix: usize },
     MakeClosure { is_async: bool, params: &'a [ParamDecl], ret: Option<&'a AiceType>, body_kind: u8 },
+    MakeComp { kind: CompKind, has_val: bool, clauses: &'a [CompClause], bare: bool },
 
     EvalPat(&'a Pattern),
     MakePatCtor { name: &'a str, n_args: usize },
@@ -172,7 +175,9 @@ fn run_tasks<'a>(lang: LanguageId, ectx: &ExprEmitCtx, st: &mut EvalState, tasks
             | CTask::MakeRecord { .. } | CTask::MakeInlineJsx { .. } | CTask::MakeArray(_)
             | CTask::MakeIndex { .. } | CTask::MakeMember { .. } | CTask::MakeAssign(_)
             | CTask::MakeAwait | CTask::MakeCall { .. } | CTask::MakeRustStructCall
-            | CTask::MakeRubyBlock { .. } | CTask::MakeClosure { .. } => step_expr_task(task, lang, ectx, st, tasks),
+            | CTask::MakeRubyBlock { .. } | CTask::MakeClosure { .. } | CTask::MakeComp { .. } => {
+                step_expr_task(task, lang, ectx, st, tasks)
+            }
             CTask::EvalPat(_) | CTask::MakePatCtor { .. } | CTask::MakePatOr { .. }
             | CTask::MakePatRange { .. } | CTask::EvalPatCond { .. } | CTask::MakePatCondCtor { .. }
             | CTask::MakePatCondOr(_) | CTask::MakePatCondRange { .. } | CTask::EvalCaseCond { .. }

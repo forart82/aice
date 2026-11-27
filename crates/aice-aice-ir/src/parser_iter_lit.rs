@@ -30,7 +30,14 @@ pub(crate) fn step_lit_cont(
             }
         }
         ParseCont::ExprArray(mut items) => {
-            items.push(pop_expr(vals));
+            let item = pop_expr(vals);
+            if items.is_empty() && crate::parser_iter_comp::is_comp_for_ahead(p) {
+                crate::parser_iter_comp::start_comp_clauses(
+                    p, crate::ir_code::CompKind::List, item, None, Vec::new(), None, stack,
+                )?;
+                return Ok(());
+            }
+            items.push(item);
             if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RBracket && !p.at_eof() {
                 stack.push(ParseCont::ExprArray(items));
                 stack.push(ParseCont::Expr(1));

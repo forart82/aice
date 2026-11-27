@@ -1,7 +1,7 @@
 use aice_lang_registry::LanguageId;
 
 use crate::compile::expr_emit::{
-    ExprEmitCtx, assign_native, bin_op_native, emit_ident, emit_lit, format_in_op, is_str_like,
+    ExprEmitCtx, assign_native, bin_op_native, emit_ident, emit_lit, format_comp, format_in_op, is_str_like,
 };
 use crate::compile::iter_emit::{CTask, EvalState, body_kind_of};
 use crate::compile::iter_expr_call::{finish_make_call, make_inline_jsx, push_eval_call, push_eval_index};
@@ -194,6 +194,10 @@ pub(crate) fn step_expr_task<'a>(
             }).collect();
             st.vals.push(format_closure(is_async, &ps, ret, body_kind, body_s.as_deref(), lang));
         }
+        CTask::MakeComp { kind, has_val, clauses, bare } => {
+            let s = format_comp(kind, has_val, clauses, bare, &mut st.vals);
+            st.vals.push(s);
+        }
         _ => unreachable!(),
     }
 }
@@ -284,9 +288,9 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             tasks.push(CTask::EvalExpr(target));
         }
         Expr::Await(inner) => { tasks.push(CTask::MakeAwait); tasks.push(CTask::EvalExpr(inner)); }
-        Expr::Match { target, cases } => {
-            tasks.push(CTask::PrepMatchExpr { target, cases });
-            tasks.push(CTask::EvalExpr(target));
+        Expr::Match { target, cases } => { tasks.push(CTask::PrepMatchExpr { target, cases }); tasks.push(CTask::EvalExpr(target)); }
+        Expr::Comprehension { kind, body, value, clauses } => {
+            crate::compile::expr_emit::push_eval_comp(*kind, body, value.as_deref(), clauses, false, tasks);
         }
     }
 }

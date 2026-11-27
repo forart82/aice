@@ -109,7 +109,7 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                         });
                     let pr = node_text(ch, src);
                     props.push(PropDecl {
-                        name: pname, aliases: Vec::new(), vis: mvis, is_static: pr.contains("static "),
+                        name: pname, aliases: Vec::new(), vis: mvis, is_static: cs_has_mod(ch, src, "static") || pr.contains("static "),
                         is_readonly: !pr.contains("set;"), is_mut: pr.contains("set;"), is_optional: false,
                         ty, init, trivia: mtr,
                     });

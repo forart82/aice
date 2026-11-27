@@ -22,6 +22,25 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Enum(ed) => emit_dart_enum(&mut ec, ed),
             AiceItem::Class(cd) => emit_dart_class(&mut ec, cd, &ectx),
             AiceItem::Fn(fd) => emit_dart_fn(&mut ec, fd, &ectx),
+            AiceItem::Const(cd) => {
+                ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
+                let t = cd.ty.as_ref().map(|x| format!("{} ", emit_dart_type(x))).unwrap_or_default();
+                ec.line(&format!("const {t}{} = {};", cd.name, emit_expr(&cd.value, LanguageId::Dart, &ectx)));
+            }
+            AiceItem::Var(vd) => {
+                ec.emit_trivia(&vd.trivia, CommentStyle::Slash);
+                let val = emit_expr(&vd.value, LanguageId::Dart, &ectx);
+                match (vd.is_mut, &vd.ty) {
+                    (false, Some(ty)) => ec.line(&format!("final {} {} = {val};", emit_dart_type(ty), vd.name)),
+                    (false, None) => ec.line(&format!("final {} = {val};", vd.name)),
+                    (true, Some(ty)) => ec.line(&format!("{} {} = {val};", emit_dart_type(ty), vd.name)),
+                    (true, None) => ec.line(&format!("var {} = {val};", vd.name)),
+                }
+            }
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.emit_trivia(trivia, CommentStyle::Slash);
+                for line in text.lines() { ec.line(line); }
+            }
             _ => {}
         }
     }

@@ -166,6 +166,16 @@ pub(crate) fn drain_expr(e: &mut Expr, work: &mut Vec<DropWork>) {
             push_expr(target, work);
             work.extend(std::mem::take(cases).into_iter().map(DropWork::MatchCase));
         }
+        Expr::Comprehension { body, value, clauses, .. } => {
+            push_expr(body, work);
+            if let Some(mut v) = value.take() {
+                push_expr(&mut v, work);
+            }
+            for mut cl in std::mem::take(clauses) {
+                push_expr(&mut cl.iter, work);
+                work.extend(cl.filters.into_iter().map(DropWork::Expr));
+            }
+        }
     }
 }
 

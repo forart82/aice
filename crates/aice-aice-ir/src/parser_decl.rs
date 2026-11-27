@@ -5,7 +5,7 @@ use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
 use crate::parser_class::parse_method_decl;
 use crate::parser_expr::parse_expr;
-use crate::parser_stmt::{is_walrus_ahead, parse_optional_body_with_trivia};
+use crate::parser_stmt::{is_walrus_ahead, parse_binding_name, parse_optional_body_with_trivia};
 pub(crate) use crate::parser_types::{parse_type_expr, parse_type_params};
 
 pub(crate) fn parse_import(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) -> Result<AiceItem, TranspileError> {
@@ -174,7 +174,7 @@ pub(crate) fn parse_const_or_var(p: &mut Parser<'_>, vis: Visibility, trivia: Tr
     let sp = p.peek().span;
     let mut tr = trivia;
     if !is_walrus_ahead(p) && p.eat(TokenKind::Const) {
-        let name = p.expect_ident_or_kw("Expected const name")?.lexeme;
+        let name = parse_binding_name(p, "Expected const name")?;
         let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
         p.expect(TokenKind::Equal, "Expected '='")?;
         let value = parse_expr(p)?;
@@ -184,10 +184,13 @@ pub(crate) fn parse_const_or_var(p: &mut Parser<'_>, vis: Visibility, trivia: Tr
     let mut is_mut = false;
     if !is_walrus_ahead(p) {
         is_mut = p.eat(TokenKind::Mut);
-        if p.eat(TokenKind::Let) { is_mut = p.peek_kind() == TokenKind::Mut && Parser::is_binding_tok(p.peek_n(1)) && p.eat(TokenKind::Mut); }
-        else { p.eat(TokenKind::Val); }
+        if p.eat(TokenKind::Let) {
+            is_mut = p.peek_kind() == TokenKind::Mut
+                && (Parser::is_binding_tok(p.peek_n(1)) || matches!(p.peek_n(1).kind, TokenKind::LBrace | TokenKind::LBracket))
+                && p.eat(TokenKind::Mut);
+        } else { p.eat(TokenKind::Val); }
     }
-    let name = p.expect_ident_or_kw("Expected binding name")?.lexeme;
+    let name = parse_binding_name(p, "Expected binding name")?;
     let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
     if p.eat(TokenKind::ColonColonEqual) { is_mut = true; }
     else if p.eat(TokenKind::ColonEqual) || p.eat(TokenKind::Equal) {}
@@ -251,18 +254,14 @@ fn parse_field_decl(p: &mut Parser<'_>, trivia: Trivia) -> Result<FieldDecl, Tra
 }
 
 fn is_interface_constraint(p: &Parser<'_>, inline: bool) -> bool {
-    if matches!(p.peek_kind(), TokenKind::Tilde | TokenKind::LBracket | TokenKind::Star) {
-        return true;
-    }
+    if matches!(p.peek_kind(), TokenKind::Tilde | TokenKind::LBracket | TokenKind::Star) { return true; }
     if p.peek().lexeme == "readonly" { return false; }
     let (mut i, mut depth) = (0usize, 0usize);
     loop {
         let k = p.peek_n(i).kind;
         if matches!(k, TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment)
             || (inline && depth == 0 && k == TokenKind::Comma)
-        {
-            return false;
-        }
+        { return false; }
         match k {
             TokenKind::LParen | TokenKind::LBrace => depth += 1,
             TokenKind::LBracket => { if depth == 0 { return true; } depth += 1; }

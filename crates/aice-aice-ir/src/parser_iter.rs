@@ -1,7 +1,10 @@
 use crate::ir::{TranspileError, Trivia};
-use crate::ir_code::{AssignOp, BinaryOp, CatchClause, Expr, MatchCase, Pattern, RecordEntry, Stmt};
+use crate::ir_code::{
+    AssignOp, BinaryOp, CatchClause, CompClause, CompKind, Expr, MatchCase, Pattern, RecordEntry, Stmt,
+};
 use crate::ir_types::{AiceType, ParamDecl};
 use crate::parser::Parser;
+use crate::parser_iter_comp::step_comp_cont;
 use crate::parser_iter_expr::step_expr_cont;
 use crate::parser_iter_pat::step_pat_cont;
 use crate::parser_iter_stmt::step_stmt_cont;
@@ -38,6 +41,24 @@ pub(crate) enum ParseCont {
     ExprClosureParamDefault { is_async: bool, params: Vec<ParamDecl>, cur: ParamDecl },
     ExprClosureFinish { is_async: bool, params: Vec<ParamDecl>, ret: Option<AiceType>, is_block: bool },
     ExprMatchWrap,
+    ExprBraceCompKey,
+    ExprBraceCompVal { key: Expr },
+    ExprCompIter {
+        kind: CompKind,
+        body: Expr,
+        value: Option<Expr>,
+        clauses: Vec<CompClause>,
+        is_async: bool,
+        target: String,
+        wrap_call: Option<(Expr, bool, bool)>,
+    },
+    ExprCompFilter {
+        kind: CompKind,
+        body: Expr,
+        value: Option<Expr>,
+        clauses: Vec<CompClause>,
+        wrap_call: Option<(Expr, bool, bool)>,
+    },
 
     // Statements & Blocks
     IndentedBlock(Vec<Stmt>),
@@ -135,6 +156,12 @@ pub(crate) fn run_parse_loop(p: &mut Parser<'_>, init: ParseCont) -> Result<Pars
             | ParseCont::ExprNewArrayInit { .. }
             | ParseCont::ExprNewObjInit { .. } => {
                 step_new_cont(p, cont, &mut stack, &mut vals)?;
+            }
+            ParseCont::ExprBraceCompKey
+            | ParseCont::ExprBraceCompVal { .. }
+            | ParseCont::ExprCompIter { .. }
+            | ParseCont::ExprCompFilter { .. } => {
+                step_comp_cont(p, cont, &mut stack, &mut vals)?;
             }
             ParseCont::PatParse | ParseCont::PatSingle | ParseCont::PatOrTail(_)
             | ParseCont::PatCtorArg { .. } | ParseCont::PatRangeEnd { .. }

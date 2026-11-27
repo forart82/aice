@@ -18,7 +18,7 @@ pub(crate) fn decompile_expr(node: Node<'_>, src: &str, lang: LanguageId) -> Exp
 
 pub(crate) fn push_index_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
     let is_optional = child_by_kind(node, "optional_chain").is_some()
-        || node.kind() == "conditional_access_expression";
+        || matches!(node.kind(), "conditional_access_expression" | "null_aware_index_expression");
     let (obj_n, idx_n) = match (
         node.child_by_field_name("object")
             .or_else(|| node.child_by_field_name("argument"))

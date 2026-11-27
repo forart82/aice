@@ -1,6 +1,6 @@
 use crate::ir::Trivia;
 use crate::ir_clone_stmt::{StmtFinish, finish_stmt, push_stmt};
-use crate::ir_code::{AssignOp, BinaryOp, CatchClause, FnBody, MemberKind, Stmt, UnaryOp};
+use crate::ir_code::{AssignOp, BinaryOp, CatchClause, CompClause, CompKind, FnBody, MemberKind, Stmt, UnaryOp};
 use crate::ir_expr::{Expr, MatchCase, Pattern, RecordEntry};
 use crate::ir_types::{AiceType, ParamDecl, PrimitiveType, RecordTypeField};
 
@@ -25,6 +25,8 @@ pub(crate) enum CloneTask<'a> {
     FinishParam(&'a ParamDecl),
     RecTy(&'a RecordTypeField),
     FinishRecTy { name: String, optional: bool },
+    CompCl(&'a CompClause),
+    FinishCompCl { is_async: bool, target: String, n_filters: usize },
 }
 
 pub(crate) enum ExprFinish {
@@ -42,6 +44,7 @@ pub(crate) enum ExprFinish {
     Assign(AssignOp),
     Await,
     Match(usize),
+    Comp { kind: CompKind, has_val: bool, n_clauses: usize },
 }
 
 pub(crate) enum PatFinish {
@@ -77,6 +80,7 @@ pub(crate) struct CloneEnv<'a> {
     pub recs: Vec<RecordEntry>,
     pub params: Vec<ParamDecl>,
     pub rec_tys: Vec<RecordTypeField>,
+    pub comp_clauses: Vec<CompClause>,
 }
 
 impl<'a> CloneEnv<'a> {
@@ -188,6 +192,18 @@ impl<'a> CloneEnv<'a> {
                 CloneTask::FinishRecTy { name, optional } => {
                     let ty = self.tys.pop().expect("rec ty");
                     self.rec_tys.push(RecordTypeField { name, optional, ty });
+                }
+                CloneTask::CompCl(cl) => {
+                    self.tasks.push(CloneTask::FinishCompCl {
+                        is_async: cl.is_async, target: cl.target.clone(), n_filters: cl.filters.len(),
+                    });
+                    for f in cl.filters.iter().rev() { self.tasks.push(CloneTask::Expr(f)); }
+                    self.tasks.push(CloneTask::Expr(&cl.iter));
+                }
+                CloneTask::FinishCompCl { is_async, target, n_filters } => {
+                    let filters = self.exprs.split_off(self.exprs.len() - n_filters);
+                    let iter = self.exprs.pop().expect("comp iter");
+                    self.comp_clauses.push(CompClause { is_async, target, iter, filters });
                 }
             }
         }

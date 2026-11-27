@@ -89,8 +89,9 @@ fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     for p in &cd.props {
         ec.emit_trivia(&p.trivia, CommentStyle::Slash);
         ec.emit_attrs(&p.trivia);
+        let st = if p.is_static { "static " } else { "" };
         let t = p.ty.as_ref().map(|x| format!("{} ", emit_type(x, LanguageId::Php))).unwrap_or_default();
-        ec.line(&format!("{}{t}${};", php_vis(p.vis), p.name));
+        ec.line(&format!("{}{st}{t}${};", php_vis(p.vis), p.name));
     }
     let allow_abs = cd.is_abstract || is_trait;
     for m in &cd.methods { emit_php_method(ec, m, is_interface, allow_abs, ectx); }

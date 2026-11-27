@@ -78,6 +78,12 @@ impl<'a> CloneEnv<'a> {
                 for mc in cases.iter().rev() { self.tasks.push(CloneTask::Case(mc)); }
                 self.tasks.push(CloneTask::Expr(target));
             }
+            Expr::Comprehension { kind, body, value, clauses } => {
+                self.tasks.push(CloneTask::FinishExpr(ExprFinish::Comp { kind: *kind, has_val: value.is_some(), n_clauses: clauses.len() }));
+                for cl in clauses.iter().rev() { self.tasks.push(CloneTask::CompCl(cl)); }
+                if let Some(v) = value { self.tasks.push(CloneTask::Expr(v)); }
+                self.tasks.push(CloneTask::Expr(body));
+            }
         }
     }
 
@@ -133,6 +139,11 @@ impl<'a> CloneEnv<'a> {
                 let cases = self.cases.split_off(self.cases.len() - n);
                 let target = Box::new(self.exprs.pop().expect("m tgt"));
                 Expr::Match { target, cases }
+            }
+            ExprFinish::Comp { kind, has_val, n_clauses } => {
+                let clauses = self.comp_clauses.split_off(self.comp_clauses.len() - n_clauses);
+                let value = has_val.then(|| Box::new(self.exprs.pop().expect("c val")));
+                Expr::Comprehension { kind, body: Box::new(self.exprs.pop().expect("c body")), value, clauses }
             }
         };
         self.exprs.push(e);
@@ -254,37 +265,14 @@ impl<'a> CloneEnv<'a> {
 }
 
 impl Clone for Stmt {
-    fn clone(&self) -> Self {
-        let mut env = CloneEnv::default();
-        env.tasks.push(CloneTask::Stmt(self));
-        env.run();
-        env.stmts.pop().expect("cloned stmt")
-    }
+    fn clone(&self) -> Self { let mut e = CloneEnv::default(); e.tasks.push(CloneTask::Stmt(self)); e.run(); e.stmts.pop().expect("stmt") }
 }
-
 impl Clone for Expr {
-    fn clone(&self) -> Self {
-        let mut env = CloneEnv::default();
-        env.tasks.push(CloneTask::Expr(self));
-        env.run();
-        env.exprs.pop().expect("cloned expr")
-    }
+    fn clone(&self) -> Self { let mut e = CloneEnv::default(); e.tasks.push(CloneTask::Expr(self)); e.run(); e.exprs.pop().expect("expr") }
 }
-
 impl Clone for Pattern {
-    fn clone(&self) -> Self {
-        let mut env = CloneEnv::default();
-        env.tasks.push(CloneTask::Pat(self));
-        env.run();
-        env.pats.pop().expect("cloned pat")
-    }
+    fn clone(&self) -> Self { let mut e = CloneEnv::default(); e.tasks.push(CloneTask::Pat(self)); e.run(); e.pats.pop().expect("pat") }
 }
-
 impl Clone for AiceType {
-    fn clone(&self) -> Self {
-        let mut env = CloneEnv::default();
-        env.tasks.push(CloneTask::Ty(self));
-        env.run();
-        env.tys.pop().expect("cloned ty")
-    }
+    fn clone(&self) -> Self { let mut e = CloneEnv::default(); e.tasks.push(CloneTask::Ty(self)); e.run(); e.tys.pop().expect("ty") }
 }

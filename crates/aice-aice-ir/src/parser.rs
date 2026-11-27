@@ -228,7 +228,8 @@ impl<'a> Parser<'a> {
                 if self.peek_kind() == TokenKind::Fn { parse_fn_decl(self, vis, true, false, trivia) }
                 else { Err(TranspileError::at("Expected 'fn' after 'async'", sp)) }
             }
-            TokenKind::Const | TokenKind::Let | TokenKind::Mut | TokenKind::Val => parse_const_or_var(self, vis, trivia),
+            TokenKind::Const | TokenKind::Let | TokenKind::Mut | TokenKind::Val
+            | TokenKind::LBrace | TokenKind::LBracket => parse_const_or_var(self, vis, trivia),
             TokenKind::Component => parse_component(self, vis, trivia),
             TokenKind::Style => parse_style(self, trivia),
             TokenKind::Tokens => parse_tokens(self, trivia),
