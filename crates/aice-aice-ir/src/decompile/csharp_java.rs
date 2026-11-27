@@ -78,3 +78,63 @@ pub(crate) fn extract_cs_type_params(node: Node<'_>, src: &str) -> Vec<TypeParam
     }
     out
 }
+
+pub(crate) fn java_has_mod(node: Node<'_>, src: &str, kw: &str) -> bool {
+    let Some(mods) = child_by_kind(node, "modifiers") else { return false; };
+    let mut cur = mods.walk();
+    mods.children(&mut cur).any(|c| !c.is_named() && node_text(c, src).trim() == kw)
+}
+
+fn collect_java_type_list(container: Node<'_>, src: &str) -> Vec<String> {
+    let list = child_by_kind(container, "type_list").unwrap_or(container);
+    named_children(list)
+        .into_iter()
+        .filter(|c| !is_comment_kind(c.kind()))
+        .map(|c| node_text(c, src).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+pub(crate) fn extract_java_heritage(node: Node<'_>, src: &str) -> (Option<String>, Vec<String>) {
+    let extends = node
+        .child_by_field_name("superclass")
+        .or_else(|| child_by_kind(node, "superclass"))
+        .and_then(|sc| {
+            named_children(sc)
+                .into_iter()
+                .find(|c| !is_comment_kind(c.kind()))
+                .map(|t| node_text(t, src).trim().to_string())
+        })
+        .filter(|s| !s.is_empty());
+    let implements = node
+        .child_by_field_name("interfaces")
+        .or_else(|| child_by_kind(node, "super_interfaces"))
+        .map(|si| collect_java_type_list(si, src))
+        .unwrap_or_default();
+    (extends, implements)
+}
+
+pub(crate) fn extract_java_iface_extends(node: Node<'_>, src: &str) -> Vec<String> {
+    child_by_kind(node, "extends_interfaces")
+        .map(|ei| collect_java_type_list(ei, src))
+        .unwrap_or_default()
+}
+
+pub(crate) fn cs_has_mod(node: Node<'_>, src: &str, kw: &str) -> bool {
+    named_children(node)
+        .into_iter()
+        .any(|c| c.kind() == "modifier" && node_text(c, src).trim() == kw)
+}
+
+pub(crate) fn extract_cs_base_list(node: Node<'_>, src: &str) -> Vec<String> {
+    let Some(bl) = child_by_kind(node, "base_list") else { return Vec::new(); };
+    let mut out = Vec::new();
+    for ch in named_children(bl) {
+        if is_comment_kind(ch.kind()) || ch.kind() == "argument_list" { continue; }
+        let txt = node_text(ch, src).trim();
+        if !txt.is_empty() && !txt.contains('(') {
+            out.push(txt.to_string());
+        }
+    }
+    out
+}

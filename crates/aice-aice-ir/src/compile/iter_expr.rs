@@ -203,7 +203,12 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
         Expr::Raw(s) => st.vals.push(s.clone()),
         Expr::Template { quasis, exprs } => {
             tasks.push(CTask::MakeTemplate { quasis, n_exprs: exprs.len() });
-            for ex in exprs.iter().rev() { tasks.push(CTask::EvalExpr(ex)); }
+            for ex in exprs.iter().rev() {
+                if lang == LanguageId::CSharp && matches!(ex, Expr::Conditional { .. }) {
+                    tasks.push(CTask::WrapParen);
+                }
+                tasks.push(CTask::EvalExpr(ex));
+            }
         }
         Expr::Binary { op, left, right } => {
             let lp = crate::printer_expr::needs_binary_parens(left, *op, false) || needs_walrus_parens(left);

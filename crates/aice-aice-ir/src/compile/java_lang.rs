@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use aice_lang_registry::LanguageId;
 
-use crate::compile::csharp_java::{emit_java_type_params, has_attr, java_nested_parent, parse_nested_tag};
+use crate::compile::csharp_java::{
+    emit_java_class_hdr, emit_java_iface_ext, emit_java_type_params, has_attr, j_vis,
+    java_nested_parent, parse_nested_tag,
+};
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
@@ -162,7 +165,8 @@ fn emit_java_interface(ec: &mut EmitCtx, td: &TypeDecl) {
     ec.blank();
     ec.emit_trivia(&td.trivia, CommentStyle::Slash);
     let tps = emit_java_type_params(&td.type_params);
-    ec.line(&format!("{}interface {}{tps} {{", j_vis(td.vis), td.name));
+    let ext = emit_java_iface_ext(&td.extends);
+    ec.line(&format!("{}interface {}{tps}{ext} {{", j_vis(td.vis), td.name));
     ec.push();
     for m in &td.methods {
         let ps = emit_j_params(&m.params);
@@ -221,23 +225,19 @@ fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMa
         }
         for p in fields { emit_java_prop(ec, p, ectx); }
         emit_java_static_blocks(ec, &cd.static_blocks, ectx);
-        for m in &cd.methods { emit_java_method(ec, m, &cd.name, ectx); }
+        for m in &cd.methods { emit_java_method(ec, m, &cd.name, false, ectx); }
         emit_java_nested_kids(ec, path, kids, nested, ectx);
         ec.pop();
         ec.line("}");
         return;
     }
     let tps = emit_java_type_params(&cd.type_params);
-    if has_dec("record") {
-        let ctor = emit_j_params(&cd.primary_ctor);
-        ec.line(&format!("{}record {}{tps}({ctor}) {{", j_vis(cd.vis), cd.name));
-    } else {
-        ec.line(&format!("{}class {}{tps} {{", j_vis(cd.vis), cd.name));
-    }
+    let ctor = has_dec("record").then(|| emit_j_params(&cd.primary_ctor));
+    ec.line(&emit_java_class_hdr(cd, j_vis(cd.vis), &tps, ctor.as_deref()));
     ec.push();
     for p in &cd.props { emit_java_prop(ec, p, ectx); }
     emit_java_static_blocks(ec, &cd.static_blocks, ectx);
-    for m in &cd.methods { emit_java_method(ec, m, &cd.name, ectx); }
+    for m in &cd.methods { emit_java_method(ec, m, &cd.name, cd.is_abstract, ectx); }
     emit_java_nested_kids(ec, path, kids, nested, ectx);
     ec.pop();
     ec.line("}");
@@ -259,12 +259,19 @@ fn emit_java_nested_kids(
     }
 }
 
-fn emit_java_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &ExprEmitCtx) {
+fn emit_java_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, cls_abs: bool, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let ps = emit_j_params(&m.params);
     let tps = emit_java_type_params(&m.type_params);
     let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };
+    if m.accessor != AccessorKind::Constructor
+        && (has_attr(&m.trivia, "abstract") || (cls_abs && matches!(m.body, FnBody::SignatureOnly)))
+    {
+        let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::Java)).unwrap_or_else(|| "void".into());
+        ec.line(&format!("{}abstract {tps_sp}{rt} {}({ps});", j_vis(m.vis), m.name));
+        return;
+    }
     if m.accessor == AccessorKind::Constructor {
         ec.line(&format!("{}{tps_sp}{cls_name}({ps}) {{", j_vis(m.vis)));
     } else {
@@ -287,11 +294,4 @@ fn emit_j_params(params: &[ParamDecl]) -> String {
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Java)).unwrap_or_else(|| "Object".into());
         format!("{t} {}", p.name)
     }).collect::<Vec<_>>().join(", ")
-}
-
-fn j_vis(v: Visibility) -> &'static str {
-    match v {
-        Visibility::Public => "public ", Visibility::Private => "private ",
-        Visibility::Protected => "protected ", _ => "",
-    }
 }

@@ -38,14 +38,21 @@ pub(crate) fn unary_op_native(op: UnaryOp, lang: LanguageId) -> &'static str {
 pub(crate) fn format_template(quasis: &[String], exs: &[String], lang: LanguageId) -> String {
     let (head, tail, op) = match lang {
         LanguageId::Python => ("f\"", "\"", ""),
+        LanguageId::CSharp => ("$\"", "\"", ""),
         LanguageId::Kotlin | LanguageId::Dart => ("\"", "\"", "$"),
         LanguageId::Ruby => ("\"", "\"", "#"),
         _ => ("`", "`", "$"),
     };
     let mut s = String::from(head);
     for (i, q) in quasis.iter().enumerate() {
-        if matches!(lang, LanguageId::Python | LanguageId::Kotlin | LanguageId::Dart | LanguageId::Ruby) {
-            s.push_str(&crate::printer_expr::escape_str(q));
+        if matches!(lang, LanguageId::Python | LanguageId::CSharp | LanguageId::Kotlin | LanguageId::Dart | LanguageId::Ruby) {
+            let esc = crate::printer_expr::escape_str(q);
+            match lang {
+                LanguageId::CSharp | LanguageId::Python => s.push_str(&esc.replace('{', "{{").replace('}', "}}")),
+                LanguageId::Kotlin | LanguageId::Dart => s.push_str(&esc.replace('$', "\\$")),
+                LanguageId::Ruby => s.push_str(&esc.replace("#{", "\\#{")),
+                _ => s.push_str(&esc),
+            }
         } else {
             s.push_str(q);
         }

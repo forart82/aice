@@ -6,7 +6,7 @@ use crate::decompile::expr_common::{
     push_c_cast_task, push_cs_special_expr, push_index_task, push_new_array_task,
     push_template_task, push_yield_task,
 };
-use crate::decompile::expr_lit::decompile_string_lit;
+use crate::decompile::expr_interp::{push_cs_interp_task, push_string_lit_task};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task};
 use crate::decompile::iter_expr_fin::{
@@ -106,9 +106,8 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "string" | "string_literal" | "interpreted_string_literal" | "raw_string_literal"
         | "verbatim_string_literal" | "byte_string_literal" | "raw_byte_string_literal"
         | "c_string_literal" | "raw_c_string_literal" | "raw_string"
-        | "char_literal" | "character_literal" => {
-            env.exprs.push(decompile_string_lit(raw, env.lang));
-        }
+        | "char_literal" | "character_literal" => push_string_lit_task(env, node, raw),
+        "interpolated_string_expression" if env.lang == LanguageId::CSharp => push_cs_interp_task(env, node),
         "template_string" => push_template_task(env, node, false),
         "identifier" | "type_identifier" | "property_identifier" | "field_identifier"
         | "private_property_identifier" | "simple_identifier" | "this" | "self"

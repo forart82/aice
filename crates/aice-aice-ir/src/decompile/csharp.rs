@@ -1,11 +1,12 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
-use crate::decompile::csharp_java::extract_cs_type_params;
+use crate::decompile::csharp_java::{cs_has_mod, extract_cs_base_list, extract_cs_type_params};
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, FnBody, MethodDecl, PropDecl};
 use crate::ir_types::{EnumDecl, EnumVariant, ParamDecl, TypeDecl, TypeKind, VariantPayload};
@@ -47,7 +48,7 @@ fn collect_cs(root: Node<'_>, src: &str, opts: &TranspileOpts, m: &mut AiceModul
                 let cd = decompile_cs_class(node, src, opts, tr.clone());
                 m.items.push(AiceItem::Type(TypeDecl {
                     vis: cd.vis, kind: TypeKind::Interface, name: cd.name, type_params: cd.type_params,
-                    extends: Vec::new(), fields: Vec::new(), methods: cd.methods,
+                    extends: cd.implements, fields: Vec::new(), methods: cd.methods,
                     alias_target: None, trivia: tr, span: cd.span,
                 }));
             }
@@ -75,11 +76,12 @@ fn collect_cs(root: Node<'_>, src: &str, opts: &TranspileOpts, m: &mut AiceModul
 fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> ClassDecl {
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
     let vis = cs_vis(node, src);
-    let raw = node_text(node, src);
-    let is_abstract = raw.contains("abstract ");
+    let is_abstract = cs_has_mod(node, src, "abstract");
     let mut decorators = Vec::new();
+    if cs_has_mod(node, src, "static") { decorators.push("static".into()); }
     if node.kind() == "record_declaration" { decorators.push("record".into()); }
     else if node.kind() == "struct_declaration" { decorators.push("struct".into()); }
+    let implements = extract_cs_base_list(node, src);
     let primary_ctor = node.child_by_field_name("parameters")
         .or_else(|| child_by_kind(node, "parameter_list"))
         .map(|pl| cs_params(pl, src))
@@ -153,8 +155,16 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                     } else {
                         FnBody::SignatureOnly
                     };
+                    let mut mtr = mtr;
+                    if !is_ctor {
+                        let mut mattrs = Vec::new();
+                        if cs_has_mod(ch, src, "abstract") { mattrs.push("@abstract".into()); }
+                        if cs_has_mod(ch, src, "override") { mattrs.push("@override".into()); }
+                        if cs_has_mod(ch, src, "virtual") { mattrs.push("@virtual".into()); }
+                        if !mattrs.is_empty() { push_attrs_to_trivia(&mut mtr, mattrs); }
+                    }
                     methods.push(MethodDecl {
-                        vis: mvis, is_static: node_text(ch, src).contains("static "), is_async: node_text(ch, src).contains("async "),
+                        vis: mvis, is_static: cs_has_mod(ch, src, "static"), is_async: cs_has_mod(ch, src, "async"),
                         is_const: false, accessor: if is_ctor { AccessorKind::Constructor } else { AccessorKind::Normal },
                         name: if is_ctor { "constructor".into() } else { mname },
                         type_params: if is_ctor { Vec::new() } else { extract_cs_type_params(ch, src) },
@@ -167,7 +177,7 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
     }
     ClassDecl {
         vis, is_abstract, decorators, name, type_params: extract_cs_type_params(node, src),
-        primary_ctor, extends: None, implements: Vec::new(),
+        primary_ctor, extends: None, implements,
         props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }
 }

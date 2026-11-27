@@ -9,6 +9,7 @@ pub mod dart_params;
 pub mod data_fmt;
 pub mod data_yaml;
 pub mod expr_common;
+pub mod expr_interp;
 pub mod expr_lit;
 pub mod go_lang;
 mod iter_env;

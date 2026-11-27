@@ -6,7 +6,7 @@ use crate::parser::Parser;
 use crate::parser_class::parse_method_decl;
 use crate::parser_expr::parse_expr;
 use crate::parser_stmt::parse_optional_body_with_trivia;
-pub(crate) use crate::parser_types::{parse_type_expr, parse_type_name_str, parse_type_params};
+pub(crate) use crate::parser_types::{parse_type_expr, parse_type_params};
 
 pub(crate) fn parse_import(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let sp = p.peek().span;
@@ -54,7 +54,7 @@ pub(crate) fn parse_type_decl(p: &mut Parser<'_>, vis: Visibility, default_kind:
     let type_params = parse_type_params(p)?;
     let mut extends = Vec::new();
     if p.eat(TokenKind::Extends) {
-        loop { extends.push(parse_type_name_str(p)?); if !p.eat(TokenKind::Comma) { break; } }
+        loop { extends.push(crate::parser_class::parse_heritage_name(p)?); if !p.eat(TokenKind::Comma) { break; } }
     }
     let (mut fields, mut methods, mut alias_target) = (Vec::new(), Vec::new(), None);
     let mut tr = trivia;

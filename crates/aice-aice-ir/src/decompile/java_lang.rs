@@ -1,7 +1,9 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
-use crate::decompile::csharp_java::extract_java_type_params;
+use crate::decompile::csharp_java::{
+    extract_java_heritage, extract_java_iface_extends, extract_java_type_params, java_has_mod,
+};
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
@@ -63,7 +65,7 @@ fn decompile_java_type_item(
             }
             out.push(AiceItem::Type(TypeDecl {
                 vis: cd.vis, kind: TypeKind::Interface, name: cd.name, type_params: cd.type_params,
-                extends: Vec::new(), fields: Vec::new(), methods: cd.methods,
+                extends: extract_java_iface_extends(node, src), fields: Vec::new(), methods: cd.methods,
                 alias_target: None, trivia: tr, span: cd.span,
             }));
             out.extend(nested);
@@ -141,7 +143,7 @@ fn decompile_java_enum(
         all_props.extend(members.props);
         out.push(AiceItem::Class(ClassDecl {
             vis, is_abstract: false, decorators, name, type_params: Vec::new(),
-            primary_ctor: Vec::new(), extends: None, implements: Vec::new(),
+            primary_ctor: Vec::new(), extends: None, implements: extract_java_heritage(node, src).1,
             props: all_props, methods: members.methods, static_blocks: members.static_blocks, trivia: tr, span: node_span(node),
         }));
     } else {
@@ -199,9 +201,12 @@ fn decompile_java_body_members(
                 let params = ch.child_by_field_name("parameters").map(|p| java_params(p, src)).unwrap_or_default();
                 let ret = if is_ctor { None } else { field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Java)) };
                 let mbody = ch.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, LanguageId::Java, opts))).unwrap_or(FnBody::SignatureOnly);
-                let mod_txt = child_by_kind(ch, "modifiers").map(|m| node_text(m, src)).unwrap_or("");
+                let mut mtr = mtr;
+                if !is_ctor && java_has_mod(ch, src, "abstract") {
+                    push_attrs_to_trivia(&mut mtr, vec!["@abstract".into()]);
+                }
                 out.methods.push(MethodDecl {
-                    vis: mvis, is_static: mod_txt.contains("static"), is_async: false, is_const: false,
+                    vis: mvis, is_static: java_has_mod(ch, src, "static"), is_async: false, is_const: false,
                     accessor: if is_ctor { AccessorKind::Constructor } else { AccessorKind::Normal },
                     name: if is_ctor { "constructor".into() } else { mname },
                     type_params, params, return_type: ret, body: mbody, trivia: mtr, span: node_span(ch),
@@ -236,14 +241,17 @@ fn decompile_java_class(
     }
     let mut decorators = Vec::new();
     if let Some(p) = parent { decorators.push(format!("nested({p})")); }
+    if parent.is_some() && java_has_mod(node, src, "static") { decorators.push("static".into()); }
     if node.kind() == "record_declaration" { decorators.push("record".into()); }
+    let is_abstract = java_has_mod(node, src, "abstract");
+    let (extends, implements) = extract_java_heritage(node, src);
     let primary_ctor = node.child_by_field_name("parameters")
         .or_else(|| child_by_kind(node, "formal_parameters"))
         .map(|p| java_params(p, src))
         .unwrap_or_default();
     ClassDecl {
-        vis, is_abstract: false, decorators, name, type_params,
-        primary_ctor, extends: None, implements: Vec::new(),
+        vis, is_abstract, decorators, name, type_params,
+        primary_ctor, extends, implements,
         props: members.props, methods: members.methods, static_blocks: members.static_blocks,
         trivia: tr, span: node_span(node),
     }

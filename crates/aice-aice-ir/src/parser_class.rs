@@ -67,7 +67,7 @@ pub(crate) fn parse_class_decl(
     }))
 }
 
-fn parse_heritage_name(p: &mut Parser<'_>) -> Result<String, TranspileError> {
+pub(crate) fn parse_heritage_name(p: &mut Parser<'_>) -> Result<String, TranspileError> {
     let mut name = parse_type_name_str(p)?;
     if matches!(p.peek_kind(), TokenKind::Lt | TokenKind::LBracket) {
         let open = p.peek_kind();
@@ -81,6 +81,12 @@ fn parse_heritage_name(p: &mut Parser<'_>) -> Result<String, TranspileError> {
             if tok.kind == open { depth += 1; }
             else if tok.kind == close {
                 depth = depth.saturating_sub(1);
+                if depth == 0 { break; }
+            } else if open == TokenKind::Lt && tok.kind == TokenKind::Shr {
+                depth = depth.saturating_sub(2);
+                if depth == 0 { break; }
+            } else if open == TokenKind::Lt && tok.kind == TokenKind::Ushr {
+                depth = depth.saturating_sub(3);
                 if depth == 0 { break; }
             }
         }

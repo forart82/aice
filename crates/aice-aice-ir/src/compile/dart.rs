@@ -56,7 +56,7 @@ fn emit_dart_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
             ec.line(&format!("{entry}{sep}"));
         }
         emit_dart_props(ec, &fields, ectx);
-        for m in &cd.methods { emit_dart_method(ec, m, &cd.name, &cd.props, ectx); }
+        for m in &cd.methods { emit_dart_method(ec, m, &cd.name, &cd.props, false, ectx); }
         ec.pop();
         ec.line("}");
         return;
@@ -78,7 +78,7 @@ fn emit_dart_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.push();
     let all_props: Vec<&PropDecl> = cd.props.iter().collect();
     emit_dart_props(ec, &all_props, ectx);
-    for m in &cd.methods { emit_dart_method(ec, m, &cd.name, &cd.props, ectx); }
+    for m in &cd.methods { emit_dart_method(ec, m, &cd.name, &cd.props, cd.is_abstract, ectx); }
     ec.pop();
     ec.line("}");
 }
@@ -93,7 +93,7 @@ fn emit_dart_props(ec: &mut EmitCtx, props: &[&PropDecl], ectx: &ExprEmitCtx) {
     }
 }
 
-fn emit_dart_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, props: &[PropDecl], ectx: &ExprEmitCtx) {
+fn emit_dart_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, props: &[PropDecl], cls_abs: bool, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let is_ctor = m.accessor == AccessorKind::Constructor;
@@ -114,6 +114,10 @@ fn emit_dart_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, props: &[P
             AccessorKind::Set => format!("{st}set {}({ps})", m.name),
             _ => format!("{st}{rt} {}{mtps}({ps})", m.name),
         };
+        if cls_abs && matches!(m.body, FnBody::SignatureOnly) {
+            ec.line(&format!("{sig};"));
+            return;
+        }
         if let FnBody::Expr(e) = &m.body && rt == "void" {
             ec.line(&format!("{sig} => {};", emit_expr(e, LanguageId::Dart, ectx)));
             return;

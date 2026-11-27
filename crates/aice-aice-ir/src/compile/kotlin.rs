@@ -126,7 +126,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     ec.line(&format!("{hdr} {{"));
     ec.push();
     for p in own_props { emit_kt_prop(ec, p, ectx); }
-    for m in own_methods { emit_kt_method(ec, m, ectx); }
+    for m in own_methods { emit_kt_method(ec, m, cd.is_abstract, ectx); }
     for kid in kids {
         let kid_path = format!("{path}.{}", kid.name);
         emit_kt_class(ec, kid, &kid_path, nested, ectx);
@@ -140,7 +140,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
         }
         ec.push();
         for p in comp_props { emit_kt_prop(ec, p, ectx); }
-        for m in comp_methods { emit_kt_method(ec, m, ectx); }
+        for m in comp_methods { emit_kt_method(ec, m, false, ectx); }
         ec.pop();
         ec.line("}");
     }
@@ -165,12 +165,16 @@ fn emit_kt_typed_expr(e: &crate::ir_code::Expr, ty: &str, ectx: &ExprEmitCtx) ->
     emit_expr(e, LanguageId::Kotlin, ectx)
 }
 
-fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
+fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, cls_abs: bool, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let (tps, wh) = emit_kt_type_params(&m.type_params);
     let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };
     let ps = emit_kt_params(&m.params, ectx);
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
+    if cls_abs && matches!(m.body, FnBody::SignatureOnly) {
+        ec.line(&format!("{}abstract fun {tps_sp}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
+        return;
+    }
     ec.line(&format!("{}fun {tps_sp}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
     ec.push();
     match &m.body {

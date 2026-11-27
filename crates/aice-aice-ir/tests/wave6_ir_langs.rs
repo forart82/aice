@@ -153,7 +153,7 @@ public class EdgeJava {
     ] {
         assert!(aice.contains(expected), "F-66 AICE missing `{expected}`:\n{aice}");
     }
-    for expected in ["public record Tx(String id, int amount)", "public class Detail", "public interface Hook", "public enum Status"] {
+    for expected in ["public record Tx(String id, int amount)", "public static class Detail", "public interface Hook", "public enum Status"] {
         assert!(native.contains(expected), "F-66 native Java missing `{expected}`:\n{native}");
     }
 }

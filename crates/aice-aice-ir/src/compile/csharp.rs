@@ -1,6 +1,6 @@
 use aice_lang_registry::LanguageId;
 
-use crate::compile::csharp_java::{emit_cs_type_params, emit_cs_where};
+use crate::compile::csharp_java::{emit_cs_bases, emit_cs_type_params, emit_cs_where, has_attr};
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
@@ -68,8 +68,9 @@ fn emit_cs_type(ec: &mut EmitCtx, td: &TypeDecl, _ectx: &ExprEmitCtx) {
         _ => "struct",
     };
     let tps = emit_cs_type_params(&td.type_params);
+    let bases = emit_cs_bases(None, &td.extends);
     let wh = emit_cs_where(&td.type_params);
-    ec.line(&format!("{}{kw} {}{tps}{wh} {{", cs_vis(td.vis), td.name));
+    ec.line(&format!("{}{kw} {}{tps}{bases}{wh} {{", cs_vis(td.vis), td.name));
     ec.push();
     for f in &td.fields {
         let t = f.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "object".into());
@@ -89,17 +90,21 @@ fn emit_cs_type(ec: &mut EmitCtx, td: &TypeDecl, _ectx: &ExprEmitCtx) {
 fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
-    let kw = if cd.decorators.iter().any(|d| d == "record") { "record" }
-    else if cd.decorators.iter().any(|d| d == "struct") { "struct" }
+    let has_dec = |k: &str| cd.decorators.iter().any(|d| d.trim_start_matches('@') == k);
+    let kw = if has_dec("record") { "record" }
+    else if has_dec("struct") { "struct" }
     else { "class" };
+    let st = if has_dec("static") { "static " } else { "" };
+    let abs = if cd.is_abstract { "abstract " } else { "" };
     let tps = emit_cs_type_params(&cd.type_params);
+    let bases = emit_cs_bases(cd.extends.as_deref(), &cd.implements);
     let wh = emit_cs_where(&cd.type_params);
     let ctor = if cd.primary_ctor.is_empty() { String::new() } else { format!("({})", emit_cs_params(&cd.primary_ctor, ectx)) };
     if kw == "record" && cd.props.is_empty() && cd.methods.is_empty() {
-        ec.line(&format!("{}{kw} {}{tps}{ctor}{wh};", cs_vis(cd.vis), cd.name));
+        ec.line(&format!("{}{st}{abs}{kw} {}{tps}{ctor}{bases}{wh};", cs_vis(cd.vis), cd.name));
         return;
     }
-    ec.line(&format!("{}{kw} {}{tps}{ctor}{wh} {{", cs_vis(cd.vis), cd.name));
+    ec.line(&format!("{}{st}{abs}{kw} {}{tps}{ctor}{bases}{wh} {{", cs_vis(cd.vis), cd.name));
     ec.push();
     for p in &cd.props {
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "object".into());
@@ -115,21 +120,28 @@ fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
             ec.line(&format!("{}{t} {} {acc}", cs_vis(p.vis), p.name));
         }
     }
-    for m in &cd.methods { emit_cs_method(ec, m, &cd.name, ectx); }
+    for m in &cd.methods { emit_cs_method(ec, m, &cd.name, cd.is_abstract, ectx); }
     ec.pop();
     ec.line("}");
 }
 
-fn emit_cs_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &ExprEmitCtx) {
+fn emit_cs_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, cls_abs: bool, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let ps = emit_cs_params(&m.params, ectx);
     let st = if m.is_static { "static " } else { "" };
     let asy = if m.is_async { "async " } else { "" };
+    let ovr = if has_attr(&m.trivia, "override") { "override " }
+        else if has_attr(&m.trivia, "virtual") { "virtual " }
+        else { "" };
     let is_ctor = m.accessor == AccessorKind::Constructor;
     let tps = if is_ctor { String::new() } else { emit_cs_type_params(&m.type_params) };
     let wh = if is_ctor { String::new() } else { emit_cs_where(&m.type_params) };
     let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::CSharp)).unwrap_or_else(|| "void".into());
+    if !is_ctor && (has_attr(&m.trivia, "abstract") || (cls_abs && matches!(m.body, FnBody::SignatureOnly))) {
+        ec.line(&format!("{}abstract {rt} {}{tps}({ps}){wh};", cs_vis(m.vis), m.name));
+        return;
+    }
     if let FnBody::Expr(e) = &m.body
         && (is_ctor || rt == "void")
     {
@@ -137,14 +149,14 @@ fn emit_cs_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &ExprE
         if is_ctor {
             ec.line(&format!("{}{cls_name}({ps}) => {rhs};", cs_vis(m.vis)));
         } else {
-            ec.line(&format!("{}{st}{asy}void {}{tps}({ps}){wh} => {rhs};", cs_vis(m.vis), m.name));
+            ec.line(&format!("{}{st}{ovr}{asy}void {}{tps}({ps}){wh} => {rhs};", cs_vis(m.vis), m.name));
         }
         return;
     }
     if is_ctor {
         ec.line(&format!("{}{cls_name}({ps}) {{", cs_vis(m.vis)));
     } else {
-        ec.line(&format!("{}{st}{asy}{rt} {}{tps}({ps}){wh} {{", cs_vis(m.vis), m.name));
+        ec.line(&format!("{}{st}{ovr}{asy}{rt} {}{tps}({ps}){wh} {{", cs_vis(m.vis), m.name));
     }
     ec.push();
     match &m.body {
