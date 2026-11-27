@@ -1,13 +1,16 @@
 use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
-use crate::decompile::cst_util::{field_text, map_type_str, named_children, node_span, node_text, strip_quotes, with_ts_root};
+use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, strip_quotes, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
+use crate::decompile::iter_env::{DTask, DecompEnv};
+use crate::decompile::iter_stmt::StmtFin;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
-use crate::ir_code::{ClassDecl, ConstDecl, FnBody, FnDecl, MethodDecl, PropDecl};
+use crate::ir_code::{ClassDecl, ConstDecl, Expr, FnBody, FnDecl, MethodDecl, Pattern, PropDecl};
+use crate::ir_expr::LiteralVal;
 use crate::ir_types::{FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind, TypeParam};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -40,14 +43,22 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     }
                 }
                 "const_declaration" => {
-                    for spec in named_children(ch) {
-                        if spec.kind() == "const_spec" {
-                            let nm = field_text(spec, "name", src).unwrap_or("C").to_string();
-                            let ty = field_text(spec, "type", src).map(|t| map_type_str(t, LanguageId::Go));
-                            let val = spec.child_by_field_name("value").map(|v| decompile_expr(v, src, LanguageId::Go))
-                                .unwrap_or(crate::ir_code::Expr::Literal(crate::ir_expr::LiteralVal::Nil));
-                            m.items.push(AiceItem::Const(ConstDecl { vis: go_vis(&nm), name: nm, ty, value: val, trivia: tr.clone(), span: node_span(spec) }));
-                        }
+                    let specs: Vec<Node<'_>> = named_children(ch).into_iter().filter(|s| s.kind() == "const_spec").collect();
+                    let raw = node_text(ch, src).trim();
+                    let simple_single = specs.len() == 1 && !raw.contains('(') && {
+                        let mut cur = specs[0].walk();
+                        specs[0].children_by_field_name("name", &mut cur).count() == 1
+                            && specs[0].child_by_field_name("value").is_some()
+                    };
+                    if simple_single {
+                        let spec = specs[0];
+                        let nm = field_text(spec, "name", src).unwrap_or("C").to_string();
+                        let ty = field_text(spec, "type", src).map(|t| map_type_str(t, LanguageId::Go));
+                        let val = spec.child_by_field_name("value").map(|v| decompile_expr(v, src, LanguageId::Go))
+                            .unwrap_or(Expr::Literal(LiteralVal::Nil));
+                        m.items.push(AiceItem::Const(ConstDecl { vis: go_vis(&nm), name: nm, ty, value: val, trivia: tr, span: node_span(spec) }));
+                    } else if !raw.is_empty() {
+                        m.items.push(AiceItem::Directive { text: raw.into(), trivia: tr, span: node_span(ch) });
                     }
                 }
                 "function_declaration" => m.items.push(AiceItem::Fn(decompile_go_fn(ch, src, opts, tr))),
@@ -246,6 +257,35 @@ fn decompile_go_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) 
     FnDecl {
         vis: go_vis(&name), is_async: false, is_static: false, decorators: Vec::new(), name,
         type_params, params, return_type, body, trivia: tr, span: node_span(node),
+    }
+}
+
+pub(crate) fn push_go_type_switch_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
+    let brace_pos = (0..node.child_count())
+        .filter_map(|i| node.child(i))
+        .find(|c| !c.is_named() && c.kind() == "{")
+        .map_or(node.end_byte(), |b| b.start_byte());
+    let hdr = env.src[node.start_byte()..brace_pos].trim().strip_prefix("switch").unwrap_or("").trim().to_string();
+    let arms: Vec<Node<'a>> = named_children(node).into_iter().filter(|c| matches!(c.kind(), "type_case" | "default_case")).collect();
+    env.match_targets.push(Expr::Call {
+        callee: Box::new(Expr::Ident("__type_switch".into())),
+        args: vec![Expr::Literal(LiteralVal::Str { value: hdr, multiline: false })],
+        is_new: false, is_optional: false, is_tagged: false,
+    });
+    env.tasks.push(DTask::FinishStmt(StmtFin::Match { is_expr: false, case_len: arms.len(), hdr_tr: None }));
+    for ch in arms.into_iter().rev() {
+        let pat = if ch.kind() == "type_case" {
+            let mut cur = ch.walk();
+            let tys: Vec<String> = ch.children_by_field_name("type", &mut cur)
+                .filter(|t| t.is_named())
+                .map(|t| node_text(t, env.src).trim().to_string()).filter(|s| !s.is_empty()).collect();
+            Pattern::Literal(LiteralVal::Str { value: tys.join(", "), multiline: false })
+        } else { Pattern::Wildcard };
+        env.tasks.push(DTask::FinishStmt(StmtFin::MatchArm { pat, has_guard: false, trivia: collect_trivia(ch, env.src, env.opts) }));
+        if let Some(sl) = child_by_kind(ch, "statement_list") {
+            env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: false });
+            env.tasks.push(DTask::Block(sl));
+        } else { env.bodies.push(FnBody::Block(Vec::new())); }
     }
 }
 

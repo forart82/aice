@@ -4,47 +4,57 @@ use tree_sitter::Node;
 use crate::decompile::c_cpp::{
     build_c_return_type, extract_c_type_quals, find_c_fn_declarator, prepend_c_type_quals,
 };
-use crate::decompile::c_lang::unwrap_c_declarator;
+use crate::decompile::c_lang::{extract_cpp_enum, unwrap_c_declarator};
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::push_attrs_to_trivia;
-use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
+use crate::ir::{AiceItem, AiceModule, ImportDecl, Span, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::{ParamDecl, TypeParam};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     with_ts_root(tree, |root| {
         let mut m = AiceModule::new(LanguageId::Cpp, "cpp");
-        for ch in named_children(root) {
-            if is_comment_kind(ch.kind()) { continue; }
-            collect_cpp_items(ch, src, opts, &mut m);
+        let top: Vec<Node<'_>> = named_children(root).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+        let non_inc: Vec<Node<'_>> = top.iter().copied().filter(|c| !c.kind().starts_with("preproc_")).collect();
+        let hoist_ns = non_inc.len() == 1 && non_inc[0].kind() == "namespace_definition" && field_text(non_inc[0], "name", src).is_some();
+        for ch in top {
+            collect_cpp_items(ch, hoist_ns && ch.kind() == "namespace_definition", src, opts, &mut m);
         }
         Ok(m)
     })
 }
 
-fn collect_cpp_items(root: Node<'_>, src: &str, opts: &TranspileOpts, m: &mut AiceModule) {
-    let mut stack = vec![root];
-    while let Some(node) = stack.pop() {
+fn collect_cpp_items(root: Node<'_>, hoist_root_ns: bool, src: &str, opts: &TranspileOpts, m: &mut AiceModule) {
+    let mut stack: Vec<Option<(Node<'_>, bool)>> = vec![Some((root, hoist_root_ns))];
+    while let Some(entry) = stack.pop() {
+        let Some((node, hoist_ns)) = entry else {
+            m.items.push(AiceItem::Directive { text: "}".into(), trivia: Trivia::default(), span: Span::empty() });
+            continue;
+        };
         let tr = collect_trivia(node, src, opts);
         match node.kind() {
             "preproc_include" => {
                 let path = field_text(node, "path", src).unwrap_or("").trim().to_string();
-                m.items.push(AiceItem::Import(ImportDecl {
-                    vis: Visibility::Default, source: path, specifiers: Vec::new(),
-                    is_type_only: false, trivia: tr, span: node_span(node),
-                }));
+                m.items.push(AiceItem::Import(ImportDecl { vis: Visibility::Default, source: path, specifiers: Vec::new(), is_type_only: false, trivia: tr, span: node_span(node) }));
             }
             "namespace_definition" => {
-                if let Some(nm) = field_text(node, "name", src) {
-                    m.module_name = nm.trim().to_string();
+                let nm = field_text(node, "name", src).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
+                if hoist_ns && let Some(name) = nm { m.module_name = name; } else {
+                    let hdr = nm.map(|n| format!("namespace {n} {{")).unwrap_or_else(|| "namespace {".into());
+                    m.items.push(AiceItem::Directive { text: hdr, trivia: tr, span: node_span(node) });
+                    stack.push(None);
                 }
                 if let Some(body) = node.child_by_field_name("body") {
                     for ch in named_children(body).into_iter().rev() {
-                        if !is_comment_kind(ch.kind()) { stack.push(ch); }
+                        if !is_comment_kind(ch.kind()) { stack.push(Some((ch, false))); }
                     }
                 }
+            }
+            "enum_specifier" if node.child_by_field_name("body").is_some() => m.items.push(AiceItem::Enum(extract_cpp_enum(node, src, tr))),
+            "declaration" if child_by_kind(node, "enum_specifier").is_some_and(|e| e.child_by_field_name("body").is_some()) && node.child_by_field_name("declarator").is_none() => {
+                m.items.push(AiceItem::Enum(extract_cpp_enum(child_by_kind(node, "enum_specifier").unwrap(), src, tr)));
             }
             "class_specifier" | "struct_specifier" => {
                 m.items.push(AiceItem::Class(decompile_cpp_class(node, src, opts, tr)));

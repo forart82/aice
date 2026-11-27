@@ -36,13 +36,19 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Class(cd) => emit_cpp_class(&mut ec, cd, &ectx),
             AiceItem::Enum(ed) => emit_cpp_enum(&mut ec, ed, &ectx),
             AiceItem::Fn(fd) => emit_cpp_fn(&mut ec, fd, &ectx),
-            AiceItem::Directive { text, .. } => {
+            AiceItem::Directive { text, trivia, .. } => {
                 let t = text.trim();
-                if (t.starts_with("enum ") || t.starts_with("using ") || t.starts_with("typedef ")
+                if t == "}" || (t.starts_with("namespace") && t.ends_with('{')) {
+                    ec.blank();
+                    ec.emit_trivia(trivia, CommentStyle::Slash);
+                    ec.line(t);
+                } else if (t.starts_with("enum ") || t.starts_with("using ") || t.starts_with("typedef ")
                     || t.starts_with("struct ") || t.starts_with("class ")) && !t.ends_with(';')
                 {
+                    ec.emit_trivia(trivia, CommentStyle::Slash);
                     ec.line(&format!("{t};"));
                 } else {
+                    ec.emit_trivia(trivia, CommentStyle::Slash);
                     ec.line(text);
                 }
             }
@@ -56,10 +62,30 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
+fn cpp_attr_arg<'a>(tr: &'a Trivia, prefix: &str) -> Option<&'a str> {
+    tr.leading.iter().find_map(|c| {
+        if c.kind != TriviaKind::Attribute { return None; }
+        c.text.trim().trim_start_matches('@').strip_prefix(prefix)?.strip_prefix('(')?.strip_suffix(')')
+    })
+}
+
 fn emit_cpp_enum(ec: &mut EmitCtx, ed: &EnumDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
-    ec.line(&format!("enum {} {{", ed.name));
+    let scope = if cpp_has_attr(&ed.trivia, "class") { "class " }
+        else if cpp_has_attr(&ed.trivia, "struct") { "struct " }
+        else { "" };
+    let base = cpp_attr_arg(&ed.trivia, "base").map(|b| format!(" : {b}")).unwrap_or_default();
+    let inline = ed.variants.len() <= 4 && ed.variants.iter().all(|v| v.trivia.is_empty());
+    if inline {
+        let items: Vec<String> = ed.variants.iter().map(|v| match &v.discriminant {
+            Some(d) => format!("{} = {}", v.name, emit_expr(d, LanguageId::Cpp, ectx)),
+            None => v.name.clone(),
+        }).collect();
+        ec.line(&format!("enum {scope}{}{base} {{ {} }};", ed.name, items.join(", ")));
+        return;
+    }
+    ec.line(&format!("enum {scope}{}{base} {{", ed.name));
     ec.push();
     for (i, v) in ed.variants.iter().enumerate() {
         ec.emit_trivia(&v.trivia, CommentStyle::Slash);

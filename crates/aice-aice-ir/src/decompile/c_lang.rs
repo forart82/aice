@@ -9,6 +9,7 @@ use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{FnBody, FnDecl};
 use crate::ir_types::{EnumDecl, EnumVariant, FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind, VariantPayload};
@@ -29,26 +30,34 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                 }
                 "type_definition" => {
                     if let Some(en) = child_by_kind(ch, "enum_specifier").filter(|e| e.child_by_field_name("body").is_some()) {
-                        let nm = field_text(ch, "declarator", src)
-                            .or_else(|| field_text(en, "name", src))
-                            .unwrap_or("Enum").trim().to_string();
-                        m.items.push(AiceItem::Enum(extract_c_enum(en, nm, src, tr)));
+                        let tag = field_text(en, "name", src).map(str::trim).filter(|s| !s.is_empty());
+                        let nm = field_text(ch, "declarator", src).map(str::trim).filter(|s| !s.is_empty())
+                            .or(tag).unwrap_or("Enum").to_string();
+                        let mut etr = tr;
+                        if let Some(tg) = tag { push_attrs_to_trivia(&mut etr, vec![format!("@tag({tg})")]); }
+                        m.items.push(AiceItem::Enum(extract_c_enum(en, nm, src, etr, LanguageId::C)));
                     } else if let Some(st) = child_by_kind(ch, "struct_specifier").or_else(|| ch.child_by_field_name("type")) {
                         let nm = field_text(ch, "declarator", src).unwrap_or("Struct").trim().to_string();
                         m.items.push(AiceItem::Type(extract_c_struct(st, nm, src, tr)));
                     }
                 }
                 "enum_specifier" if ch.child_by_field_name("body").is_some() => {
-                    let nm = field_text(ch, "name", src).unwrap_or("Enum").trim().to_string();
-                    m.items.push(AiceItem::Enum(extract_c_enum(ch, nm, src, tr)));
+                    let tag = field_text(ch, "name", src).map(str::trim).filter(|s| !s.is_empty());
+                    let nm = tag.unwrap_or("Enum").to_string();
+                    let mut etr = tr;
+                    if let Some(tg) = tag { push_attrs_to_trivia(&mut etr, vec![format!("@tag({tg})")]); }
+                    m.items.push(AiceItem::Enum(extract_c_enum(ch, nm, src, etr, LanguageId::C)));
                 }
                 "declaration"
                     if child_by_kind(ch, "enum_specifier").is_some_and(|e| e.child_by_field_name("body").is_some())
                         && ch.child_by_field_name("declarator").is_none() =>
                 {
                     let en = child_by_kind(ch, "enum_specifier").expect("enum_specifier");
-                    let nm = field_text(en, "name", src).unwrap_or("Enum").trim().to_string();
-                    m.items.push(AiceItem::Enum(extract_c_enum(en, nm, src, tr)));
+                    let tag = field_text(en, "name", src).map(str::trim).filter(|s| !s.is_empty());
+                    let nm = tag.unwrap_or("Enum").to_string();
+                    let mut etr = tr;
+                    if let Some(tg) = tag { push_attrs_to_trivia(&mut etr, vec![format!("@tag({tg})")]); }
+                    m.items.push(AiceItem::Enum(extract_c_enum(en, nm, src, etr, LanguageId::C)));
                 }
                 "struct_specifier" => {
                     let nm = field_text(ch, "name", src).unwrap_or("Struct").to_string();
@@ -62,18 +71,34 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
     })
 }
 
-fn extract_c_enum(node: Node<'_>, name: String, src: &str, tr: Trivia) -> EnumDecl {
+fn extract_c_enum(node: Node<'_>, name: String, src: &str, tr: Trivia, lang: LanguageId) -> EnumDecl {
     let mut variants = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
         for ch in named_children(body) {
             if ch.kind() == "enumerator" {
                 let vn = field_text(ch, "name", src).unwrap_or("V").trim().to_string();
-                let disc = ch.child_by_field_name("value").map(|v| decompile_expr(v, src, LanguageId::C));
+                let disc = ch.child_by_field_name("value").map(|v| decompile_expr(v, src, lang));
                 variants.push(EnumVariant { name: vn, payload: VariantPayload::Unit, discriminant: disc, trivia: Trivia::default() });
             }
         }
     }
     EnumDecl { vis: Visibility::Public, name, type_params: Vec::new(), variants, trivia: tr, span: node_span(node) }
+}
+
+pub(crate) fn extract_cpp_enum(node: Node<'_>, src: &str, mut tr: Trivia) -> EnumDecl {
+    let mut attrs = Vec::new();
+    for i in 0..node.child_count() {
+        if let Some(c) = node.child(i) && !c.is_named() {
+            if c.kind() == "class" { attrs.push("@class".into()); }
+            else if c.kind() == "struct" { attrs.push("@struct".into()); }
+        }
+    }
+    if let Some(base) = field_text(node, "base", src).map(str::trim).filter(|s| !s.is_empty()) {
+        attrs.push(format!("@base({base})"));
+    }
+    if !attrs.is_empty() { push_attrs_to_trivia(&mut tr, attrs); }
+    let nm = field_text(node, "name", src).unwrap_or("Enum").trim().to_string();
+    extract_c_enum(node, nm, src, tr, LanguageId::Cpp)
 }
 
 fn extract_c_struct(node: Node<'_>, name: String, src: &str, tr: Trivia) -> TypeDecl {

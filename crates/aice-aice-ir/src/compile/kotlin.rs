@@ -7,8 +7,8 @@ use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::kotlin_dart::{emit_kt_type, emit_kt_type_params};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
-use crate::ir_types::ParamDecl;
+use crate::ir_code::{ClassDecl, Expr, FnBody, FnDecl, MethodDecl, PropDecl};
+use crate::ir_types::{EnumDecl, ParamDecl};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     if module.items.is_empty() && !module.raw_fallback.is_empty() {
@@ -43,6 +43,10 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                 }
                 ec.blank();
                 emit_kt_class(&mut ec, cd, &cd.name, &nested_map, &ectx);
+            }
+            AiceItem::Enum(ed) => {
+                ec.blank();
+                emit_kt_enum(&mut ec, ed);
             }
             AiceItem::Fn(fd) => emit_kt_fn(&mut ec, fd, &ectx),
             AiceItem::Directive { text, trivia, .. } => {
@@ -115,8 +119,14 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     if !supers.is_empty() { hdr.push_str(&format!(" : {}", supers.join(", "))); }
     hdr.push_str(&wh);
 
+    let is_enum = has_dec("enum");
+    let variants: Vec<&PropDecl> = if is_enum {
+        cd.props.iter().filter(|p| has_attr(&p.trivia, "variant")).collect()
+    } else {
+        Vec::new()
+    };
     let own_props: Vec<&PropDecl> = cd.props.iter()
-        .filter(|p| !has_attr(&p.trivia, "nested_type") && companion_tag(&p.trivia).is_none())
+        .filter(|p| (!is_enum || !has_attr(&p.trivia, "variant")) && !has_attr(&p.trivia, "nested_type") && companion_tag(&p.trivia).is_none())
         .collect();
     let own_methods: Vec<&MethodDecl> = cd.methods.iter()
         .filter(|m| companion_tag(&m.trivia).is_none())
@@ -125,14 +135,32 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     let comp_methods: Vec<&MethodDecl> = cd.methods.iter().filter(|m| companion_tag(&m.trivia).is_some()).collect();
     let kids = nested.get(path).map(Vec::as_slice).unwrap_or(&[]);
 
-    let body_empty = own_props.is_empty() && own_methods.is_empty() && comp_props.is_empty()
-        && comp_methods.is_empty() && kids.is_empty();
+    let has_members = !own_props.is_empty() || !own_methods.is_empty()
+        || !comp_props.is_empty() || !comp_methods.is_empty() || !kids.is_empty();
+    let body_empty = variants.is_empty() && !has_members;
     if body_empty && (!cd.primary_ctor.is_empty() || has_dec("object")) {
         ec.line(&hdr);
         return;
     }
     ec.line(&format!("{hdr} {{"));
     ec.push();
+    for (idx, v) in variants.iter().enumerate() {
+        ec.emit_trivia(&v.trivia, CommentStyle::Slash);
+        let entry = match &v.init {
+            Some(Expr::Raw(r)) => {
+                let rt = r.trim();
+                if rt.starts_with('{') { format!("{} {rt}", v.name) } else { format!("{}{rt}", v.name) }
+            }
+            Some(Expr::Call { args, .. }) => {
+                let a: Vec<String> = args.iter().map(|e| emit_expr(e, LanguageId::Kotlin, ectx)).collect();
+                format!("{}({})", v.name, a.join(", "))
+            }
+            Some(e) => format!("{}({})", v.name, emit_expr(e, LanguageId::Kotlin, ectx)),
+            None => v.name.clone(),
+        };
+        let sep = if idx + 1 < variants.len() { "," } else if has_members { ";" } else { "" };
+        ec.line(&format!("{entry}{sep}"));
+    }
     for p in own_props { emit_kt_prop(ec, p, ectx); }
     for m in own_methods { emit_kt_method(ec, m, cd.is_abstract, is_iface, ectx); }
     for kid in kids {
@@ -232,6 +260,20 @@ fn emit_kt_params(params: &[ParamDecl], ectx: &ExprEmitCtx) -> String {
         let d = p.default.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Kotlin, ectx))).unwrap_or_default();
         format!("{}: {t}{d}", p.name)
     }).collect::<Vec<_>>().join(", ")
+}
+
+fn emit_kt_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
+    ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
+    let (tps, wh) = emit_kt_type_params(&ed.type_params);
+    ec.line(&format!("{}enum class {}{tps}{wh} {{", kt_vis(ed.vis), ed.name));
+    ec.push();
+    for (idx, v) in ed.variants.iter().enumerate() {
+        ec.emit_trivia(&v.trivia, CommentStyle::Slash);
+        let comma = if idx + 1 < ed.variants.len() { "," } else { "" };
+        ec.line(&format!("{}{comma}", v.name));
+    }
+    ec.pop();
+    ec.line("}");
 }
 
 fn kt_vis(v: Visibility) -> &'static str {

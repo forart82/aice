@@ -5,7 +5,7 @@ use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl};
 use crate::ir_types::{EnumDecl, ParamDecl, TypeDecl, TypeKind};
 
@@ -28,7 +28,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     for item in &module.items {
         match item {
             AiceItem::Class(cd) => emit_cs_class(&mut ec, cd, &ectx),
-            AiceItem::Enum(ed) => emit_cs_enum(&mut ec, ed),
+            AiceItem::Enum(ed) => emit_cs_enum(&mut ec, ed, &ectx),
             AiceItem::Type(td) => emit_cs_type(&mut ec, td, &ectx),
             AiceItem::Fn(fd) => emit_cs_fn(&mut ec, fd, &ectx),
             AiceItem::Const(cd) => {
@@ -49,12 +49,26 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
-fn emit_cs_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
+fn cs_attr_arg<'a>(tr: &'a Trivia, prefix: &str) -> Option<&'a str> {
+    tr.leading.iter().find_map(|c| {
+        if c.kind != TriviaKind::Attribute { return None; }
+        c.text.trim_start_matches('@').strip_prefix(prefix)?.strip_prefix('(')?.strip_suffix(')')
+    })
+}
+
+fn emit_cs_enum(ec: &mut EmitCtx, ed: &EnumDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
-    ec.line(&format!("{}enum {} {{", cs_vis(ed.vis), ed.name));
+    let base = cs_attr_arg(&ed.trivia, "base").map(|b| format!(" : {b}")).unwrap_or_default();
+    ec.line(&format!("{}enum {}{base} {{", cs_vis(ed.vis), ed.name));
     ec.push();
-    for v in &ed.variants { ec.line(&format!("{},", v.name)); }
+    for v in &ed.variants {
+        ec.emit_trivia(&v.trivia, CommentStyle::Slash);
+        match &v.discriminant {
+            Some(d) => ec.line(&format!("{} = {},", v.name, emit_expr(d, LanguageId::CSharp, ectx))),
+            None => ec.line(&format!("{},", v.name)),
+        }
+    }
     ec.pop();
     ec.line("}");
 }
@@ -107,9 +121,13 @@ fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.line(&format!("{}{st}{abs}{kw} {}{tps}{ctor}{bases}{wh} {{", cs_vis(cd.vis), cd.name));
     ec.push();
     for p in &cd.props {
+        ec.emit_trivia(&p.trivia, CommentStyle::Slash);
         let st = if p.is_static { "static " } else { "" };
         let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::CSharp)).unwrap_or_else(|| "object".into());
-        if let Some(ref init) = p.init {
+        if has_attr(&p.trivia, "const") {
+            let rhs = p.init.as_ref().map(|e| emit_expr(e, LanguageId::CSharp, ectx)).unwrap_or_else(|| "default".into());
+            ec.line(&format!("{}const {t} {} = {rhs};", cs_vis(p.vis), p.name));
+        } else if let Some(ref init) = p.init {
             let rhs = emit_expr(init, LanguageId::CSharp, ectx);
             if p.is_readonly {
                 ec.line(&format!("{}{st}{t} {} => {rhs};", cs_vis(p.vis), p.name));

@@ -3,7 +3,7 @@ use aice_lang_registry::LanguageId;
 use crate::compile::iter_emit::{CTask, EvalState};
 use crate::compile::iter_match_pat::case_has_cond;
 use crate::compile::pattern_emit::needs_if_lowering;
-use crate::ir_code::{Expr, FnBody, LiteralVal, MatchCase, Pattern};
+use crate::ir_code::{Expr, FnBody, LiteralVal, MatchCase, Pattern, Stmt};
 
 pub(crate) fn step_brace_match_task<'a>(
     task: CTask<'a>,
@@ -56,8 +56,9 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
     let subj = st.vals.pop().unwrap();
     let has_guard = cases.iter().any(|c| c.guard.is_some());
     let subjectless = matches!(target, Expr::Literal(LiteralVal::Bool(true))) && has_guard;
+    let go_tsw = if lang == LanguageId::Go { go_type_switch_hdr(target) } else { None };
     let ec = st.ctxs.last_mut().unwrap();
-    if !(lang == LanguageId::Go && subj == "__select") && needs_if_lowering(target, cases, lang) {
+    if !(lang == LanguageId::Go && (subj == "__select" || go_tsw.is_some())) && needs_if_lowering(target, cases, lang) {
         if !cases.is_empty() { tasks.push(CTask::BraceLine("}")); }
         for (idx, mc) in cases.iter().enumerate().rev() {
             let hc = case_has_cond(mc, subjectless);
@@ -116,8 +117,12 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
             if subjectless { if let Some(g) = &mc.guard { tasks.push(CTask::EvalExpr(g)); } }
             else if !matches!(mc.pattern, Pattern::Wildcard) { tasks.push(CTask::EvalPat(&mc.pattern)); }
         }
-    } else if lang == LanguageId::Go && subj == "__select" {
-        ec.line("select {"); ec.push(); tasks.push(CTask::BraceLine("}")); tasks.push(CTask::BracePop);
+    } else if lang == LanguageId::Go && (subj == "__select" || go_tsw.is_some()) {
+        let hdr = match go_tsw {
+            Some(h) => format!("switch {h} {{"),
+            None => "select {".to_string(),
+        };
+        ec.line(&hdr); ec.push(); tasks.push(CTask::BraceLine("}")); tasks.push(CTask::BracePop);
         for mc in cases.iter().rev() {
             tasks.push(CTask::BracePop);
             match &mc.body {
@@ -136,7 +141,9 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
         ec.line(&format!("switch ({subj}) {{")); ec.push(); tasks.push(CTask::BraceLine("}")); tasks.push(CTask::BracePop);
         for mc in cases.iter().rev() {
             tasks.push(CTask::BracePop);
-            if lang != LanguageId::Go { tasks.push(CTask::BraceOwnedLine(format!("break{semi}"))); }
+            if lang != LanguageId::Go && !arm_ends_with_terminator(&mc.body) {
+                tasks.push(CTask::BraceOwnedLine(format!("break{semi}")));
+            }
             match &mc.body {
                 FnBody::Expr(e) => { tasks.push(CTask::BraceExprStmt { as_tail: false }); tasks.push(CTask::EvalExpr(e)); }
                 FnBody::Block(b) => tasks.push(CTask::BraceStmts { stmts: b, tail: false }),
@@ -152,4 +159,35 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
             }
         }
     }
+}
+
+fn go_type_switch_hdr(target: &Expr) -> Option<&str> {
+    if let Expr::Call { callee, args, .. } = target
+        && matches!(callee.as_ref(), Expr::Ident(n) if n == "__type_switch")
+        && let Some(Expr::Literal(LiteralVal::Str { value, .. })) = args.first()
+    {
+        Some(value.as_str())
+    } else {
+        None
+    }
+}
+
+fn arm_ends_with_terminator(body: &FnBody) -> bool {
+    let FnBody::Block(stmts) = body else { return false };
+    let mut stack = vec![stmts.as_slice()];
+    while let Some(cur) = stack.pop() {
+        let Some(last) = cur.iter().rev().find(|s| !matches!(s, Stmt::Comment(_) | Stmt::Pass)) else {
+            return false;
+        };
+        match last {
+            Stmt::Break { .. } | Stmt::Return { .. } | Stmt::Throw { .. } | Stmt::Continue { .. } => {}
+            Stmt::If { then_body, elifs, else_body: Some(eb), .. } => {
+                stack.push(then_body.as_slice());
+                for (_, b) in elifs { stack.push(b.as_slice()); }
+                stack.push(eb.as_slice());
+            }
+            _ => return false,
+        }
+    }
+    true
 }

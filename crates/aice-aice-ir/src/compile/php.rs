@@ -4,7 +4,7 @@ use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
 use crate::ir_types::ParamDecl;
 
@@ -88,10 +88,19 @@ fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     }
     for p in &cd.props {
         ec.emit_trivia(&p.trivia, CommentStyle::Slash);
-        ec.emit_attrs(&p.trivia);
-        let st = if p.is_static { "static " } else { "" };
-        let t = p.ty.as_ref().map(|x| format!("{} ", emit_type(x, LanguageId::Php))).unwrap_or_default();
-        ec.line(&format!("{}{st}{t}${};", php_vis(p.vis), p.name));
+        emit_php_attrs(ec, &p.trivia);
+        if php_has_attr(&p.trivia, "const") {
+            let fin = if php_has_attr(&p.trivia, "final") { "final " } else { "" };
+            let t = p.ty.as_ref().map(|x| format!("{} ", emit_type(x, LanguageId::Php))).unwrap_or_default();
+            let val = p.init.as_ref().map(|e| emit_expr(e, LanguageId::Php, ectx)).unwrap_or_else(|| "null".into());
+            ec.line(&format!("{fin}{}const {t}{} = {val};", php_vis(p.vis), p.name));
+        } else {
+            let st = if p.is_static { "static " } else { "" };
+            let ro = if p.is_readonly && p.ty.is_some() { "readonly " } else { "" };
+            let t = p.ty.as_ref().map(|x| format!("{} ", emit_type(x, LanguageId::Php))).unwrap_or_default();
+            let init = p.init.as_ref().map(|e| format!(" = {}", emit_expr(e, LanguageId::Php, ectx))).unwrap_or_default();
+            ec.line(&format!("{}{st}{ro}{t}${}{init};", php_vis(p.vis), p.name));
+        }
     }
     let allow_abs = cd.is_abstract || is_trait;
     for m in &cd.methods { emit_php_method(ec, m, is_interface, allow_abs, ectx); }
@@ -152,6 +161,18 @@ fn emit_php_params(params: &[ParamDecl], ectx: &ExprEmitCtx) -> String {
         }
         s
     }).collect::<Vec<_>>().join(", ")
+}
+
+fn php_has_attr(tr: &Trivia, needle: &str) -> bool {
+    tr.leading.iter().any(|c| c.kind == TriviaKind::Attribute && c.text.trim_start_matches('@') == needle)
+}
+
+fn emit_php_attrs(ec: &mut EmitCtx, tr: &Trivia) {
+    for c in &tr.leading {
+        if c.kind == TriviaKind::Attribute && c.text.starts_with("#[") {
+            ec.line(&c.text);
+        }
+    }
 }
 
 fn php_vis(v: Visibility) -> &'static str {

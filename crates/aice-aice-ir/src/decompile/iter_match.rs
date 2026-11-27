@@ -47,6 +47,7 @@ pub(crate) fn push_match_arms<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, is_ex
         ch.kind(),
         "match_arm" | "when_entry" | "switch_case" | "switch_default" | "case_clause"
             | "expression_case" | "default_case" | "case_statement"
+            | "switch_section" | "switch_block_statement_group"
             | "match_conditional_expression" | "match_default_expression"
     ) || (node.kind() == "case" && matches!(ch.kind(), "when" | "else"))).collect();
 
@@ -61,6 +62,9 @@ pub(crate) fn push_match_arms<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, is_ex
             "when_entry" => push_kotlin_when_entry(env, ch, is_subjectless),
             "match_conditional_expression" | "match_default_expression" => push_php_match_arm(env, ch),
             "case_clause" if env.lang == LanguageId::Python => push_py_case_arm(env, ch),
+            "switch_section" => crate::decompile::csharp_java::push_cs_switch_section(env, ch),
+            "switch_block_statement_group" => crate::decompile::csharp_java::push_java_switch_group(env, ch),
+            "switch_case" | "switch_default" => crate::decompile::csharp_java::push_js_switch_arm(env, ch),
             "when" if node.kind() == "case" => push_ruby_when(env, ch, is_subjectless),
             "else" if node.kind() == "case" => {
                 let bn = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "then")).unwrap_or(ch);

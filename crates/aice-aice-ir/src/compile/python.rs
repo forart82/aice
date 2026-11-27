@@ -3,8 +3,8 @@ use aice_lang_registry::LanguageId;
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, Stmt};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind};
+use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, Stmt};
 use crate::ir_types::ParamDecl;
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -65,11 +65,30 @@ fn emit_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
     ec.pop();
 }
 
+fn has_py_attr(tr: &Trivia, name: &str) -> bool {
+    tr.leading.iter().any(|c| c.kind == TriviaKind::Attribute && c.text.trim() == name)
+}
+
+fn py_kwargs_tag(s: &str) -> Option<&str> {
+    s.trim().trim_start_matches('@').strip_prefix("kwargs(")?.strip_suffix(')')
+}
+
+fn py_trivia_kwargs(tr: &Trivia) -> Option<&str> {
+    tr.leading.iter().find_map(|c| (c.kind == TriviaKind::Attribute).then(|| py_kwargs_tag(&c.text)).flatten())
+}
+
 fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Hash);
+    for c in &m.trivia.leading {
+        if c.kind == TriviaKind::Attribute && py_kwargs_tag(&c.text).is_none() {
+            ec.line(&c.text);
+        }
+    }
+    if m.is_static && !has_py_attr(&m.trivia, "@staticmethod") { ec.line("@staticmethod"); }
+    if m.accessor == AccessorKind::Get && !has_py_attr(&m.trivia, "@property") { ec.line("@property"); }
     let asy = if m.is_async { "async " } else { "" };
-    let ps = emit_py_params(&m.params, ectx);
+    let ps = emit_py_params(&m.params, py_trivia_kwargs(&m.trivia), ectx);
     let rt = m.return_type.as_ref().map(|t| format!(" -> {}", emit_type(t, LanguageId::Python))).unwrap_or_default();
     ec.line(&format!("{asy}def {}({ps}){rt}:", m.name));
     ec.push();
@@ -80,9 +99,12 @@ fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
 fn emit_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Hash);
-    for dec in &f.decorators { ec.line(&format!("@{dec}")); }
+    let kw_param = f.decorators.iter().find_map(|d| py_kwargs_tag(d)).or_else(|| py_trivia_kwargs(&f.trivia));
+    for dec in &f.decorators {
+        if py_kwargs_tag(dec).is_none() { ec.line(&format!("@{dec}")); }
+    }
     let asy = if f.is_async { "async " } else { "" };
-    let ps = emit_py_params(&f.params, ectx);
+    let ps = emit_py_params(&f.params, kw_param, ectx);
     let rt = f.return_type.as_ref().map(|t| format!(" -> {}", emit_type(t, LanguageId::Python))).unwrap_or_default();
     ec.line(&format!("{asy}def {}({ps}){rt}:", f.name));
     ec.push();
@@ -103,9 +125,16 @@ fn emit_py_stmts(ec: &mut EmitCtx, stmts: &[Stmt], ectx: &ExprEmitCtx) {
     crate::compile::iter_emit::run_py_stmts(ec, stmts, ectx);
 }
 
-fn emit_py_params(params: &[ParamDecl], ectx: &ExprEmitCtx) -> String {
+fn emit_py_params(params: &[ParamDecl], kw_param: Option<&str>, ectx: &ExprEmitCtx) -> String {
+    let mut seen_rest = false;
     params.iter().map(|p| {
-        let mut s = p.name.clone();
+        let mut s = if p.is_rest {
+            let is_kw = kw_param == Some(p.name.as_str()) || seen_rest;
+            if !is_kw { seen_rest = true; }
+            if is_kw { format!("**{}", p.name) } else { format!("*{}", p.name) }
+        } else {
+            p.name.clone()
+        };
         if let Some(ref ty) = p.ty { s.push_str(&format!(": {}", emit_type(ty, LanguageId::Python))); }
         if let Some(ref def) = p.default { s.push_str(&format!(" = {}", emit_expr(def, LanguageId::Python, ectx))); }
         s

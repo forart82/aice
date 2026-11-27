@@ -6,9 +6,9 @@ use crate::decompile::dart;
 use crate::decompile::dart_params::extract_dart_field_init;
 use crate::decompile::kotlin;
 use crate::decompile::trivia::is_comment_kind;
-use crate::decompile::ts_helpers::normalize_single_line;
+use crate::decompile::ts_helpers::{normalize_single_line, push_attrs_to_trivia};
 use crate::ir::{AiceItem, AiceModule, TranspileError, TranspileOpts, Trivia, Visibility};
-use crate::ir_code::{ConstDecl, VarDecl};
+use crate::ir_code::{ConstDecl, Expr, PropDecl, VarDecl};
 use crate::ir_types::{AiceType, PrimitiveType, TypeParam};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -228,6 +228,32 @@ pub(crate) fn kt_supertypes(node: Node<'_>, src: &str) -> (Option<String>, Vec<S
         }
     }
     (extends, implements)
+}
+
+pub(crate) fn decompile_kt_enum_entry(node: Node<'_>, enum_name: &str, src: &str, mut tr: Trivia) -> PropDecl {
+    let name = child_by_kind(node, "identifier")
+        .or_else(|| child_by_kind(node, "simple_identifier"))
+        .map(|n| node_text(n, src).trim().to_string())
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "V".into());
+    push_attrs_to_trivia(&mut tr, vec!["@variant".into()]);
+    let vargs = child_by_kind(node, "value_arguments");
+    let init = if let Some(cb) = child_by_kind(node, "class_body") {
+        let s = vargs.map_or(cb.start_byte(), |va| va.start_byte());
+        Some(Expr::Raw(src[s..node.end_byte()].trim().to_string()))
+    } else if let Some(va) = vargs {
+        let args: Vec<Node<'_>> = named_children(va).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+        if args.iter().all(|a| a.kind() == "value_argument" && a.named_child_count() == 1) {
+            let exprs = args.into_iter().filter_map(|a| named_children(a).into_iter().next())
+                .map(|e| crate::decompile::expr_common::decompile_expr(e, src, LanguageId::Kotlin)).collect();
+            Some(Expr::Call { callee: Box::new(Expr::Ident(enum_name.into())), args: exprs, is_new: false, is_optional: false, is_tagged: false })
+        } else {
+            Some(Expr::Raw(node_text(va, src).trim().to_string()))
+        }
+    } else {
+        None
+    };
+    PropDecl { name, aliases: Vec::new(), vis: Visibility::Default, is_static: false, is_readonly: false, is_mut: false, is_optional: false, ty: None, init, trivia: tr }
 }
 
 pub(crate) fn decompile_dart_top_var(node: Node<'_>, src: &str, tr: Trivia, m: &mut AiceModule) {

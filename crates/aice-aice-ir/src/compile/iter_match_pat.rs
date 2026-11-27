@@ -17,7 +17,14 @@ pub(crate) fn step_pat_task<'a>(
         CTask::EvalPat(pat) => match pat {
             Pattern::Wildcard => st.vals.push("_".into()),
             Pattern::Literal(l) => st.vals.push(emit_lit(l, lang)),
-            Pattern::Ident(s) => st.vals.push(s.clone()),
+            Pattern::Ident(s) => {
+                let out = if matches!(lang, LanguageId::Rust | LanguageId::Cpp | LanguageId::Php | LanguageId::Ruby) {
+                    s.clone()
+                } else {
+                    s.replace("::", ".")
+                };
+                st.vals.push(out);
+            }
             Pattern::Constructor { name, args } => {
                 if args.is_empty() { st.vals.push(name.clone()); }
                 else {

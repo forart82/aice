@@ -4,7 +4,7 @@ use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
-use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
+use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{FnBody, FnDecl};
 use crate::ir_types::{EnumDecl, ParamDecl, TypeDecl};
 
@@ -36,10 +36,20 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
+fn c_tag_attr(tr: &Trivia) -> Option<&str> {
+    tr.leading.iter().find_map(|c| {
+        if c.kind != TriviaKind::Attribute { return None; }
+        c.text.trim_start_matches('@').strip_prefix("tag(")?.strip_suffix(')')
+    })
+}
+
 fn emit_c_enum(ec: &mut EmitCtx, ed: &EnumDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
-    ec.line("typedef enum {");
+    match c_tag_attr(&ed.trivia) {
+        Some(tag) if !tag.is_empty() => ec.line(&format!("typedef enum {tag} {{")),
+        _ => ec.line("typedef enum {"),
+    }
     ec.push();
     if ed.variants.is_empty() {
         ec.line(&format!("{}_EMPTY = 0", ed.name));

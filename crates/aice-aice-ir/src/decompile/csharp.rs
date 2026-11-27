@@ -57,16 +57,25 @@ fn collect_cs(root: Node<'_>, src: &str, opts: &TranspileOpts, m: &mut AiceModul
             }
             "enum_declaration" => {
                 let name = field_text(node, "name", src).unwrap_or("Enum").to_string();
+                let mut etr = tr;
+                if let Some(bl) = child_by_kind(node, "base_list") {
+                    let base = node_text(bl, src).trim().trim_start_matches(':').trim();
+                    if !base.is_empty() { push_attrs_to_trivia(&mut etr, vec![format!("@base({base})")]); }
+                }
                 let mut variants = Vec::new();
                 if let Some(body) = node.child_by_field_name("body") {
                     for ch in named_children(body) {
                         if ch.kind() == "enum_member_declaration" {
                             let vn = field_text(ch, "name", src).unwrap_or("V").to_string();
-                            variants.push(EnumVariant { name: vn, payload: VariantPayload::Unit, discriminant: None, trivia: Trivia::default() });
+                            let disc = cs_init_expr(ch, src);
+                            variants.push(EnumVariant {
+                                name: vn, payload: VariantPayload::Unit, discriminant: disc,
+                                trivia: collect_trivia(ch, src, opts),
+                            });
                         }
                     }
                 }
-                m.items.push(AiceItem::Enum(EnumDecl { vis: cs_vis(node, src), name, type_params: Vec::new(), variants, trivia: tr, span: node_span(node) }));
+                m.items.push(AiceItem::Enum(EnumDecl { vis: cs_vis(node, src), name, type_params: Vec::new(), variants, trivia: etr, span: node_span(node) }));
             }
             _ => {}
         }
@@ -118,9 +127,14 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                     if let Some(vd) = named_children(ch).into_iter().find(|c| c.kind() == "variable_declaration") {
                         let ty = field_text(vd, "type", src).map(|t| map_type_str(t, LanguageId::CSharp));
                         let mods = named_children(ch);
-                        let is_readonly = mods.iter().any(|c| c.kind() == "modifier" && matches!(node_text(*c, src).trim(), "readonly" | "const"))
-                            || node_text(ch, src).contains("readonly ");
-                        let is_static = mods.iter().any(|c| c.kind() == "modifier" && node_text(*c, src).trim() == "static");
+                        let is_const = mods.iter().any(|c| c.kind() == "modifier" && node_text(*c, src).trim() == "const");
+                        let is_readonly = !is_const
+                            && (mods.iter().any(|c| c.kind() == "modifier" && node_text(*c, src).trim() == "readonly")
+                                || node_text(ch, src).contains("readonly "));
+                        let is_static = !is_const
+                            && mods.iter().any(|c| c.kind() == "modifier" && node_text(*c, src).trim() == "static");
+                        let mut ftr = mtr;
+                        if is_const { push_attrs_to_trivia(&mut ftr, vec!["@const".into()]); }
                         for dec in named_children(vd) {
                             if dec.kind() == "variable_declarator" {
                                 let fnm = field_text(dec, "name", src)
@@ -131,8 +145,8 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                                 let init = cs_init_expr(dec, src);
                                 props.push(PropDecl {
                                     name: fnm, aliases: Vec::new(), vis: mvis, is_static,
-                                    is_readonly, is_mut: !is_readonly,
-                                    is_optional: false, ty: ty.clone(), init, trivia: mtr.clone(),
+                                    is_readonly, is_mut: !is_const && !is_readonly,
+                                    is_optional: false, ty: ty.clone(), init, trivia: ftr.clone(),
                                 });
                             }
                         }

@@ -5,6 +5,7 @@ use crate::decompile::cst_util::{field_text, map_type_str, named_children, node_
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
+use crate::decompile::ts_helpers::{normalize_single_line, push_attrs_to_trivia};
 use crate::ir::{AiceItem, AiceModule, ImportDecl, ImportSpec, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl, VarDecl};
 use crate::ir_types::ParamDecl;
@@ -88,6 +89,28 @@ fn decompile_py_item(
                             }
                         }
                         "function_definition" => methods.push(py_method(ch, src, opts, mtr)),
+                        "decorated_definition" => {
+                            let mut decs = Vec::new();
+                            let mut cur = ch;
+                            while cur.kind() == "decorated_definition" {
+                                let mut next_def = None;
+                                for dch in named_children(cur) {
+                                    if dch.kind() == "decorator" {
+                                        let d = normalize_single_line(node_text(dch, src));
+                                        if !d.is_empty() { decs.push(d); }
+                                    } else if !is_comment_kind(dch.kind()) {
+                                        next_def = Some(dch);
+                                    }
+                                }
+                                let Some(nd) = next_def else { break; };
+                                cur = nd;
+                            }
+                            if cur.kind() == "function_definition" {
+                                let mut dtr = mtr;
+                                push_attrs_to_trivia(&mut dtr, decs);
+                                methods.push(py_method(cur, src, opts, dtr));
+                            }
+                        }
                         _ => {}
                     }
                 }
@@ -139,10 +162,11 @@ fn py_prop(asn: Node<'_>, src: &str, tr: Trivia) -> PropDecl {
     }
 }
 
-fn py_fn(node: Node<'_>, decorators: Vec<String>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
+fn py_fn(node: Node<'_>, mut decorators: Vec<String>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
     let name = field_text(node, "name", src).unwrap_or("fn_anon").to_string();
     let is_async = node_text(node, src).trim_start().starts_with("async ");
-    let params = node.child_by_field_name("parameters").map(|p| py_params(p, src)).unwrap_or_default();
+    let (params, kw_param) = node.child_by_field_name("parameters").map(|p| py_params(p, src)).unwrap_or_default();
+    if let Some(kw) = kw_param { decorators.push(format!("kwargs({kw})")); }
     let return_type = field_text(node, "return_type", src).map(|t| map_type_str(t, LanguageId::Python));
     let body = node.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, LanguageId::Python, opts))).unwrap_or(FnBody::SignatureOnly);
     FnDecl {
@@ -152,7 +176,9 @@ fn py_fn(node: Node<'_>, decorators: Vec<String>, src: &str, opts: &TranspileOpt
 }
 
 fn py_method(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> MethodDecl {
-    let f = py_fn(node, Vec::new(), src, opts, tr);
+    let mut f = py_fn(node, Vec::new(), src, opts, tr);
+    let extra: Vec<String> = f.decorators.drain(..).map(|d| format!("@{d}")).collect();
+    if !extra.is_empty() { push_attrs_to_trivia(&mut f.trivia, extra); }
     MethodDecl {
         vis: py_vis(&f.name), is_static: false, is_async: f.is_async, is_const: false,
         accessor: Default::default(), name: f.name, type_params: f.type_params,
@@ -160,8 +186,9 @@ fn py_method(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> Met
     }
 }
 
-fn py_params(pnode: Node<'_>, src: &str) -> Vec<ParamDecl> {
+fn py_params(pnode: Node<'_>, src: &str) -> (Vec<ParamDecl>, Option<String>) {
     let mut out = Vec::new();
+    let mut kw_param = None;
     for ch in named_children(pnode) {
         if matches!(ch.kind(), "positional_separator" | "keyword_separator") {
             continue;
@@ -177,12 +204,17 @@ fn py_params(pnode: Node<'_>, src: &str) -> Vec<ParamDecl> {
             "default_parameter" | "typed_default_parameter" => field_text(ch, "name", src).unwrap_or("p").trim().to_string(),
             _ => raw.trim_start_matches('*').split([':', '=']).next().unwrap_or("p").trim().to_string(),
         };
-        let is_rest = raw.starts_with('*')
-            || matches!(ch.kind(), "list_splat_pattern" | "dictionary_splat_pattern")
+        let is_kw_splat = raw.starts_with("**")
+            || ch.kind() == "dictionary_splat_pattern"
             || (ch.kind() == "typed_parameter"
-                && named_children(ch).first().is_some_and(|c| {
-                    matches!(c.kind(), "list_splat_pattern" | "dictionary_splat_pattern")
-                }));
+                && named_children(ch).first().is_some_and(|c| c.kind() == "dictionary_splat_pattern"));
+        let is_list_splat = !is_kw_splat
+            && (raw.starts_with('*')
+                || ch.kind() == "list_splat_pattern"
+                || (ch.kind() == "typed_parameter"
+                    && named_children(ch).first().is_some_and(|c| c.kind() == "list_splat_pattern")));
+        let is_rest = is_kw_splat || is_list_splat;
+        if is_kw_splat { kw_param = Some(name.clone()); }
         let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Python));
         let default = ch.child_by_field_name("value").map(|v| decompile_expr(v, src, LanguageId::Python));
         out.push(ParamDecl {
@@ -190,7 +222,7 @@ fn py_params(pnode: Node<'_>, src: &str) -> Vec<ParamDecl> {
             is_optional: false, is_rest, ty, default, trivia: Trivia::default(),
         });
     }
-    out
+    (out, kw_param)
 }
 
 fn py_vis(name: &str) -> Visibility {

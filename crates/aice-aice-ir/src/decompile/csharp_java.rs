@@ -3,9 +3,13 @@ use tree_sitter::Node;
 
 use crate::decompile::csharp;
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_text};
+use crate::decompile::iter_env::{DTask, DecompEnv};
+use crate::decompile::iter_stmt::{StmtFin, push_stmt_nodes};
 use crate::decompile::java_lang;
-use crate::decompile::trivia::is_comment_kind;
+use crate::decompile::match_cf::parse_simple_pattern;
+use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::ir::{AiceModule, TranspileError, TranspileOpts};
+use crate::ir_code::{FnBody, Pattern};
 use crate::ir_types::TypeParam;
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
@@ -149,4 +153,66 @@ pub(crate) fn extract_cs_base_list(node: Node<'_>, src: &str) -> Vec<String> {
         }
     }
     out
+}
+
+fn push_switch_arm_block<'a>(env: &mut DecompEnv<'a>, pat: Pattern, ch: Node<'a>, stmts: Vec<Node<'a>>) {
+    env.tasks.push(DTask::FinishStmt(StmtFin::MatchArm { pat, has_guard: false, trivia: collect_trivia(ch, env.src, env.opts) }));
+    if stmts.is_empty() {
+        env.bodies.push(FnBody::Block(Vec::new()));
+    } else {
+        env.tasks.push(DTask::FinishFnBodyFromBlock { single_expr_collapse: false });
+        let base = env.stmts.len();
+        env.tasks.push(DTask::FinishBlock(base));
+        push_stmt_nodes(env, stmts);
+    }
+}
+
+pub(crate) fn push_cs_switch_section<'a>(env: &mut DecompEnv<'a>, ch: Node<'a>) {
+    let last_colon = (0..ch.child_count())
+        .filter_map(|i| ch.child(i))
+        .filter(|c| !c.is_named() && c.kind() == ":")
+        .map(|c| c.end_byte())
+        .max()
+        .unwrap_or(ch.start_byte());
+    let (mut pats, mut is_def, mut stmts) = (Vec::new(), false, Vec::new());
+    for i in 0..ch.child_count() {
+        let Some(c) = ch.child(i) else { continue };
+        if c.end_byte() <= last_colon {
+            if !c.is_named() && c.kind() == "default" { is_def = true; }
+            else if c.is_named() && !is_comment_kind(c.kind()) && c.kind() != "when_clause" {
+                pats.push(parse_simple_pattern(node_text(c, env.src).trim()));
+            }
+        } else if c.is_named() && !is_comment_kind(c.kind()) {
+            stmts.push(c);
+        }
+    }
+    let pat = if is_def || pats.is_empty() { Pattern::Wildcard }
+        else if pats.len() == 1 { pats.remove(0) } else { Pattern::Or(pats) };
+    push_switch_arm_block(env, pat, ch, stmts);
+}
+
+pub(crate) fn push_java_switch_group<'a>(env: &mut DecompEnv<'a>, ch: Node<'a>) {
+    let (mut pats, mut is_def, mut stmts) = (Vec::new(), false, Vec::new());
+    for c in named_children(ch) {
+        if is_comment_kind(c.kind()) { continue; }
+        if c.kind() == "switch_label" {
+            if node_text(c, env.src).trim_start().starts_with("default") { is_def = true; }
+            else {
+                for e in named_children(c) {
+                    if !is_comment_kind(e.kind()) { pats.push(parse_simple_pattern(node_text(e, env.src).trim())); }
+                }
+            }
+        } else { stmts.push(c); }
+    }
+    let pat = if is_def || pats.is_empty() { Pattern::Wildcard }
+        else if pats.len() == 1 { pats.remove(0) } else { Pattern::Or(pats) };
+    push_switch_arm_block(env, pat, ch, stmts);
+}
+
+pub(crate) fn push_js_switch_arm<'a>(env: &mut DecompEnv<'a>, ch: Node<'a>) {
+    let pat = if ch.kind() == "switch_default" { Pattern::Wildcard }
+        else { field_text(ch, "value", env.src).map(|s| parse_simple_pattern(s.trim())).unwrap_or(Pattern::Wildcard) };
+    let mut cur = ch.walk();
+    let stmts: Vec<Node<'a>> = ch.children_by_field_name("body", &mut cur).filter(|c| !is_comment_kind(c.kind())).collect();
+    push_switch_arm_block(env, pat, ch, stmts);
 }

@@ -5,7 +5,7 @@ use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl};
+use crate::ir_code::{ClassDecl, Expr, FnBody, FnDecl, RecordEntry};
 use crate::ir_types::{ParamDecl, TypeDecl, TypeKind, TypeParam};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -43,7 +43,16 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Type(td) => emit_go_type(&mut ec, td),
             AiceItem::Class(cd) => emit_go_struct(&mut ec, cd, &ectx),
             AiceItem::Fn(fd) => emit_go_fn(&mut ec, fd, &ectx),
-            AiceItem::Const(cd) => ec.line(&format!("const {} = {}", cd.name, emit_expr(&cd.value, LanguageId::Go, &ectx))),
+            AiceItem::Const(cd) => {
+                ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
+                let ty = cd.ty.as_ref().map(|t| format!(" {}", emit_type(t, LanguageId::Go))).unwrap_or_default();
+                ec.line(&format!("const {}{ty} = {}", cd.name, emit_expr(&cd.value, LanguageId::Go, &ectx)));
+            }
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.blank();
+                ec.emit_trivia(trivia, CommentStyle::Slash);
+                for line in text.lines() { ec.line(line); }
+            }
             _ => {}
         }
     }
@@ -166,6 +175,19 @@ fn extract_go_tag(tr: &Trivia) -> Option<String> {
 fn emit_go_body(ec: &mut EmitCtx, body: &FnBody, ectx: &ExprEmitCtx) {
     match body {
         FnBody::SignatureOnly => {}
+        FnBody::Expr(Expr::Record(entries))
+            if !entries.is_empty()
+                && entries.iter().all(|e| matches!(e, RecordEntry::Field { key: None, .. })) =>
+        {
+            let vals: Vec<String> = entries
+                .iter()
+                .filter_map(|e| match e {
+                    RecordEntry::Field { value, .. } => Some(emit_expr(value, LanguageId::Go, ectx)),
+                    _ => None,
+                })
+                .collect();
+            ec.line(&format!("return {}", vals.join(", ")));
+        }
         FnBody::Expr(e) => ec.line(&format!("return {}", emit_expr(e, LanguageId::Go, ectx))),
         FnBody::Block(stmts) => emit_brace_stmts(stmts, LanguageId::Go, ec, ectx, false),
     }

@@ -4,15 +4,15 @@ use tree_sitter::Node;
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::kotlin_dart::{
-    extract_kt_type_params, kt_has_mod, kt_member_attrs, kt_param_has_kw, kt_return_type,
-    kt_supertypes, kt_type_node,
+    decompile_kt_enum_entry, extract_kt_type_params, kt_has_mod, kt_member_attrs, kt_param_has_kw,
+    kt_return_type, kt_supertypes, kt_type_node,
 };
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::push_attrs_to_trivia;
-use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
+use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, TriviaKind, Visibility};
 use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
-use crate::ir_types::ParamDecl;
+use crate::ir_types::{EnumDecl, EnumVariant, ParamDecl, VariantPayload};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     with_ts_root(tree, |root| {
@@ -54,11 +54,8 @@ fn push_kt_import(ch: Node<'_>, src: &str, tr: Trivia, m: &mut AiceModule) {
 
 fn kt_ident(node: Node<'_>, src: &str) -> Option<String> {
     field_text(node, "name", src)
-        .or_else(|| child_by_kind(node, "type_identifier").map(|n| node_text(n, src)))
-        .or_else(|| child_by_kind(node, "identifier").map(|n| node_text(n, src)))
-        .or_else(|| child_by_kind(node, "simple_identifier").map(|n| node_text(n, src)))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty())
+        .or_else(|| child_by_kind(node, "type_identifier").or_else(|| child_by_kind(node, "identifier")).or_else(|| child_by_kind(node, "simple_identifier")).map(|n| node_text(n, src)))
+        .map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 fn has_anon_kw(node: Node<'_>, kw: &str) -> bool {
@@ -94,11 +91,12 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
     }
     let (extends, implements) = kt_supertypes(node, src);
     let (mut props, mut methods, mut nested_items, mut direct_nested) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
-    if let Some(body) = child_by_kind(node, "class_body") {
+    if let Some(body) = child_by_kind(node, "class_body").or_else(|| child_by_kind(node, "enum_class_body")) {
         for ch in named_children(body) {
             if is_comment_kind(ch.kind()) { continue; }
             let mtr = collect_trivia(ch, src, opts);
             match ch.kind() {
+                "enum_entry" => props.push(decompile_kt_enum_entry(ch, &name, src, mtr)),
                 "function_declaration" => methods.push(kt_fn_to_method(decompile_kt_fn(ch, src, opts, mtr), false)),
                 "property_declaration" => {
                     if let Some(p) = decompile_kt_prop(ch, src, mtr, false, None) { props.push(p); }
@@ -119,17 +117,24 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
         for (nname, nvis) in direct_nested {
             let mut ntr = Trivia::default();
             push_attrs_to_trivia(&mut ntr, vec!["@nested_type".into()]);
-            props.push(PropDecl {
-                name: nname, aliases: Vec::new(), vis: nvis, is_static: false,
-                is_readonly: false, is_mut: false, is_optional: false, ty: None, init: None, trivia: ntr,
-            });
+            props.push(PropDecl { name: nname, aliases: Vec::new(), vis: nvis, is_static: false, is_readonly: false, is_mut: false, is_optional: false, ty: None, init: None, trivia: ntr });
         }
     }
     decorators.dedup();
+    let is_simple_enum = decorators.as_slice() == ["enum"] && !is_abstract && primary_ctor.is_empty()
+        && extends.is_none() && implements.is_empty() && methods.is_empty() && nested_items.is_empty()
+        && !props.is_empty() && props.iter().all(|p| p.init.is_none() && p.trivia.leading.iter().any(|c| c.kind == TriviaKind::Attribute && c.text == "@variant"));
+    if is_simple_enum {
+        let variants = props.into_iter().map(|mut p| {
+            p.trivia.leading.retain(|c| !(c.kind == TriviaKind::Attribute && c.text == "@variant"));
+            EnumVariant { name: p.name, payload: VariantPayload::Unit, discriminant: None, trivia: p.trivia }
+        }).collect();
+        out.push(AiceItem::Enum(EnumDecl { vis: kt_vis(node, src), name, type_params, variants, trivia: tr, span: node_span(node) }));
+        return;
+    }
     out.push(AiceItem::Class(ClassDecl {
-        vis: kt_vis(node, src), is_abstract, decorators, name, type_params,
-        primary_ctor, extends, implements, props, methods,
-        static_blocks: Vec::new(), trivia: tr, span: node_span(node),
+        vis: kt_vis(node, src), is_abstract, decorators, name, type_params, primary_ctor,
+        extends, implements, props, methods, static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }));
     out.extend(nested_items);
 }
@@ -270,11 +275,8 @@ fn kt_default_expr(node: Node<'_>, src: &str) -> Option<crate::ir_code::Expr> {
     let mut seen_eq = false;
     for i in 0..node.child_count() {
         let Some(ch) = node.child(i) else { continue };
-        if !seen_eq {
-            if ch.kind() == "=" || node_text(ch, src).trim() == "=" { seen_eq = true; }
-        } else if ch.is_named() {
-            return Some(kt_value_expr(ch, src));
-        }
+        if !seen_eq { seen_eq = ch.kind() == "=" || node_text(ch, src).trim() == "="; }
+        else if ch.is_named() { return Some(kt_value_expr(ch, src)); }
     }
     None
 }
@@ -290,8 +292,5 @@ fn kt_param_vis(node: Node<'_>, src: &str) -> Visibility {
 }
 
 fn kt_vis(node: Node<'_>, src: &str) -> Visibility {
-    match kt_param_vis(node, src) {
-        Visibility::Default => Visibility::Public,
-        v => v,
-    }
+    match kt_param_vis(node, src) { Visibility::Default => Visibility::Public, v => v }
 }

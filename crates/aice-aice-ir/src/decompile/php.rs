@@ -136,16 +136,42 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                         }
                     }
                 }
+                "const_declaration" => {
+                    let mut attrs = extract_php_attrs(ch, src);
+                    attrs.push("@const".into());
+                    if child_by_kind(ch, "final_modifier").is_some() { attrs.push("@final".into()); }
+                    push_attrs_to_trivia(&mut mtr, attrs);
+                    let ty = ch.child_by_field_name("type").map(|t| map_type_str(node_text(t, src), LanguageId::Php));
+                    for el in named_children(ch) {
+                        if el.kind() == "const_element" {
+                            let name_n = child_by_kind(el, "name");
+                            let cname = name_n.map(|n| node_text(n, src).trim().to_string())
+                                .unwrap_or_else(|| node_text(el, src).split('=').next().unwrap_or("C").trim().to_string());
+                            let val = named_children(el).into_iter()
+                                .find(|c| Some(*c) != name_n && !is_comment_kind(c.kind()))
+                                .map(|e| crate::decompile::expr_common::decompile_expr(e, src, LanguageId::Php));
+                            props.push(PropDecl {
+                                name: cname, aliases: Vec::new(), vis: mvis, is_static: false, is_readonly: false,
+                                is_mut: false, is_optional: false, ty: ty.clone(), init: val, trivia: mtr.clone(),
+                            });
+                        }
+                    }
+                }
                 "property_declaration" => {
                     push_attrs_to_trivia(&mut mtr, extract_php_attrs(ch, src));
                     let ty = ch.child_by_field_name("type").map(|t| map_type_str(node_text(t, src), LanguageId::Php));
                     let is_st = child_by_kind(ch, "static_modifier").is_some();
+                    let is_ro = child_by_kind(ch, "readonly_modifier").is_some();
                     for el in named_children(ch) {
                         if el.kind() == "property_element" {
-                            let pnm = node_text(el, src).trim().trim_start_matches('$').split('=').next().unwrap_or("p").trim().to_string();
+                            let pnm = field_text(el, "name", src)
+                                .or_else(|| child_by_kind(el, "variable_name").map(|n| node_text(n, src)))
+                                .unwrap_or_else(|| node_text(el, src).split('=').next().unwrap_or("p"))
+                                .trim().trim_start_matches('$').to_string();
+                            let init = php_param_default(el, src);
                             props.push(PropDecl {
-                                name: pnm, aliases: Vec::new(), vis: mvis, is_static: is_st, is_readonly: false,
-                                is_mut: true, is_optional: false, ty: ty.clone(), init: None, trivia: mtr.clone(),
+                                name: pnm, aliases: Vec::new(), vis: mvis, is_static: is_st, is_readonly: is_ro,
+                                is_mut: !is_ro, is_optional: false, ty: ty.clone(), init, trivia: mtr.clone(),
                             });
                         }
                     }
