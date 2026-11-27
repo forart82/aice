@@ -234,17 +234,19 @@ fn r7_report_schema_and_exact_bpe_verification() {
         // F-95 Rust `(crc & 1).wrapping_neg()` parens in C-02 [+2/+1], F-97 C/C++ `const`
         // pointer/ref param & return qualifiers in C-06 [+8/+9], F-107 Dart FormController
         // field initializers in C-07 [+10/+10]), Wave 16 fidelity fixes (F-131 structured
-        // Rust `tuple_expression` in C-02 `wal_record.rs` [-8/-9]), & Wave 17 fidelity fixes
+        // Rust `tuple_expression` in C-02 `wal_record.rs` [-8/-9]), Wave 17 fidelity fixes
         // (F-149 Rust range expressions in C-02 [+8/+7], F-150 Go composite literals in C-04
-        // [+22/+22]).
-        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-17 counts.
+        // [+22/+22]), & Wave 18 fidelity fixes (F-154 Go if/switch inits + F-156 Go defer/go in
+        // C-04 [+55/+60], F-155 C pointer `rb->...` in C-06 [+31/+31], F-158 Kotlin `try` expr in
+        // C-07 [+3/+3]).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-18 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
             "C-01" => (2155, 2193),
             "C-02" => (1713, 1683),
-            "C-04" => (1625, 1638),
+            "C-04" => (1680, 1698),
             "C-05" => (1572, 1595),
-            "C-06" => (1510, 1519),
-            "C-07" => (1520, 1538),
+            "C-06" => (1541, 1550),
+            "C-07" => (1523, 1541),
             "C-08" => (1432, 1441),
             "C-09" => (1262, 1264),
             "C-10" => (1415, 1432),
