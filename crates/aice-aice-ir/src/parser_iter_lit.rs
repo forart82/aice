@@ -103,10 +103,14 @@ pub(crate) fn start_record_entry(
 }
 
 pub(crate) fn looks_like_closure_after_fn(p: &Parser<'_>) -> bool {
-    if p.peek_n(1).kind != TokenKind::LParen {
+    looks_like_closure_after_fn_at(p, 0)
+}
+
+pub(crate) fn looks_like_closure_after_fn_at(p: &Parser<'_>, fn_off: usize) -> bool {
+    if p.peek_n(fn_off + 1).kind != TokenKind::LParen {
         return false;
     }
-    let (mut idx, mut depth) = (p.pos + 2, 1usize);
+    let (mut idx, mut depth) = (p.pos + fn_off + 2, 1usize);
     while idx < p.tokens.len() && depth > 0 {
         match p.tokens[idx].kind {
             TokenKind::LParen => depth += 1,
@@ -120,6 +124,31 @@ pub(crate) fn looks_like_closure_after_fn(p: &Parser<'_>) -> bool {
         p.tokens.get(idx).map(|t| t.kind),
         Some(TokenKind::Equal | TokenKind::FatArrow | TokenKind::LBrace | TokenKind::Arrow)
     )
+}
+
+pub(crate) fn is_move_closure_ahead(p: &Parser<'_>, tok: &crate::lexer_tokens::Token) -> bool {
+    (tok.kind == TokenKind::Ident
+        && tok.lexeme == "move"
+        && p.peek_n(1).kind == TokenKind::Fn
+        && looks_like_closure_after_fn_at(p, 1))
+        || (tok.kind == TokenKind::Async
+            && p.peek_n(1).kind == TokenKind::Ident
+            && p.peek_n(1).lexeme == "move"
+            && p.peek_n(2).kind == TokenKind::Fn
+            && looks_like_closure_after_fn_at(p, 2))
+}
+
+pub(crate) fn start_move_closure(
+    p: &mut Parser<'_>,
+    stack: &mut Vec<ParseCont>,
+    vals: &mut Vec<ParseVal>,
+) -> Result<(), TranspileError> {
+    let is_async = p.eat(TokenKind::Async);
+    p.advance(); // move
+    p.expect(TokenKind::Fn, "Expected 'fn'")?;
+    stack.push(ParseCont::ExprUnary { op: crate::ir_code::UnaryOp::Move });
+    p.expect(TokenKind::LParen, "Expected '('")?;
+    step_closure_params(p, is_async, Vec::new(), stack, vals)
 }
 
 pub(crate) fn step_closure_params(

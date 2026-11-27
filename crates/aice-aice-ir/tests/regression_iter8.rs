@@ -80,7 +80,7 @@ fn check(x:any) -> any:
     let AiceItem::Fn(fd) = &mg.items[0] else { panic!("expected Fn"); };
     let FnBody::Block(stmts) = &fd.body else { panic!("expected Block"); };
     assert_eq!(stmts.len(), 3, "expected 3 stmts, got {stmts:?}");
-    assert!(matches!(&stmts[0], Stmt::Let { init: Expr::Record(_), .. }));
+    assert!(matches!(&stmts[0], Stmt::Let { init: Some(Expr::Record(_)), .. }));
     let Stmt::If { then_body, .. } = &stmts[1] else { panic!("expected Stmt::If"); };
     assert_eq!(then_body.len(), 2, "if x == {{ a: 1 }} escaped: {then_body:?}");
 }

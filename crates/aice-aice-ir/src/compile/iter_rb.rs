@@ -37,7 +37,10 @@ pub(crate) fn step_rb_task<'a>(
             for item in stmts.iter().rev() { tasks.push(CTask::RbStmt(item)); }
         }
         CTask::RbStmt(stmt) => push_rb_stmt(stmt, st, tasks),
-        CTask::RbLet(name) => { let v = st.vals.pop().unwrap(); emit_rb_line(ec, &format!("{name} = {v}")); }
+        CTask::RbLet { name, has_init } => {
+            let v = if has_init { st.vals.pop().unwrap() } else { "nil".to_string() };
+            emit_rb_line(ec, &format!("{name} = {v}"));
+        }
         CTask::RbAssign(op) => {
             let r = st.vals.pop().unwrap();
             let l = st.vals.pop().unwrap();
@@ -67,7 +70,10 @@ fn push_rb_stmt<'a>(stmt: &'a Stmt, st: &mut EvalState, tasks: &mut Vec<CTask<'a
     match stmt {
         Stmt::Pass => {}
         Stmt::Comment(tr) => ec.emit_trivia(tr, CommentStyle::Hash),
-        Stmt::Let { name, init, .. } => { tasks.push(CTask::RbLet(name)); tasks.push(CTask::EvalExpr(init)); }
+        Stmt::Let { name, init, .. } => {
+            tasks.push(CTask::RbLet { name, has_init: init.is_some() });
+            if let Some(e) = init { tasks.push(CTask::EvalExpr(e)); }
+        }
         Stmt::Assign { target, op, value, .. } => {
             tasks.push(CTask::RbAssign(*op)); tasks.push(CTask::EvalExpr(value)); tasks.push(CTask::EvalExpr(target));
         }

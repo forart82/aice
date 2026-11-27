@@ -10,9 +10,12 @@ pub(crate) fn push_inline_stmt<'a>(tasks: &mut Vec<PTask<'a>>, st: &'a Stmt, out
         Stmt::Return { value: None, .. } => out.push_str("ret"),
         Stmt::Expr { expr, .. } => tasks.push(PTask::Expr(expr)),
         Stmt::Let { name, is_mut, ty, init, .. } => {
-            let op = if *is_mut { " ::= " } else { " := " };
-            tasks.push(PTask::Expr(init));
-            tasks.push(PTask::Lit(op));
+            if let Some(e) = init {
+                tasks.push(PTask::Expr(e));
+                tasks.push(PTask::Lit(if *is_mut { " ::= " } else { " := " }));
+            } else {
+                out.push_str(if *is_mut { "mut " } else { "let " });
+            }
             if let Some(t) = ty {
                 tasks.push(PTask::Ty(t));
                 tasks.push(PTask::Lit(": "));

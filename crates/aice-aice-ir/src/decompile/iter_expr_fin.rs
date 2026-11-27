@@ -51,10 +51,11 @@ pub(crate) fn push_lambda_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         .unwrap_or(node.end_byte());
     let hdr = env.src.get(node.start_byte()..hdr_end).unwrap_or("");
     let is_async = hdr.split_whitespace().any(|w| w == "async");
+    let is_move = env.lang == LanguageId::Rust && hdr.split_whitespace().any(|w| w == "move");
     let is_generator = matches!(env.lang, LanguageId::JavaScript | LanguageId::TypeScript | LanguageId::Tsx)
         && (node.kind() == "generator_function" || hdr.contains('*'));
     env.tasks.push(DTask::FinishExpr(ExprFin::Closure {
-        is_async, is_generator, params, default_mask, destruct_stmts, ret, body_kind,
+        is_async, is_generator, is_move, params, default_mask, destruct_stmts, ret, body_kind,
     }));
     if let Some(tn) = target_n {
         if body_kind == 1 { env.tasks.push(DTask::Block(tn)); } else { env.tasks.push(DTask::Expr(tn)); }
@@ -231,7 +232,7 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             Expr::Binary { op: BinaryOp::As, left: Box::new(env.exprs.pop().expect("cast")), right: Box::new(rhs) }
         }
         ExprFin::Await => Expr::Await(Box::new(env.exprs.pop().expect("await"))),
-        ExprFin::Closure { is_async, is_generator, mut params, default_mask, mut destruct_stmts, ret, body_kind } => {
+        ExprFin::Closure { is_async, is_generator, is_move, mut params, default_mask, mut destruct_stmts, ret, body_kind } => {
             let body = match body_kind {
                 1 => {
                     let mut stmts = env.blocks.pop().unwrap_or_default();
@@ -264,6 +265,8 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             let cl = Expr::Closure { is_async, params, ret, body: Box::new(body) };
             if is_generator {
                 Expr::Unary { op: UnaryOp::Generator, is_postfix: false, operand: Box::new(cl) }
+            } else if is_move {
+                Expr::Unary { op: UnaryOp::Move, is_postfix: false, operand: Box::new(cl) }
             } else {
                 cl
             }

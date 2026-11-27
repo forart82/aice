@@ -73,7 +73,11 @@ pub(crate) fn push_opt_ty(opt: &mut Option<AiceType>, work: &mut Vec<DropWork>) 
 
 pub(crate) fn drain_stmt(s: &mut Stmt, work: &mut Vec<DropWork>) {
     match s {
-        Stmt::Let { ty, init, .. } | Stmt::Destructure { ty, init, .. } => {
+        Stmt::Let { ty, init, .. } => {
+            push_opt_ty(ty, work);
+            push_opt_expr(init, work);
+        }
+        Stmt::Destructure { ty, init, .. } => {
             push_opt_ty(ty, work);
             push_expr(init, work);
         }

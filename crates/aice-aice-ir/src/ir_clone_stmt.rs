@@ -3,7 +3,7 @@ use crate::ir_clone::{CloneEnv, CloneTask};
 use crate::ir_code::{AssignOp, Stmt};
 
 pub(crate) enum StmtFinish {
-    Let { name: String, is_mut: bool, has_ty: bool, trivia: Trivia },
+    Let { name: String, is_mut: bool, has_ty: bool, has_init: bool, trivia: Trivia },
     Destructure { names: Vec<String>, is_mut: bool, has_ty: bool, trivia: Trivia },
     Assign { op: AssignOp, trivia: Trivia },
     Return { has_val: bool, trivia: Trivia },
@@ -36,9 +36,9 @@ pub(crate) fn push_stmt<'a>(env: &mut CloneEnv<'a>, s: &'a Stmt) {
     match s {
         Stmt::Let { name, is_mut, ty, init, trivia } => {
             env.tasks.push(CloneTask::FinishStmt(StmtFinish::Let {
-                name: name.clone(), is_mut: *is_mut, has_ty: ty.is_some(), trivia: trivia.clone(),
+                name: name.clone(), is_mut: *is_mut, has_ty: ty.is_some(), has_init: init.is_some(), trivia: trivia.clone(),
             }));
-            env.tasks.push(CloneTask::Expr(init));
+            if let Some(e) = init { env.tasks.push(CloneTask::Expr(e)); }
             if let Some(t) = ty { env.tasks.push(CloneTask::Ty(t)); }
         }
         Stmt::Destructure { names, is_mut, ty, init, trivia } => {
@@ -139,8 +139,8 @@ pub(crate) fn push_stmt<'a>(env: &mut CloneEnv<'a>, s: &'a Stmt) {
 
 pub(crate) fn finish_stmt(env: &mut CloneEnv<'_>, f: StmtFinish) {
     let s = match f {
-        StmtFinish::Let { name, is_mut, has_ty, trivia } => {
-            let init = env.exprs.pop().expect("let init");
+        StmtFinish::Let { name, is_mut, has_ty, has_init, trivia } => {
+            let init = if has_init { Some(env.exprs.pop().expect("let init")) } else { None };
             let ty = if has_ty { Some(env.tys.pop().expect("let ty")) } else { None };
             Stmt::Let { name, is_mut, ty, init, trivia }
         }

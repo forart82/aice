@@ -270,7 +270,7 @@ pub(crate) fn extract_ts_destructured_param_stmts(
                     name: format!("{{ {} }}", parts.join(", ")),
                     is_mut: false,
                     ty: None,
-                    init: Expr::Ident(pname),
+                    init: Some(Expr::Ident(pname)),
                     trivia: Trivia::default(),
                 });
             }

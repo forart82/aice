@@ -23,6 +23,24 @@ pub(crate) fn push_rs_turbofish_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>
 }
 
 pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    if env.lang == LanguageId::Kotlin
+        && (child_by_kind(node, "annotated_lambda").is_some()
+            || child_by_kind(node, "lambda_literal").is_some()
+            || child_by_kind(node, "call_suffix").is_some_and(|cs| {
+                child_by_kind(cs, "annotated_lambda").is_some()
+                    || child_by_kind(cs, "lambda_literal").is_some()
+            }))
+    {
+        env.exprs.push(Expr::Raw(raw.to_string()));
+        return;
+    }
+    if env.lang == LanguageId::Cpp
+        && (node.child_by_field_name("arguments").is_some_and(|a| a.kind() == "initializer_list")
+            || child_by_kind(node, "initializer_list").is_some())
+    {
+        env.exprs.push(Expr::Raw(raw.to_string()));
+        return;
+    }
     if node.kind() == "implicit_object_creation_expression" {
         let arg_nodes = node.child_by_field_name("arguments")
             .or_else(|| child_by_kind(node, "argument_list"))

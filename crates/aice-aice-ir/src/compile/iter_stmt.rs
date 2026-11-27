@@ -28,25 +28,9 @@ pub(crate) fn step_stmt_task<'a>(
             }
         }
         CTask::BraceStmt { st: stmt, tail } => push_brace_stmt(stmt, lang, semi, tail, st, tasks),
-        CTask::BraceLet { name, is_mut, ty } => {
-            let rhs = st.vals.pop().unwrap();
-            let line = match lang {
-                LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript => {
-                    let kw = if is_mut { "let" } else { "const" };
-                    let t = if lang != LanguageId::JavaScript { ty.map(|x| format!(": {}", emit_type(x, lang))).unwrap_or_default() } else { String::new() };
-                    format!("{kw} {name}{t} = {rhs}{semi}")
-                }
-                LanguageId::Rust => format!(
-                    "{} {name}{} = {rhs};",
-                    if is_mut && !name.starts_with(['(', '[', '{']) { "let mut" } else { "let" },
-                    ty.map(|x| format!(": {}", emit_type(x, lang))).unwrap_or_default()
-                ),
-                LanguageId::Go => format!("{name} := {rhs}"),
-                LanguageId::Kotlin => format!("{} {name}{} = {rhs}", if is_mut { "var" } else { "val" }, ty.map(|x| format!(": {}", emit_type(x, lang))).unwrap_or_default()),
-                LanguageId::Php => format!("{} = {rhs};", if name.starts_with('$') { name.to_string() } else { format!("${name}") }),
-                LanguageId::Cpp => format!("{} {name} = {rhs};", ty.map(|x| emit_type(x, lang)).unwrap_or_else(|| "auto".into())),
-                _ => format!("{} {name} = {rhs};", ty.map(|x| emit_type(x, lang)).unwrap_or_else(|| "var".into())),
-            };
+        CTask::BraceLet { name, is_mut, ty, has_init } => {
+            let rhs = has_init.then(|| st.vals.pop().unwrap());
+            let line = crate::compile::stmt_common::format_brace_let(name, is_mut, ty, rhs.as_deref(), lang, semi);
             ec.line(&line);
         }
         CTask::BraceDestructure { names, is_mut } => {
@@ -146,8 +130,8 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
         Stmt::Comment(tr) => ec.emit_trivia(tr, CommentStyle::Slash),
         Stmt::Let { name, is_mut, ty, init, trivia } => {
             ec.emit_trivia(trivia, CommentStyle::Slash);
-            tasks.push(CTask::BraceLet { name, is_mut: *is_mut, ty: ty.as_ref() });
-            tasks.push(CTask::EvalExpr(init));
+            tasks.push(CTask::BraceLet { name, is_mut: *is_mut, ty: ty.as_ref(), has_init: init.is_some() });
+            if let Some(e) = init { tasks.push(CTask::EvalExpr(e)); }
         }
         Stmt::Destructure { names, is_mut, init, trivia, .. } => {
             ec.emit_trivia(trivia, CommentStyle::Slash);

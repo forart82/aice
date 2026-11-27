@@ -7,7 +7,7 @@ use crate::compile::iter_emit::{CTask, EvalState, body_kind_of};
 use crate::compile::iter_expr_call::{finish_make_call, make_inline_jsx, push_eval_call, push_eval_index};
 use crate::compile::iter_expr_fmt::{
     format_closure, format_closure_param, format_js_generator_fn, format_record_entry,
-    format_template, needs_walrus_parens, unary_op_native,
+    format_rust_move_closure, format_template, needs_walrus_parens, unary_op_native,
 };
 use crate::ir_code::{BinaryOp, Expr, FnBody, MemberKind, RecordEntry, UnaryOp};
 
@@ -69,6 +69,7 @@ pub(crate) fn step_expr_task<'a>(
         CTask::MakeUnary { op, is_postfix, wrap } => {
             let raw = st.vals.pop().unwrap();
             if op == UnaryOp::Generator { st.vals.push(format_js_generator_fn(&raw, lang)); return; }
+            if op == UnaryOp::Move { st.vals.push(format_rust_move_closure(&raw, lang)); return; }
             let op_s = unary_op_native(op, lang);
             let inner = if !op_s.is_empty() && wrap { format!("({raw})") } else { raw };
             st.vals.push(if is_postfix { format!("{inner}{op_s}") } else { format!("{op_s}{inner}") });
@@ -227,7 +228,7 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
             tasks.push(CTask::EvalExpr(left));
         }
         Expr::Unary { op, is_postfix, operand } => {
-            let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator)
+            let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator | UnaryOp::Move)
                 && (matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
                     || needs_walrus_parens(operand));
             tasks.push(CTask::MakeUnary { op: *op, is_postfix: *is_postfix, wrap });

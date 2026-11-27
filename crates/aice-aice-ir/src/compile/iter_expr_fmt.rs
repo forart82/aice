@@ -31,6 +31,7 @@ pub(crate) fn unary_op_native(op: UnaryOp, lang: LanguageId) -> &'static str {
         (UnaryOp::YieldStar, LanguageId::Python) => "yield from ",
         (UnaryOp::YieldStar, _) => "yield* ",
         (UnaryOp::Generator, _) => "",
+        (UnaryOp::Move, LanguageId::Rust) => "move ",
         _ => "",
     }
 }
@@ -146,8 +147,8 @@ pub(crate) fn format_closure(
     match lang {
         LanguageId::Rust => {
             let rt = ret.map(|t| format!(" -> {}", emit_type(t, lang))).unwrap_or_default();
-            if rt.is_empty() || bk != 2 { format!("|{}| {rhs}", ps.join(", ")) }
-            else { format!("|{}|{rt} {rhs}", ps.join(", ")) }
+            if rt.is_empty() || bk != 2 { format!("{asy}|{}| {rhs}", ps.join(", ")) }
+            else { format!("{asy}|{}|{rt} {rhs}", ps.join(", ")) }
         }
         LanguageId::Php if bk == 1 => format!("fn({}) => {rhs}", ps.join(", ")),
         LanguageId::Php => format!("function({}) {rhs}", ps.join(", ")),
@@ -259,6 +260,11 @@ pub(crate) fn format_js_generator_fn(raw: &str, lang: LanguageId) -> String {
     };
     let asy = if is_async { "async " } else { "" };
     format!("{asy}function*{params}{ret_part} {body}")
+}
+
+pub(crate) fn format_rust_move_closure(raw: &str, lang: LanguageId) -> String {
+    if lang != LanguageId::Rust { return raw.to_string(); }
+    if let Some(rest) = raw.strip_prefix("async ") { format!("async move {rest}") } else { format!("move {raw}") }
 }
 
 fn format_js_gen_method_entry(key: &str, val: &str) -> Option<String> {

@@ -118,10 +118,13 @@ pub(crate) fn is_decl_kw_stmt_ahead(p: &Parser<'_>) -> bool {
     {
         idx += 1;
     }
-    p.tokens.get(idx).is_some_and(Parser::is_binding_tok)
-        && p.tokens.get(idx + 1).is_some_and(|t| {
-            matches!(t.kind, TokenKind::Colon | TokenKind::Equal | TokenKind::ColonEqual | TokenKind::ColonColonEqual)
-        })
+    let Some(nm) = p.tokens.get(idx) else { return false; };
+    if !Parser::is_binding_tok(nm) { return false; }
+    let nk = p.tokens.get(idx + 1).map(|t| t.kind);
+    matches!(nk, Some(TokenKind::Colon | TokenKind::Equal | TokenKind::ColonEqual | TokenKind::ColonColonEqual))
+        || (!matches!(nm.kind, TokenKind::In | TokenKind::And | TokenKind::Or | TokenKind::Instanceof | TokenKind::As)
+            && nm.lexeme != "is"
+            && matches!(nk, None | Some(TokenKind::Newline | TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment)))
 }
 
 pub(crate) fn is_ret_stmt_ahead(p: &Parser<'_>) -> bool {

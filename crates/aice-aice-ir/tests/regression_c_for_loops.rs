@@ -240,7 +240,7 @@ fn csharp_and_multivar_for_and_ident_initializers() {
         LanguageId::C,
         "multi.c",
         "int m(int n) { int a[4]; int u, v = n; int *p = &n, q = 0; return v + q; }\n",
-        &["a:int ::= nil", "u:int ::= nil", "v:int ::= n", "p:\"int*\" ::= &n", "q:int ::= 0"],
+        &["mut a:int", "mut u:int", "v:int ::= n", "p:\"int*\" ::= &n", "q:int ::= 0"],
     );
     assert!(!c_multi.contains("a:int ::= 4"), "array size leaked as init:\n{c_multi}");
 }

@@ -135,7 +135,7 @@ pub(crate) fn step_stmt_cont(
                 let init = if is_comma || p.tokens.get(p.pos.saturating_sub(1)).is_some_and(|t| t.kind == TokenKind::Comma) {
                     slice_rhs(p, rhs_start)
                 } else { expr };
-                vals.push(ParseVal::Stmt(Box::new(Stmt::Let { name, is_mut, ty, init, trivia: Trivia::default() })));
+                vals.push(ParseVal::Stmt(Box::new(Stmt::Let { name, is_mut, ty, init: Some(init), trivia: Trivia::default() })));
             }
         }
         ParseCont::StmtDestructure { names, is_mut } => {
@@ -264,11 +264,13 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             }
             let name = p.expect_ident_or_kw("Expected variable name")?.lexeme;
             let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
-            if p.eat(TokenKind::ColonColonEqual) { is_mut = true; }
-            else if !p.eat(TokenKind::ColonEqual) { p.expect(TokenKind::Equal, "Expected '=', ':=', or '::='")?; }
-            let rhs_start = p.peek().span.start_byte;
-            stack.push(ParseCont::StmtLet { name, is_mut, ty, rhs_start, is_comma: false });
-            stack.push(ParseCont::Expr(1));
+            if is_stmt_end(p.peek_kind()) {
+                vals.push(ParseVal::Stmt(Box::new(Stmt::Let { name, is_mut, ty, init: None, trivia: Trivia::default() })));
+            } else {
+                if p.eat(TokenKind::ColonColonEqual) { is_mut = true; } else if !p.eat(TokenKind::ColonEqual) { p.expect(TokenKind::Equal, "Expected '=', ':=', or '::='")?; }
+                stack.push(ParseCont::StmtLet { name, is_mut, ty, rhs_start: p.peek().span.start_byte, is_comma: false });
+                stack.push(ParseCont::Expr(1));
+            }
         }
         TokenKind::LBracket if is_destructure_ahead(p) => {
             let names = parse_array_destructure_elems(p)?;

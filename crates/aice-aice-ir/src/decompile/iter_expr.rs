@@ -49,7 +49,7 @@ pub(crate) enum ExprFin {
     Array(usize),
     TypeCast { ty: String, quote_mode: u8 },
     Await,
-    Closure { is_async: bool, is_generator: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, destruct_stmts: Vec<Stmt>, ret: Option<AiceType>, body_kind: u8 },
+    Closure { is_async: bool, is_generator: bool, is_move: bool, params: Vec<ParamDecl>, default_mask: Vec<bool>, destruct_stmts: Vec<Stmt>, ret: Option<AiceType>, body_kind: u8 },
     RubyBlock { params: Vec<ParamDecl>, has_body: bool },
     InlineJsx(bool),
     Tuple(usize),

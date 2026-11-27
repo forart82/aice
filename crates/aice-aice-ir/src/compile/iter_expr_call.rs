@@ -115,7 +115,14 @@ pub(crate) fn push_eval_call<'a>(
     } else {
         for a in args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
     }
-    if need_eval { tasks.push(CTask::EvalExpr(callee)); }
+    if need_eval {
+        if lang == LanguageId::Php
+            && matches!(callee, Expr::Raw(s) if s.starts_with("function") || s.starts_with("static function") || s.starts_with("fn"))
+        {
+            tasks.push(CTask::WrapParen);
+        }
+        tasks.push(CTask::EvalExpr(callee));
+    }
 }
 
 pub(crate) fn push_eval_index<'a>(

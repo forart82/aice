@@ -118,7 +118,7 @@ pub enum Stmt {
         name: String,
         is_mut: bool,
         ty: Option<AiceType>,
-        init: Expr,
+        init: Option<Expr>,
         trivia: Trivia,
     },
     Destructure {

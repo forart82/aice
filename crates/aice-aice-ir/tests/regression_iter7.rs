@@ -34,7 +34,7 @@ fn iter7_lexer_multiline_record_and_record_return_type() {
     let m2 = parse_aice(clo_rec).unwrap_or_else(|e| panic!("closure = record failed: {e}"));
     let AiceItem::Fn(fd2) = &m2.items[0] else { panic!("expected Fn"); };
     let FnBody::Block(bs2) = &fd2.body else { panic!("expected Block"); };
-    let Stmt::Let { init: Expr::Closure { body, .. }, .. } = &bs2[0] else {
+    let Stmt::Let { init: Some(Expr::Closure { body, .. }), .. } = &bs2[0] else {
         panic!("expected Let Closure, got {:?}", bs2[0]);
     };
     assert!(matches!(body.as_ref(), FnBody::Expr(Expr::Record(es)) if es.len() == 2));

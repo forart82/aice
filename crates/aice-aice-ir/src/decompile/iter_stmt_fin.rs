@@ -173,7 +173,7 @@ pub(crate) fn finish_stmt_task(env: &mut DecompEnv<'_>, f: StmtFin) {
             env.stmts.push(Stmt::For { binding, iter, body, trivia });
         }
         StmtFin::VarDecl { name, is_mut, ty, has_init } => {
-            let init = if has_init { env.exprs.pop().expect("var init") } else { Expr::Literal(LiteralVal::Nil) };
+            let init = if has_init { Some(env.exprs.pop().expect("var init")) } else { None };
             env.stmts.push(Stmt::Let { name, is_mut, ty, init, trivia: Trivia::default() });
         }
         StmtFin::Destructure { names, is_mut, has_init } => {

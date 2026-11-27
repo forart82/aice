@@ -179,6 +179,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             p.expect(TokenKind::LParen, "Expected '('")?;
             step_closure_params(p, false, Vec::new(), stack, vals)?;
         }
+        _ if crate::parser_iter_lit::is_move_closure_ahead(p, &tok) => crate::parser_iter_lit::start_move_closure(p, stack, vals)?,
         TokenKind::Async if p.peek_n(1).kind == TokenKind::Fn => {
             p.advance(); p.advance();
             if p.eat(TokenKind::Star) { stack.push(ParseCont::ExprUnary { op: UnaryOp::Generator }); }

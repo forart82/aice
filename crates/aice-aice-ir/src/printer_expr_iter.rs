@@ -76,13 +76,13 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             if lp { tasks.push(PTask::Lit("(")); }
         }
         Expr::Unary { op, is_postfix, operand } => {
-            if *op == UnaryOp::Generator
+            if matches!(*op, UnaryOp::Generator | UnaryOp::Move)
                 && let Expr::Closure { is_async, params, ret, body } = operand.as_ref()
             {
-                push_closure_print(tasks, out, *is_async, true, params, ret.as_ref(), body);
+                push_closure_print(tasks, out, (*is_async, *op == UnaryOp::Generator, *op == UnaryOp::Move), params, ret.as_ref(), body);
                 return;
             }
-            let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator)
+            let wrap = !matches!(*op, UnaryOp::Yield | UnaryOp::YieldStar | UnaryOp::Generator | UnaryOp::Move)
                 && matches!(operand.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. });
             if *is_postfix {
                 tasks.push(PTask::Lit(unary_op_str(*op)));
@@ -198,7 +198,7 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             out.push_str("{ ");
         }
         Expr::Closure { is_async, params, ret, body } => {
-            push_closure_print(tasks, out, *is_async, false, params, ret.as_ref(), body);
+            push_closure_print(tasks, out, (*is_async, false, false), params, ret.as_ref(), body);
         }
         Expr::Assign { target, op, value } => {
             tasks.push(PTask::Expr(value));
@@ -242,12 +242,12 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
 fn push_closure_print<'a>(
     tasks: &mut Vec<PTask<'a>>,
     out: &mut String,
-    is_async: bool,
-    is_generator: bool,
+    flags: (bool, bool, bool),
     params: &'a [crate::ir_types::ParamDecl],
     ret: Option<&'a AiceType>,
     body: &'a FnBody,
 ) {
+    let (is_async, is_generator, is_move) = flags;
     match body {
         FnBody::Expr(e) => {
             tasks.push(PTask::Expr(e));
@@ -279,10 +279,12 @@ fn push_closure_print<'a>(
         if p.is_rest { tasks.push(PTask::Lit("...")); }
         if i > 0 { tasks.push(PTask::Lit(", ")); }
     }
-    out.push_str(match (is_async, is_generator) {
-        (true, true) => "async fn*(",
-        (true, false) => "async fn(",
-        (false, true) => "fn*(",
-        (false, false) => "fn(",
+    out.push_str(match (is_async, is_generator, is_move) {
+        (true, true, _) => "async fn*(",
+        (true, false, true) => "async move fn(",
+        (true, false, false) => "async fn(",
+        (false, true, _) => "fn*(",
+        (false, false, true) => "move fn(",
+        (false, false, false) => "fn(",
     });
 }

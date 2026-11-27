@@ -27,10 +27,16 @@ pub(crate) fn step_py_task<'a>(
             for item in stmts.iter().rev() { tasks.push(CTask::PyStmt(item)); }
         }
         CTask::PyStmt(stmt) => push_py_stmt(stmt, st, tasks),
-        CTask::PyLet { name, ty } => {
-            let rhs = st.vals.pop().unwrap();
+        CTask::PyLet { name, ty, has_init } => {
             let t = ty.map(|x| format!(": {}", emit_type(x, LanguageId::Python))).unwrap_or_default();
-            ec.line(&format!("{name}{t} = {rhs}"));
+            if has_init {
+                let rhs = st.vals.pop().unwrap();
+                ec.line(&format!("{name}{t} = {rhs}"));
+            } else if !t.is_empty() {
+                ec.line(&format!("{name}{t}"));
+            } else {
+                ec.line(&format!("{name} = None"));
+            }
         }
         CTask::PyAssign(op) => {
             let r = st.vals.pop().unwrap();
@@ -75,8 +81,8 @@ fn push_py_stmt<'a>(stmt: &'a Stmt, st: &mut EvalState, tasks: &mut Vec<CTask<'a
         Stmt::Comment(tr) => ec.emit_trivia(tr, CommentStyle::Hash),
         Stmt::Let { name, ty, init, trivia, .. } => {
             ec.emit_trivia(trivia, CommentStyle::Hash);
-            tasks.push(CTask::PyLet { name, ty: ty.as_ref() });
-            tasks.push(CTask::EvalExpr(init));
+            tasks.push(CTask::PyLet { name, ty: ty.as_ref(), has_init: init.is_some() });
+            if let Some(e) = init { tasks.push(CTask::EvalExpr(e)); }
         }
         Stmt::Assign { target, op, value, trivia } => {
             ec.emit_trivia(trivia, CommentStyle::Hash);

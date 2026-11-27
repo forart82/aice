@@ -36,7 +36,8 @@ fn run_nil_tasks<'a>(init: NilTask<'a>) {
                 }
             },
             NilTask::Stmt(st) => match st {
-                Stmt::Let { init, .. } | Stmt::Destructure { init, .. } => tasks.push(NilTask::Expr(init)),
+                Stmt::Let { init: Some(e), .. } => tasks.push(NilTask::Expr(e)),
+                Stmt::Destructure { init, .. } => tasks.push(NilTask::Expr(init)),
                 Stmt::Assign { target, value, .. } => {
                     fix_nil_target(target);
                     tasks.push(NilTask::Expr(value));

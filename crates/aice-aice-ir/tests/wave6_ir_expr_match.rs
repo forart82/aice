@@ -151,9 +151,10 @@ fn f62_rust_wildcard_closure_and_cpp_lambda_params() {
     assert!(rs_aice.contains("fold(0, fn(_, x) = *x)"), "Rust |_, x| dropped:\n{rs_aice}");
     assert!(rs_aice.contains("fn(_: \"&i32\") = 2"), "Rust typed wildcard dropped:\n{rs_aice}");
     assert!(rs_aice.contains("d := fn() = 0usize"), "Rust 0-arg closure regressed:\n{rs_aice}");
-    assert!(rs_aice.contains("fn(x: u64) -> u64"), "Rust typed closure regressed:\n{rs_aice}");
+    assert!(rs_aice.contains("move fn(x: u64) -> u64"), "Rust move typed closure regressed:\n{rs_aice}");
     assert!(rs_nat.contains(".map(|_| 1)"), "Rust native lost |_|:\n{rs_nat}");
     assert!(rs_nat.contains(".fold(0, |_, x| *x)"), "Rust native lost |_, x|:\n{rs_nat}");
+    assert!(rs_nat.contains("move |x: u64| -> u64"), "Rust native lost move:\n{rs_nat}");
 
     let cpp = r#"#include <cstdint>
 #include <vector>
@@ -190,15 +191,14 @@ private:
 }
 "#;
     let (cpp_aice, cpp_nat) = roundtrip(LanguageId::Cpp, "ring.cpp", cpp);
-    assert!(
-        cpp_aice.contains("combine:auto := fn(item: \"const T&\") -> T { ret (acc ^ item) + 1 }"),
-        "C++ lambda param/return/body dropped:\n{cpp_aice}"
-    );
+    assert!(cpp_aice.contains("[&](const T& item) noexcept -> T"), "C++ lambda capture/noexcept/return dropped:\n{cpp_aice}");
     assert!(!cpp_aice.contains("combine:auto := fn()"), "C++ lambda degraded to fn():\n{cpp_aice}");
-    assert!(cpp_aice.contains("fn(a: int, b: int = 2) { ret a + b }"), "{cpp_aice}");
-    assert!(cpp_aice.contains("zero:auto ::= fn() { ret 0 }"), "{cpp_aice}");
-    assert!(cpp_aice.contains("bare:auto ::= fn() { ret acc }"), "{cpp_aice}");
-    assert!(cpp_nat.contains("[&](const T& item) -> T { return (acc ^ item) + 1; }"), "{cpp_nat}");
+    assert!(cpp_aice.contains("[=](int a, int b = 2)"), "C++ [=] capture dropped:\n{cpp_aice}");
+    assert!(cpp_aice.contains("[]()"), "C++ [] capture dropped:\n{cpp_aice}");
+    assert!(cpp_aice.contains("[&] {"), "C++ bare [&] lambda dropped:\n{cpp_aice}");
+    assert!(cpp_nat.contains("[&](const T& item) noexcept -> T"), "{cpp_nat}");
+    assert!(cpp_nat.contains("[=](int a, int b = 2)"), "{cpp_nat}");
+    assert!(cpp_nat.contains("[]()"), "{cpp_nat}");
 }
 
 #[test]

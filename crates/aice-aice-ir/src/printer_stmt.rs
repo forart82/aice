@@ -82,8 +82,16 @@ pub(crate) fn print_block_stmts(c: &mut PrintCtx<'_>, init_stmts: &[Stmt], init_
                 Stmt::Let { name, is_mut, ty, init, trivia } => {
                     c.emit_trivia(trivia, d);
                     let t = if c.opts.include_types { ty.as_ref().map(|x| format!("{}{}", c.colon_sep(), print_type(x))).unwrap_or_default() } else { String::new() };
-                    let op = if *is_mut { "::=" } else { ":=" };
-                    c.line_tr(d, &format!("{name}{t} {op} {}", print_expr(init)), trivia);
+                    match init {
+                        Some(e) => {
+                            let op = if *is_mut { "::=" } else { ":=" };
+                            c.line_tr(d, &format!("{name}{t} {op} {}", print_expr(e)), trivia);
+                        }
+                        None => {
+                            let kw = if *is_mut { "mut" } else { "let" };
+                            c.line_tr(d, &format!("{kw} {name}{t}"), trivia);
+                        }
+                    }
                 }
                 Stmt::Destructure { names, is_mut, init, trivia, .. } => {
                     c.emit_trivia(trivia, d);

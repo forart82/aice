@@ -17,13 +17,14 @@ pub(crate) fn is_raw_passthrough_expr(kind: &str, lang: LanguageId) -> bool {
             | "raw_c_string_literal"
     ) || matches!(
         (kind, lang),
-        ("object_literal" | "try_expression", LanguageId::Kotlin)
-            | ("anonymous_class" | "arrow_function", LanguageId::Php)
+        ("object_literal" | "try_expression" | "lambda_literal" | "annotated_lambda", LanguageId::Kotlin)
+            | ("anonymous_class" | "arrow_function" | "anonymous_function", LanguageId::Php)
             | ("text_block", LanguageId::Java)
             | ("switch_expression", LanguageId::Java | LanguageId::CSharp)
-            | ("send_statement" | "channel_type" | "composite_literal", LanguageId::Go)
+            | ("send_statement" | "channel_type" | "composite_literal" | "func_literal", LanguageId::Go)
             | ("range_expression", LanguageId::Rust)
-            | ("template_function", LanguageId::Cpp)
+            | ("compound_literal_expression" | "initializer_list", LanguageId::C | LanguageId::Cpp)
+            | ("template_function" | "lambda_expression", LanguageId::Cpp)
     )
 }
 
