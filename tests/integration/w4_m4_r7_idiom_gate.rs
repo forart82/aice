@@ -239,12 +239,13 @@ fn r7_report_schema_and_exact_bpe_verification() {
         // [+22/+22]), Wave 18 fidelity fixes (F-154 Go if/switch inits + F-156 Go defer/go in
         // C-04 [+55/+60], F-155 C pointer `rb->...` in C-06 [+31/+31], F-158 Kotlin `try` expr in
         // C-07 [+3/+3]), Wave 19 fidelity fixes (F-160 Go `func_literal` in C-04 [+3/+4],
-        // F-161 Kotlin trailing lambdas in C-07 [+39/+40]), & Wave 20 fidelity fixes
+        // F-161 Kotlin trailing lambdas in C-07 [+39/+40]), Wave 20 fidelity fixes
         // (F-168 Go package-level `var (...)` in C-04 `types.go` [+51/+46], F-165 Kotlin `else`
-        // branch in C-07 `SyncState.kt` [+21/+22]).
-        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-20 counts.
+        // branch in C-07 `SyncState.kt` [+21/+22]), & Wave 21 fidelity fixes (F-177/F-182a
+        // lossless TS complex cast quoting on C-01 `api_client.ts` `as OrderRecord[]` [+2/+2]).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-21 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
-            "C-01" => (2155, 2193),
+            "C-01" => (2157, 2195),
             "C-02" => (1713, 1683),
             "C-04" => (1734, 1748),
             "C-05" => (1572, 1595),
