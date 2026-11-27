@@ -5,6 +5,7 @@ use crate::r6::sql_expr::{check_sql_stmt_completeness, split_statements_semi, va
 use crate::r6::sql_lex::{LineIndex, SqlTok, SqlTokKind, sp};
 use crate::r6::sql_pratt::validate_pratt_expr;
 use crate::r6::sql_symbols::make_rd_node;
+use crate::r6::sql_upsert::validate_and_collect_upsert_masks;
 use crate::r6::sqlite::{is_pragma_kw_val, is_sqlite_ident};
 use crate::ts_pool::{GrammarSlot, ParserPool};
 
@@ -202,34 +203,15 @@ pub fn collect_sqlite_node(stmt: &[SqlTok], src: &str, li: &LineIndex, nodes: &m
 pub fn run_ts_on_tokens(stmt: &[SqlTok], src: &str, pool: &mut ParserPool, errs: &mut Vec<ErrorSpan>) {
     let trim_masks = validate_and_collect_trim_masks(stmt, src, errs);
     let is_ddl = stmt.first().is_some_and(|t| t.is_kw(src, "CREATE"));
-    let on_conf = if is_ddl {
-        None
-    } else {
-        stmt.windows(2).position(|w| w[0].is_kw(src, "ON") && w[1].is_kw(src, "CONFLICT"))
-    };
-    let core = if let Some(pos) = on_conf {
-        if let Some(do_pos) = stmt[pos..].iter().position(|t| t.is_kw(src, "DO")) {
-            let after_do = &stmt[pos + do_pos + 1..];
-            let ok = after_do.first().is_some_and(|t| t.is_kw(src, "NOTHING"))
-                || (after_do.len() >= 5 && after_do[0].is_kw(src, "UPDATE") && after_do[1].is_kw(src, "SET"));
-            if !ok {
-                errs.push(sp(stmt[pos + do_pos].line, stmt[pos + do_pos].col, "Invalid ON CONFLICT DO action"));
-            }
-        } else {
-            errs.push(sp(stmt[pos].line, stmt[pos].col, "Expected DO after ON CONFLICT"));
-        }
-        &stmt[..pos]
-    } else {
-        stmt
-    };
-    let (Some(f), Some(l)) = (core.first(), core.last()) else { return; };
+    let upsert_masks = if is_ddl { Vec::new() } else { validate_and_collect_upsert_masks(stmt, src, errs) };
+    let (Some(f), Some(l)) = (stmt.first(), stmt.last()) else { return; };
     let mut buf = String::with_capacity(l.end - f.start + 4);
-    let (mut i, mut mi) = (0usize, 0usize);
-    while i < core.len() {
-        let t = &core[i];
+    let (mut i, mut mi, mut ui) = (0usize, 0usize, 0usize);
+    while i < stmt.len() {
+        let t = &stmt[i];
         if t.is_kw(src, "AUTOINCREMENT") { i += 1; continue; }
-        if is_ddl && t.is_kw(src, "ON") && core.get(i + 1).is_some_and(|n| n.is_kw(src, "CONFLICT")) {
-            let algo_ok = core.get(i + 2).is_some_and(|a| {
+        if is_ddl && t.is_kw(src, "ON") && stmt.get(i + 1).is_some_and(|n| n.is_kw(src, "CONFLICT")) {
+            let algo_ok = stmt.get(i + 2).is_some_and(|a| {
                 ["ROLLBACK", "ABORT", "FAIL", "IGNORE", "REPLACE"].iter().any(|k| a.is_kw(src, k))
             });
             if !algo_ok {
@@ -241,7 +223,10 @@ pub fn run_ts_on_tokens(stmt: &[SqlTok], src: &str, pool: &mut ParserPool, errs:
             continue;
         }
         while mi < trim_masks.len() && t.start >= trim_masks[mi].1 { mi += 1; }
-        if mi < trim_masks.len() && t.start >= trim_masks[mi].0 && t.end <= trim_masks[mi].1 {
+        while ui < upsert_masks.len() && t.start >= upsert_masks[ui].1 { ui += 1; }
+        if (mi < trim_masks.len() && t.start >= trim_masks[mi].0 && t.end <= trim_masks[mi].1)
+            || (ui < upsert_masks.len() && t.start >= upsert_masks[ui].0 && t.end <= upsert_masks[ui].1)
+        {
             i += 1;
             continue;
         }

@@ -26,6 +26,7 @@ mod sql_pratt;
 mod sql_pratt_ext;
 pub(crate) mod sql_symbols;
 mod sql_trim;
+mod sql_upsert;
 pub mod sqlite;
 mod sqlite_rd;
 pub mod tsql;

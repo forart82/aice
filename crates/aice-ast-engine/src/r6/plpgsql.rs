@@ -16,6 +16,7 @@ use crate::r6::sql_pratt_ext::check_pg_casts;
 use crate::r6::sql_symbols::{
     extract_rd_deps, extract_rd_symbols, extract_sequel_deps, extract_sequel_symbols, make_rd_node,
 };
+use crate::r6::sql_upsert::validate_and_mask_upsert_clauses;
 use crate::ts_pool::{GrammarSlot, ParserPool, with_parser_pool};
 
 pub struct PostgreSqlAdapter;
@@ -200,6 +201,7 @@ fn mask_do_blocks(src: &str, clean: &[SqlTok], mut errs: Option<&mut Vec<ErrorSp
                 }
             }
             validate_and_mask_trim_calls(stmt, src, &mut bytes, &mut local_errs);
+            validate_and_mask_upsert_clauses(stmt, src, &mut bytes, &mut local_errs);
             if let Some(ref mut e) = errs {
                 e.extend(local_errs);
             }

@@ -2073,3 +2073,114 @@ fn wave6_f70_cypher_neo4j5_ddl_constraints_indexes_and_rejections() {
         assert_invalid(LanguageId::Cypher, name, bad);
     }
 }
+
+#[test]
+fn regression_wave17_f148b_sql_upsert_on_conflict() {
+    let valid_common = [
+        (
+            "upsert_repro.sql",
+            "CREATE TABLE t (id INTEGER PRIMARY KEY, v INTEGER);\nINSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT(id) DO UPDATE SET v = excluded.v;",
+        ),
+        (
+            "upsert_do_nothing_bare.sql",
+            "INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT DO NOTHING;",
+        ),
+        (
+            "upsert_do_nothing_col.sql",
+            "INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT(id) DO NOTHING;",
+        ),
+        (
+            "upsert_multi_col_where.sql",
+            "INSERT INTO t (a, b, v, w) VALUES (1, 2, 3, 4) ON CONFLICT(a, b) DO UPDATE SET v = excluded.v, w = COALESCE(t.w, 0) + excluded.w WHERE t.v < excluded.v;",
+        ),
+        (
+            "upsert_partial_tuple_ret.sql",
+            "INSERT INTO t (a, b, v, w) VALUES (1, 2, 3, 4) ON CONFLICT(a, b DESC) WHERE active = 1 DO UPDATE SET (v, w) = (excluded.v, excluded.w) WHERE excluded.v > 0 RETURNING a, b, v;",
+        ),
+        (
+            "upsert_trim_ok.sql",
+            "INSERT INTO t (a) VALUES ('x') ON CONFLICT(a) DO UPDATE SET a = TRIM(BOTH ' ' FROM excluded.a);",
+        ),
+        (
+            "upsert_with_cte.sql",
+            "WITH src AS (SELECT 1 AS id, 2 AS v) INSERT INTO t (id, v) SELECT id, v FROM src ON CONFLICT(id) DO UPDATE SET v = excluded.v RETURNING id;",
+        ),
+        (
+            "join_table_named_conflict.sql",
+            "INSERT INTO t SELECT a.id, a.v FROM a JOIN conflict ON conflict.id = a.id;",
+        ),
+    ];
+
+    for lang in [LanguageId::AnsiSql, LanguageId::Sqlite, LanguageId::PostgreSql] {
+        for (name, sql) in valid_common {
+            assert_valid(lang, name, sql);
+        }
+    }
+
+    // SQLite-specific valid UPSERT forms (chained ON CONFLICT + DDL ON CONFLICT preserved)
+    assert_valid(
+        LanguageId::Sqlite,
+        "sq_chained_upsert.sql",
+        "CREATE TABLE t (id INT PRIMARY KEY ON CONFLICT REPLACE, u INT UNIQUE, v INT);\nINSERT INTO t (id, u, v) VALUES (1, 2, 3) ON CONFLICT(id) DO UPDATE SET v = excluded.v ON CONFLICT(u) DO NOTHING RETURNING id;",
+    );
+
+    // PostgreSQL-specific valid UPSERT forms (ON CONSTRAINT, ::cast, writable CTE, DO block, SQL fn)
+    assert_valid(
+        LanguageId::PostgreSql,
+        "pg_on_constraint_cast.sql",
+        "INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT ON CONSTRAINT t_pkey DO UPDATE SET v = EXCLUDED.v::int RETURNING id;",
+    );
+    assert_valid(
+        LanguageId::PostgreSql,
+        "pg_writable_cte.sql",
+        "WITH ins AS (INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT(id) DO UPDATE SET v = excluded.v RETURNING id) SELECT * FROM ins;",
+    );
+    assert_valid(
+        LanguageId::PostgreSql,
+        "pg_plpgsql_do_upsert.sql",
+        "DO $$\nDECLARE v_id INT;\nBEGIN\n  INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT(id) DO UPDATE SET v = excluded.v RETURNING id INTO STRICT v_id;\nEND;\n$$;",
+    );
+    assert_valid(
+        LanguageId::PostgreSql,
+        "pg_sql_fn_upsert.sql",
+        "CREATE FUNCTION up_t() RETURNS VOID LANGUAGE sql AS $$\n  INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT(id) DO UPDATE SET v = excluded.v;\n$$;",
+    );
+
+    // Malformed UPSERT probes MUST be rejected across AnsiSql, Sqlite, and PostgreSql (0 bypasses)
+    let invalid_common = [
+        ("bad_no_do.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT;"),
+        ("bad_empty_target.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT() DO NOTHING;"),
+        ("bad_target_garbage.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id GARBAGE) DO NOTHING;"),
+        ("bad_target_trail_comma.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id,) DO NOTHING;"),
+        ("bad_do_action.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO BOGUS;"),
+        ("bad_do_nothing_garbage.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO NOTHING GARBAGE;"),
+        ("bad_do_update_no_set.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE;"),
+        ("bad_do_update_empty_set.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET;"),
+        ("bad_do_update_no_eq.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET v;"),
+        ("bad_do_update_dangling_eq.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET v = ;"),
+        ("bad_do_update_garbage.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET v = 1 GARBAGE;"),
+        ("bad_do_update_trail_comma.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET v = 1, ;"),
+        ("bad_do_update_empty_where.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET v = 1 WHERE;"),
+        ("bad_do_update_bad_where.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET v = 1 WHERE a b;"),
+        ("bad_tuple_empty.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET () = (1);"),
+        ("bad_tuple_trail_comma.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT(id) DO UPDATE SET (v,) = (1);"),
+        ("bad_on_constraint_no_name.sql", "INSERT INTO t (id) VALUES (1) ON CONFLICT ON CONSTRAINT DO NOTHING;"),
+        ("bad_select_on_conflict.sql", "SELECT 1 ON CONFLICT DO NOTHING;"),
+        ("bad_update_on_conflict.sql", "UPDATE t SET v = 1 ON CONFLICT(id) DO NOTHING;"),
+        ("bad_insert_core_broken.sql", "INSERT INTO t (id, v) VALUES (1, ) ON CONFLICT(id) DO NOTHING;"),
+        ("bad_returning_empty.sql", "INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT(id) DO UPDATE SET v = excluded.v RETURNING ;"),
+        ("bad_trim_in_upsert.sql", "INSERT INTO t (a) VALUES ('x') ON CONFLICT(a) DO UPDATE SET a = TRIM('x' GARBAGE);"),
+    ];
+
+    for lang in [LanguageId::AnsiSql, LanguageId::Sqlite, LanguageId::PostgreSql] {
+        for (name, sql) in invalid_common {
+            assert_invalid(lang, name, sql);
+        }
+    }
+
+    assert_invalid(
+        LanguageId::PostgreSql,
+        "bad_pg_do_upsert.sql",
+        "DO $$\nBEGIN\n  INSERT INTO t (id, v) VALUES (1, 2) ON CONFLICT(id) DO UPDATE SET v = 1 GARBAGE;\nEND;\n$$;",
+    );
+}

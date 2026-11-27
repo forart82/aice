@@ -11,6 +11,7 @@ use crate::r6::sql_expr::{
 };
 use crate::r6::sql_lex::{LexOpts, SqlTokKind, lex_sql};
 use crate::r6::sql_symbols::{extract_sequel_deps, extract_sequel_symbols};
+use crate::r6::sql_upsert::validate_and_mask_upsert_clauses;
 use crate::ts_pool::{GrammarSlot, ParserPool, with_parser_pool};
 
 pub struct AnsiSqlAdapter;
@@ -63,7 +64,7 @@ impl AstSlicer for AnsiSqlAdapter {
     }
 }
 
-fn prepare_ansi_masked(src: &str, errs: &mut Vec<ErrorSpan>) -> String {
+fn prepare_ansi_masked(src: &str, errs: &mut Vec<ErrorSpan>, mask_upsert: bool) -> String {
     let (toks, lex_errs, _) = lex_sql(src, LexOpts::default());
     errs.extend(lex_errs);
     let clean = strip_comments(&toks);
@@ -80,6 +81,9 @@ fn prepare_ansi_masked(src: &str, errs: &mut Vec<ErrorSpan>) -> String {
             }
         } else {
             validate_and_mask_trim_calls(stmt, src, &mut masked, errs);
+            if mask_upsert {
+                validate_and_mask_upsert_clauses(stmt, src, &mut masked, errs);
+            }
         }
     }
     String::from_utf8(masked).unwrap_or_else(|_| src.to_string())
@@ -87,13 +91,13 @@ fn prepare_ansi_masked(src: &str, errs: &mut Vec<ErrorSpan>) -> String {
 
 pub(crate) fn parse_ansi(src: &str, pool: &mut ParserPool) -> Result<ParsedTree, ParseError> {
     let mut ignored = Vec::new();
-    let norm = prepare_ansi_masked(src, &mut ignored);
+    let norm = prepare_ansi_masked(src, &mut ignored, false);
     pool.parse_lang(LanguageId::AnsiSql, &norm)
 }
 
 pub fn verify_ansi_spans(src: &str, pool: &mut ParserPool) -> Vec<ErrorSpan> {
     let mut errs = Vec::new();
-    let norm = prepare_ansi_masked(src, &mut errs);
+    let norm = prepare_ansi_masked(src, &mut errs, true);
     let mut spans = match pool.parse_slot(GrammarSlot::Sql, &norm) {
         Ok(tree) => collect_ts_error_spans(&tree, &norm),
         Err(e) => vec![ErrorSpan {

@@ -1806,3 +1806,59 @@ fn regression_wave3_f43_bounded_firewall_diagnostics_no_220_line_dump() {
     assert!(win.lines().count() <= 28, "format_context_window dumped {} lines", win.lines().count());
     assert!(win.contains("lines omitted"), "expected omission marker:\n{win}");
 }
+
+#[test]
+fn regression_wave17_f141_hunk_exact_match_no_indent_doubling() {
+    let ctx = EnclosingContext::full_file(None);
+    let fw = DefaultSyntaxFirewall;
+
+    // 1. Python exact-match hunk appending col-0 `def bar():` must NOT double-indent foo() or nest bar()
+    let py_src = "def foo():\n    x = 1\n    return x\n";
+    let py_hunk = extract_hunk_blocks(
+        "<<<\n    x = 1\n    return x\n===\n    x = 1\n    return x\n\ndef bar():\n    return 2\n>>>",
+    )
+    .unwrap();
+    let py_out = apply_hunk_blocks(py_src, &py_hunk, Path::new("ind2.py"), LanguageId::Python, "\n", 1, &ctx).unwrap();
+    let py_exp = "def foo():\n    x = 1\n    return x\n\ndef bar():\n    return 2\n";
+    assert_eq!(py_out, py_exp, "Python exact-match hunk corrupted indentation:\n{py_out}");
+    assert!(matches!(fw.verify(&py_out, Path::new("ind2.py"), LanguageId::Python), FirewallVerdict::Valid));
+
+    // 2. YAML exact-match hunk appending col-0 comment (`budgets.yaml` repro) must preserve 2-space mapping indent
+    let yaml_src = "default_currency: USD\ncategories:\n  cloud: 300\n  entertainment: 200\n";
+    let yaml_hunk = extract_hunk_blocks(
+        "<<<\n  cloud: 300\n  entertainment: 200\n===\n  cloud: 300\n  entertainment: 200\n# v17-proof\n>>>",
+    )
+    .unwrap();
+    let yaml_out = apply_hunk_blocks(yaml_src, &yaml_hunk, Path::new("budgets.yaml"), LanguageId::Yaml, "\n", 1, &ctx).unwrap();
+    let yaml_exp = "default_currency: USD\ncategories:\n  cloud: 300\n  entertainment: 200\n# v17-proof\n";
+    assert_eq!(yaml_out, yaml_exp, "YAML exact-match hunk corrupted indentation:\n{yaml_out}");
+    assert!(matches!(fw.verify(&yaml_out, Path::new("budgets.yaml"), LanguageId::Yaml), FirewallVerdict::Valid));
+
+    // 3. Same-indent fuzzy matches (trailing spaces on multi-line & single-line whole-line) must NOT double-indent
+    let yaml_ws = "default_currency: USD\ncategories:\n  cloud: 300  \n  entertainment: 200\n";
+    let yaml_ws_out = apply_hunk_blocks(yaml_ws, &yaml_hunk, Path::new("budgets.yaml"), LanguageId::Yaml, "\n", 1, &ctx).unwrap();
+    assert_eq!(yaml_ws_out, yaml_exp, "Same-indent fuzzy YAML hunk doubled indent:\n{yaml_ws_out}");
+
+    let py_single = "def foo():\n    return 1  \n";
+    let py_single_hunk = extract_hunk_blocks(
+        "<<<\n    return 1\n===\n    return 1\n\ndef bar():\n    return 2\n>>>",
+    )
+    .unwrap();
+    let py_single_out = apply_hunk_blocks(py_single, &py_single_hunk, Path::new("ind1.py"), LanguageId::Python, "\n", 1, &ctx).unwrap();
+    assert_eq!(py_single_out, "def foo():\n    return 1\n\ndef bar():\n    return 2\n");
+
+    // 4. Fuzzy indent-shift MUST still work when search matched via a stripped indentation offset != 0
+    let py_fuzzy = extract_hunk_blocks("<<<\nx = 1\nreturn x\n===\nx = 2\nif x:\n    return x\n>>>").unwrap();
+    let py_fuzzy_out = apply_hunk_blocks(py_src, &py_fuzzy, Path::new("fuzzy.py"), LanguageId::Python, "\n", 1, &ctx).unwrap();
+    assert_eq!(py_fuzzy_out, "def foo():\n    x = 2\n    if x:\n        return x\n");
+
+    let py_shift2 = extract_hunk_blocks("<<<\n  x = 1\n  return x\n===\n  x = 9\n  return x\n>>>").unwrap();
+    let py_shift2_out = apply_hunk_blocks(py_src, &py_shift2, Path::new("shift2.py"), LanguageId::Python, "\n", 1, &ctx).unwrap();
+    assert_eq!(py_shift2_out, "def foo():\n    x = 9\n    return x\n");
+
+    // 5. True inline single-line substring replacement stays intact
+    let inline_src = "    let total = old_val + 1;\n";
+    let inline_hunk = extract_hunk_blocks("<<<\nold_val\n===\nnew_val\n>>>").unwrap();
+    let inline_out = apply_hunk_blocks(inline_src, &inline_hunk, Path::new("in.ts"), LanguageId::TypeScript, "\n", 1, &ctx).unwrap();
+    assert_eq!(inline_out, "    let total = new_val + 1;\n");
+}

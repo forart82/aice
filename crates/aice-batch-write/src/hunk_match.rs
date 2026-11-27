@@ -80,14 +80,10 @@ fn min_indent<'a>(lines: impl IntoIterator<Item = &'a str>) -> &'a str {
 fn adapt_repl_indent(repl: &[String], scope_slice: &[String], search_lines: &[String], exact: bool) -> Vec<String> {
     let scope_base = min_indent(scope_slice.iter().map(String::as_str));
     let search_base = min_indent(search_lines.iter().map(String::as_str));
-    let repl_base = min_indent(repl.iter().map(String::as_str));
-    if exact {
-        if !scope_base.is_empty() && !search_base.is_empty() && repl_base.is_empty() {
-            return repl.iter().map(|l| if l.trim().is_empty() { String::new() } else { format!("{scope_base}{l}") }).collect();
-        }
+    if exact || scope_base == search_base {
         return repl.to_vec();
     }
-    let strip_len = if repl_base.len() >= search_base.len() { repl_base.len() } else { search_base.len().min(repl_base.len()) };
+    let strip_len = min_indent(repl.iter().map(String::as_str)).len();
     repl.iter().map(|l| {
         if l.trim().is_empty() { String::new() }
         else {
@@ -192,15 +188,18 @@ fn apply_single_hunk(
         if let Some(&(i, pos)) = inline_hits.first() {
             let line = &scope_lines[i];
             let indent = leading_ws(line);
-            let mut joined = repl.join(eol);
-            if repl.len() > 1 {
-                joined = repl.iter().enumerate().map(|(k, l)| {
-                    if k == 0 || l.trim().is_empty() { l.clone() } else { format!("{indent}{l}") }
-                }).collect::<Vec<_>>().join(eol);
+            let is_whole_line = pos == indent.len() && pos + needle.len() == line.trim_end().len();
+            if !is_whole_line {
+                let mut joined = repl.join(eol);
+                if repl.len() > 1 {
+                    joined = repl.iter().enumerate().map(|(k, l)| {
+                        if k == 0 || l.trim().is_empty() { l.clone() } else { format!("{indent}{l}") }
+                    }).collect::<Vec<_>>().join(eol);
+                }
+                let new_line = format!("{}{}{}", &line[..pos], joined, &line[pos + needle.len()..]);
+                let (new_lines, _) = split_lines_keep(&new_line);
+                return Ok(replace_span(&scope_lines, i, i + 1, new_lines));
             }
-            let new_line = format!("{}{}{}", &line[..pos], joined, &line[pos + needle.len()..]);
-            let (new_lines, _) = split_lines_keep(&new_line);
-            return Ok(replace_span(&scope_lines, i, i + 1, new_lines));
         }
     }
     if scope_lines.len() >= m {

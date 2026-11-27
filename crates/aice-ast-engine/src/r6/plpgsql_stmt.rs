@@ -6,6 +6,7 @@ use crate::r6::sql_expr::{
 use crate::r6::sql_lex::{SqlTok, SqlTokKind, sp};
 use crate::r6::sql_pratt::validate_pratt_expr;
 use crate::r6::sql_pratt_ext::check_pg_casts;
+use crate::r6::sql_upsert::{validate_and_collect_upsert_masks, validate_and_mask_upsert_clauses};
 use crate::ts_pool::{GrammarSlot, ParserPool};
 
 pub enum PgFrame {
@@ -142,15 +143,18 @@ fn validate_inner_sql_impl(
 ) {
     let cast_masks = check_pg_casts(stmt, body, errs);
     let trim_masks = validate_and_collect_trim_masks(stmt, body, errs);
+    let upsert_masks = validate_and_collect_upsert_masks(stmt, body, errs);
     let raw = &body[stmt[0].start..stmt[stmt.len() - 1].end];
     let mut cleaned = String::with_capacity(raw.len() + 8);
     let (mut into_state, mut into_has_target, mut into_tok) = (0u8, false, None);
-    let (mut mi, mut ci) = (0usize, 0usize);
+    let (mut mi, mut ci, mut ui) = (0usize, 0usize, 0usize);
     for (idx, t) in stmt.iter().enumerate() {
         while mi < trim_masks.len() && t.start >= trim_masks[mi].1 { mi += 1; }
         while ci < cast_masks.len() && t.start >= cast_masks[ci].1 { ci += 1; }
+        while ui < upsert_masks.len() && t.start >= upsert_masks[ui].1 { ui += 1; }
         if (mi < trim_masks.len() && t.start >= trim_masks[mi].0 && t.end <= trim_masks[mi].1)
             || (ci < cast_masks.len() && t.start >= cast_masks[ci].0 && t.end <= cast_masks[ci].1)
+            || (ui < upsert_masks.len() && t.start >= upsert_masks[ui].0 && t.end <= upsert_masks[ui].1)
         {
             continue;
         }
@@ -239,6 +243,7 @@ pub fn validate_sql_block(toks: &[SqlTok], body: &str, pool: &mut ParserPool, er
             }
         }
         validate_and_mask_trim_calls(stmt, body, &mut masked, errs);
+        validate_and_mask_upsert_clauses(stmt, body, &mut masked, errs);
     }
     let norm = String::from_utf8(masked).unwrap_or_else(|_| body.to_string());
     if let Ok(tree) = pool.parse_slot(GrammarSlot::Sql, &norm) {
