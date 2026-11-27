@@ -233,13 +233,15 @@ fn r7_report_schema_and_exact_bpe_verification() {
         // & Wave 8 fidelity fixes (F-101 TSX `default as React` import in C-01 [+2/+2],
         // F-95 Rust `(crc & 1).wrapping_neg()` parens in C-02 [+2/+1], F-97 C/C++ `const`
         // pointer/ref param & return qualifiers in C-06 [+8/+9], F-107 Dart FormController
-        // field initializers in C-07 [+10/+10]), & Wave 16 fidelity fixes (F-131 structured
-        // Rust `tuple_expression` in C-02 `wal_record.rs` [-8/-9]).
-        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-16 counts.
+        // field initializers in C-07 [+10/+10]), Wave 16 fidelity fixes (F-131 structured
+        // Rust `tuple_expression` in C-02 `wal_record.rs` [-8/-9]), & Wave 17 fidelity fixes
+        // (F-149 Rust range expressions in C-02 [+8/+7], F-150 Go composite literals in C-04
+        // [+22/+22]).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-17 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
             "C-01" => (2155, 2193),
-            "C-02" => (1705, 1676),
-            "C-04" => (1603, 1616),
+            "C-02" => (1713, 1683),
+            "C-04" => (1625, 1638),
             "C-05" => (1572, 1595),
             "C-06" => (1510, 1519),
             "C-07" => (1520, 1538),
