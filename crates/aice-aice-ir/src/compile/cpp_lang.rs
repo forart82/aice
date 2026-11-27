@@ -69,6 +69,43 @@ fn cpp_attr_arg<'a>(tr: &'a Trivia, prefix: &str) -> Option<&'a str> {
     })
 }
 
+fn parse_cpp_quoted_attr(text: &str, prefix: &str) -> Option<String> {
+    let s = text.trim().trim_start_matches('@');
+    let inner = s.strip_prefix(prefix)?.strip_prefix('(')?.strip_suffix(')')?.trim();
+    if let Some(unq) = inner.strip_prefix('"').and_then(|r| r.strip_suffix('"')) {
+        Some(unq.replace("\\\"", "\"").replace("\\\\", "\\"))
+    } else {
+        Some(inner.to_string())
+    }
+}
+
+fn cpp_quoted_attr(tr: &Trivia, decs: &[String], prefix: &str) -> Option<String> {
+    tr.leading.iter()
+        .find_map(|c| (c.kind == TriviaKind::Attribute).then(|| parse_cpp_quoted_attr(&c.text, prefix)).flatten())
+        .or_else(|| decs.iter().find_map(|d| parse_cpp_quoted_attr(d, prefix)))
+}
+
+fn cpp_has_any_attr(tr: &Trivia, decs: &[String], name: &str) -> bool {
+    cpp_has_attr(tr, name) || decs.iter().any(|d| d.trim().trim_start_matches('@') == name)
+}
+
+fn cpp_fn_quals(tr: &Trivia, decs: &[String]) -> String {
+    let mut s = String::new();
+    if cpp_has_any_attr(tr, decs, "inline") { s.push_str("inline "); }
+    if cpp_has_any_attr(tr, decs, "constexpr") { s.push_str("constexpr "); }
+    if cpp_has_any_attr(tr, decs, "consteval") { s.push_str("consteval "); }
+    s
+}
+
+fn is_cpp_conv_op(name: &str) -> bool {
+    let tail = name.rsplit("::").next().unwrap_or(name).trim();
+    let Some(rest) = tail.strip_prefix("operator") else { return false; };
+    let trimmed = rest.trim_start();
+    trimmed.len() < rest.len()
+        && trimmed.as_bytes().first().is_some_and(|b| b.is_ascii_alphabetic() || *b == b'_')
+        && !matches!(trimmed, "new" | "delete" | "new[]" | "delete[]" | "co_await")
+}
+
 fn emit_cpp_enum(ec: &mut EmitCtx, ed: &EnumDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
@@ -158,24 +195,37 @@ fn emit_cpp_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, ectx: &Expr
     let ps = emit_cpp_params(&m.params);
     let is_virtual = cpp_has_attr(&m.trivia, "virtual");
     let is_pure = cpp_has_attr(&m.trivia, "pure");
+    let is_default = cpp_has_attr(&m.trivia, "default");
+    let is_delete = cpp_has_attr(&m.trivia, "delete");
     let is_override = cpp_has_attr(&m.trivia, "override");
     let is_final = cpp_has_attr(&m.trivia, "final");
+    let fr = if cpp_has_attr(&m.trivia, "friend") { "friend " } else { "" };
     let st = if m.is_static { "static " } else { "" };
+    let quals = cpp_fn_quals(&m.trivia, &[]);
     let virt = if is_virtual || is_pure { "virtual " } else { "" };
     let ovr = if is_override { " override" } else { "" };
     let fin = if is_final { " final" } else { "" };
+    let emit_name = cpp_quoted_attr(&m.trivia, &[], "op").unwrap_or_else(|| m.name.clone());
     let sig = if m.accessor == AccessorKind::Constructor {
-        format!("explicit {cls_name}({ps})")
-    } else if m.name.starts_with('~') {
-        format!("{virt}{}({ps}){ovr}{fin}", m.name)
+        format!("{quals}explicit {cls_name}({ps})")
+    } else if emit_name.starts_with('~') {
+        format!("{quals}{virt}{emit_name}({ps}){ovr}{fin}")
+    } else if m.return_type.is_none() && is_cpp_conv_op(&emit_name) {
+        let cst = if m.is_const { " const" } else { "" };
+        let exp = if cpp_has_attr(&m.trivia, "explicit") { "explicit " } else { "" };
+        format!("{fr}{st}{quals}{exp}{virt}{emit_name}({ps}){cst}{ovr}{fin}")
     } else {
         let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::Cpp)).unwrap_or_else(|| "void".into());
         let cst = if m.is_const { " const" } else { "" };
-        format!("{st}{virt}{rt} {}({ps}){cst}{ovr}{fin}", m.name)
+        format!("{fr}{st}{quals}{virt}{rt} {emit_name}({ps}){cst}{ovr}{fin}")
     };
     if m.body == FnBody::SignatureOnly {
         if is_pure {
             ec.line(&format!("{sig} = 0;"));
+        } else if is_default {
+            ec.line(&format!("{sig} = default;"));
+        } else if is_delete {
+            ec.line(&format!("{sig} = delete;"));
         } else {
             ec.line(&format!("{sig};"));
         }
@@ -196,9 +246,12 @@ fn emit_cpp_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
     emit_cpp_template_hdr(ec, &f.type_params);
+    let quals = cpp_fn_quals(&f.trivia, &f.decorators);
+    let emit_name = cpp_quoted_attr(&f.trivia, &f.decorators, "op").unwrap_or_else(|| f.name.clone());
+    let cst = if cpp_has_any_attr(&f.trivia, &f.decorators, "const_method") { " const" } else { "" };
     let rt = f.return_type.as_ref().map(|t| emit_type(t, LanguageId::Cpp)).unwrap_or_else(|| "void".into());
     let ps = emit_cpp_params(&f.params);
-    ec.line(&format!("{rt} {}({ps}) {{", f.name));
+    ec.line(&format!("{quals}{rt} {emit_name}({ps}){cst} {{"));
     ec.push();
     match &f.body {
         FnBody::SignatureOnly => {}

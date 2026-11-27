@@ -5,7 +5,8 @@ use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_
 use crate::decompile::expr_common::decompile_expr;
 use crate::decompile::rust_helpers::{
     decompile_rs_impl_assoc, decompile_rs_trait_assoc, decompile_struct, extract_rs_fields,
-    is_rs_non_tail_raw, rs_generic_attrs_match, rs_vis,
+    extract_rs_fn_quals, fix_rs_bare_str_in_module, is_rs_non_tail_raw, rs_esc,
+    rs_generic_attrs_match, rs_vis,
 };
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
@@ -88,6 +89,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
             }
         }
         attach_rs_impls(&mut m, impls);
+        fix_rs_bare_str_in_module(&mut m);
         Ok(m)
     })
 }
@@ -207,9 +209,9 @@ fn decompile_trait(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileO
 
 fn decompile_rs_fn(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
     let name = field_text(node, "name", src).unwrap_or("fn_anon").to_string();
-    let is_async = node_text(node, src).trim_start().contains("async fn");
+    let (is_async, mut decorators) = extract_rs_fn_quals(node, src);
     let (type_params, attrs) = extract_rs_generics(node, src);
-    let decorators = attrs.into_iter().map(|a| a.trim_start_matches('@').to_string()).collect();
+    decorators.extend(attrs.into_iter().map(|a| a.trim_start_matches('@').to_string()));
     let mut params = Vec::new();
     if let Some(plist) = node.child_by_field_name("parameters") {
         for ch in named_children(plist) {
@@ -294,5 +296,3 @@ fn rs_bound_type(b: Node<'_>, src: &str) -> AiceType {
         AiceType::Raw(raw)
     } else { map_type_str(&raw, LanguageId::Rust) }
 }
-
-fn rs_esc(s: &str) -> String { s.replace('\\', "\\\\").replace('"', "\\\"") }

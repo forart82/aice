@@ -3,8 +3,9 @@ use aice_lang_registry::LanguageId;
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::rust_helpers::{
-    emit_rs_all_hash_attrs, emit_rs_impl_assoc, emit_rs_trait_assoc, format_rs_generics,
-    format_rs_tuple_field_ty, format_rs_type_args, is_rs_assoc_attr, rs_attr_arg,
+    emit_rs_all_hash_attrs, emit_rs_impl_assoc, emit_rs_trait_assoc, format_rs_fn_quals,
+    format_rs_generics, format_rs_tuple_field_ty, format_rs_type_args, is_rs_assoc_attr,
+    is_rs_raw_directive, rs_attr_arg,
 };
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
@@ -44,8 +45,8 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                if text.starts_with("#[") || text.starts_with("#![") || is_rs_macro_item(text) {
-                    ec.line(text);
+                if is_rs_raw_directive(text) {
+                    ec.line(text.trim());
                 } else {
                     ec.line(&format!("// {text}"));
                 }
@@ -184,15 +185,15 @@ fn emit_struct_impl(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     emit_rs_all_hash_attrs(ec, &m.trivia, &[]);
-    let asy = if m.is_async { "async " } else { "" };
+    let quals = format_rs_fn_quals(&m.trivia, &[], m.is_async);
     let (gp, wh) = format_rs_generics(&m.type_params, &m.trivia, &[]);
     let ps = emit_rs_params(&m.params);
     let rt = m.return_type.as_ref().map(|t| format!(" -> {}", emit_type(t, LanguageId::Rust))).unwrap_or_default();
     if m.body == FnBody::SignatureOnly {
-        ec.line(&format!("{}{asy}fn {}{gp}({ps}){rt}{wh};", rs_vis(m.vis), m.name));
+        ec.line(&format!("{}{quals}fn {}{gp}({ps}){rt}{wh};", rs_vis(m.vis), m.name));
         return;
     }
-    ec.line(&format!("{}{asy}fn {}{gp}({ps}){rt}{wh} {{", rs_vis(m.vis), m.name));
+    ec.line(&format!("{}{quals}fn {}{gp}({ps}){rt}{wh} {{", rs_vis(m.vis), m.name));
     ec.push();
     emit_rs_body(ec, &m.body, ectx);
     ec.pop();
@@ -203,11 +204,11 @@ fn emit_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
     emit_rs_all_hash_attrs(ec, &f.trivia, &f.decorators);
-    let asy = if f.is_async { "async " } else { "" };
+    let quals = format_rs_fn_quals(&f.trivia, &f.decorators, f.is_async);
     let (gp, wh) = format_rs_generics(&f.type_params, &f.trivia, &f.decorators);
     let ps = emit_rs_params(&f.params);
     let rt = f.return_type.as_ref().map(|t| format!(" -> {}", emit_type(t, LanguageId::Rust))).unwrap_or_default();
-    ec.line(&format!("{}{asy}fn {}{gp}({ps}){rt}{wh} {{", rs_vis(f.vis), f.name));
+    ec.line(&format!("{}{quals}fn {}{gp}({ps}){rt}{wh} {{", rs_vis(f.vis), f.name));
     ec.push();
     emit_rs_body(ec, &f.body, ectx);
     ec.pop();
@@ -232,13 +233,6 @@ fn emit_rs_params(params: &[ParamDecl]) -> String {
             format!("{mt}{}: {t}", p.name)
         }
     }).collect::<Vec<_>>().join(", ")
-}
-
-fn is_rs_macro_item(text: &str) -> bool {
-    let t = text.trim_start();
-    if t.starts_with("macro_rules!") { return true; }
-    let rest = t.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == ':');
-    rest.len() < t.len() && rest.strip_prefix('!').is_some_and(|r| matches!(r.trim_start().as_bytes().first(), Some(b'(' | b'[' | b'{')))
 }
 
 fn has_trivia_attr(tr: &Trivia, name: &str) -> bool {

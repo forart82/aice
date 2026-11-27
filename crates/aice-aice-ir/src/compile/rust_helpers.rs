@@ -118,3 +118,63 @@ pub(crate) fn emit_rs_all_hash_attrs(ec: &mut EmitCtx, tr: &Trivia, decs: &[Stri
 pub(crate) fn format_rs_tuple_field_ty(ty: Option<&AiceType>) -> String {
     ty.map(|x| emit_type(x, LanguageId::Rust)).unwrap_or_else(|| "()".into())
 }
+
+pub(crate) fn has_rs_attr(tr: &Trivia, decs: &[String], name: &str) -> bool {
+    tr.leading.iter().any(|c| {
+        c.kind == TriviaKind::Attribute && c.text.trim().trim_start_matches('@') == name
+    }) || decs.iter().any(|d| d.trim().trim_start_matches('@') == name)
+}
+
+pub(crate) fn format_rs_fn_quals(tr: &Trivia, decs: &[String], is_async: bool) -> String {
+    let mut s = String::new();
+    if has_rs_attr(tr, decs, "const") { s.push_str("const "); }
+    if is_async { s.push_str("async "); }
+    if has_rs_attr(tr, decs, "unsafe") { s.push_str("unsafe "); }
+    if let Some(abi) = rs_attr_arg(tr, decs, "extern") {
+        if abi.is_empty() { s.push_str("extern "); }
+        else { s.push_str(&format!("extern \"{abi}\" ")); }
+    } else if has_rs_attr(tr, decs, "extern") {
+        s.push_str("extern ");
+    }
+    s
+}
+
+fn starts_with_rs_kw(s: &str, kw: &str) -> bool {
+    s.strip_prefix(kw).is_some_and(|r| {
+        r.is_empty() || !matches!(r.as_bytes()[0], b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_')
+    })
+}
+
+fn is_rs_macro_item(text: &str) -> bool {
+    let t = text.trim_start();
+    if t.starts_with("macro_rules!") { return true; }
+    let rest = t.trim_start_matches(|c: char| c.is_ascii_alphanumeric() || c == '_' || c == ':');
+    rest.len() < t.len() && rest.strip_prefix('!').is_some_and(|r| matches!(r.trim_start().as_bytes().first(), Some(b'(' | b'[' | b'{')))
+}
+
+pub(crate) fn is_rs_raw_directive(text: &str) -> bool {
+    let t = text.trim_start();
+    if t.starts_with("#[") || t.starts_with("#![") || is_rs_macro_item(t) {
+        return true;
+    }
+    let mut rest = t;
+    if let Some(after_pub) = rest.strip_prefix("pub") {
+        if let Some(after_ws) = after_pub.strip_prefix(char::is_whitespace) {
+            rest = after_ws.trim_start();
+        } else if let Some(after_lp) = after_pub.strip_prefix('(')
+            && let Some(rp) = after_lp.find(')')
+        {
+            rest = after_lp[rp + 1..].trim_start();
+        }
+    }
+    if let Some(after_unsafe) = rest.strip_prefix("unsafe")
+        && after_unsafe.starts_with(char::is_whitespace)
+    {
+        rest = after_unsafe.trim_start();
+    }
+    starts_with_rs_kw(rest, "mod")
+        || starts_with_rs_kw(rest, "extern")
+        || starts_with_rs_kw(rest, "union")
+        || starts_with_rs_kw(rest, "macro")
+        || is_rs_macro_item(rest)
+}

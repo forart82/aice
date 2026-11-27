@@ -12,7 +12,7 @@ use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::push_attrs_to_trivia;
 use crate::ir::{AiceItem, AiceModule, ImportDecl, TranspileError, TranspileOpts, Trivia, Visibility};
 use crate::ir_code::{FnBody, FnDecl};
-use crate::ir_types::{EnumDecl, EnumVariant, FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind, VariantPayload};
+use crate::ir_types::{EnumDecl, EnumVariant, FieldDecl, FieldSigil, ParamDecl, TypeDecl, TypeKind, TypeParam, VariantPayload};
 
 pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<AiceModule, TranspileError> {
     with_ts_root(tree, |root| {
@@ -205,4 +205,77 @@ fn decompile_c_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -
 
 pub(crate) fn unwrap_c_declarator(node: Node<'_>, src: &str) -> (String, String) {
     unwrap_c_param_declarator(node, src)
+}
+
+pub(crate) fn extract_cpp_bases(node: Node<'_>, src: &str) -> (Option<String>, Vec<String>) {
+    let Some(clause) = child_by_kind(node, "base_class_clause") else { return (None, Vec::new()); };
+    let mut bases = Vec::new();
+    for ch in named_children(clause) {
+        if matches!(ch.kind(), "access_specifier" | "virtual") || is_comment_kind(ch.kind()) { continue; }
+        let txt = node_text(ch, src).trim();
+        if !txt.is_empty() && !matches!(txt, "public" | "protected" | "private" | "virtual") {
+            bases.push(txt.to_string());
+        }
+    }
+    if bases.is_empty() { (None, Vec::new()) } else { let first = bases.remove(0); (Some(first), bases) }
+}
+
+pub(crate) fn extract_cpp_type_params(node: Node<'_>, src: &str) -> Vec<TypeParam> {
+    let mut out = Vec::new();
+    let Some(pl) = node.child_by_field_name("parameters").or_else(|| child_by_kind(node, "template_parameter_list")) else {
+        return out;
+    };
+    for ch in named_children(pl) {
+        if matches!(ch.kind(), "type_parameter_declaration" | "parameter_declaration") {
+            let nm = field_text(ch, "name", src)
+                .or_else(|| named_children(ch).into_iter().last().map(|n| node_text(n, src)))
+                .unwrap_or("T").trim().to_string();
+            out.push(TypeParam { name: nm, bounds: Vec::new(), default: None });
+        }
+    }
+    out
+}
+
+pub(crate) fn extract_cpp_fn_quals(node: Node<'_>, src: &str) -> Vec<String> {
+    let decl_start = node.child_by_field_name("declarator").map(|n| n.start_byte()).unwrap_or(node.end_byte());
+    let mut quals = Vec::new();
+    let mut cur = node.walk();
+    for c in node.children(&mut cur) {
+        if c.start_byte() >= decl_start { break; }
+        for tok in node_text(c, src).split_whitespace() {
+            if matches!(tok, "inline" | "constexpr" | "consteval") && !quals.iter().any(|q| q == tok) {
+                quals.push(tok.to_string());
+            }
+        }
+    }
+    quals
+}
+
+pub(crate) fn normalize_cpp_op_name(raw_name: &str) -> Option<(String, String)> {
+    let clean = raw_name.trim().lines().map(str::trim).filter(|l| !l.is_empty()).collect::<Vec<_>>().join(" ");
+    let (prefix, tail) = match clean.rfind("::") {
+        Some(idx) => (&clean[..idx], clean[idx + 2..].trim()),
+        None => ("", clean.as_str()),
+    };
+    let rest = tail.strip_prefix("operator")?;
+    if rest.is_empty() || rest.as_bytes()[0].is_ascii_alphanumeric() || rest.as_bytes()[0] == b'_' {
+        return None;
+    }
+    let sym = rest.trim();
+    let slug = match sym {
+        "+" => "add", "-" => "sub", "*" => "mul", "/" => "div", "%" => "rem",
+        "==" => "eq", "!=" => "ne", "<" => "lt", "<=" => "le", ">" => "gt", ">=" => "ge", "<=>" => "cmp",
+        "[]" => "index", "()" => "call", "<<" => "shl", ">>" => "shr",
+        "+=" => "add_assign", "-=" => "sub_assign", "*=" => "mul_assign", "/=" => "div_assign", "%=" => "rem_assign",
+        "&=" => "bitand_assign", "|=" => "bitor_assign", "^=" => "bitxor_assign", "<<=" => "shl_assign", ">>=" => "shr_assign",
+        "=" => "assign", "++" => "inc", "--" => "dec", "!" => "not", "~" => "bitnot",
+        "&" => "bitand", "|" => "bitor", "^" => "bitxor", "&&" => "and", "||" => "or", "->" => "deref", "->*" => "deref_ptr",
+        "," => "comma",
+        _ => "custom",
+    };
+    let pfx: String = prefix.chars().map(|c| if c.is_ascii_alphanumeric() { c } else { '_' }).collect();
+    let pfx = pfx.trim_matches('_');
+    let safe = if pfx.is_empty() { format!("op_{slug}") } else { format!("{pfx}_op_{slug}") };
+    let esc = clean.replace('\\', "\\\\").replace('"', "\\\"");
+    Some((safe, format!("op(\"{esc}\")")))
 }
