@@ -3,10 +3,10 @@ use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, named_children, node_text};
 use crate::decompile::iter_env::{DTask, DecompEnv};
-use crate::decompile::iter_expr::ExprFin;
+use crate::decompile::iter_expr::{ExprFin, ObjSlot};
 use crate::decompile::trivia::is_comment_kind;
 use crate::ir::TranspileOpts;
-use crate::ir_code::{Expr, UnaryOp};
+use crate::ir_code::{AssignOp, BinaryOp, Expr, UnaryOp};
 
 pub(crate) fn decompile_expr(node: Node<'_>, src: &str, lang: LanguageId) -> Expr {
     let opts = TranspileOpts::default();
@@ -221,5 +221,76 @@ pub(crate) fn push_new_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, r
                 env.tasks.push(DTask::Expr(d));
             }
         }
+    }
+}
+
+pub(crate) fn cs_init_elems<'a>(init_node: Node<'a>) -> Option<Vec<Node<'a>>> {
+    let elems: Vec<Node<'a>> = named_children(init_node)
+        .into_iter()
+        .filter(|c| !is_comment_kind(c.kind()))
+        .collect();
+    if elems.iter().any(|c| c.kind() == "preproc_if") { None } else { Some(elems) }
+}
+
+pub(crate) fn push_cs_special_expr<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
+    match node.kind() {
+        "initializer_expression" => {
+            let Some(elems) = cs_init_elems(node) else { env.exprs.push(Expr::Raw(raw.to_string())); return; };
+            env.tasks.push(DTask::FinishExpr(ExprFin::Object((0..elems.len()).map(|_| ObjSlot::Shorthand).collect())));
+            for el in elems.into_iter().rev() { env.tasks.push(DTask::Expr(el)); }
+        }
+        "element_binding_expression" => {
+            let xs: Vec<_> = named_children(node).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+            env.tasks.push(DTask::FinishExpr(ExprFin::Array(xs.len())));
+            for c in xs.into_iter().rev() { env.tasks.push(DTask::Expr(c)); }
+        }
+        "with_expression" => {
+            let kids: Vec<_> = named_children(node).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+            let Some(&recv) = kids.first() else { env.exprs.push(Expr::Raw(raw.to_string())); return; };
+            let mut pairs = Vec::new();
+            for &wi in &kids[1..] {
+                if wi.kind() != "with_initializer" { env.exprs.push(Expr::Raw(raw.to_string())); return; }
+                let wk: Vec<_> = named_children(wi).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+                if wk.len() < 2 { env.exprs.push(Expr::Raw(raw.to_string())); return; }
+                pairs.push((wk[0], wk[1]));
+            }
+            env.tasks.push(DTask::FinishExpr(ExprFin::Binary(BinaryOp::With)));
+            env.tasks.push(DTask::FinishExpr(ExprFin::Object((0..pairs.len()).map(|_| ObjSlot::Shorthand).collect())));
+            for (k, v) in pairs.into_iter().rev() {
+                env.tasks.push(DTask::FinishExpr(ExprFin::Assign(AssignOp::Assign)));
+                env.tasks.push(DTask::Expr(v));
+                env.tasks.push(DTask::Expr(k));
+            }
+            env.tasks.push(DTask::Expr(recv));
+        }
+        "anonymous_object_creation_expression" => {
+            let mut entries: Vec<(Option<Node<'a>>, Node<'a>)> = Vec::new();
+            let mut cur = node.walk();
+            let raw_kids: Vec<Node<'a>> = node.children(&mut cur).collect();
+            let mut i = 0;
+            while i < raw_kids.len() {
+                let ch = raw_kids[i];
+                if !ch.is_named() || is_comment_kind(ch.kind()) { i += 1; continue; }
+                let mut j = i + 1;
+                while j < raw_kids.len() && is_comment_kind(raw_kids[j].kind()) { j += 1; }
+                if j < raw_kids.len() && !raw_kids[j].is_named() && raw_kids[j].kind() == "=" {
+                    let mut k = j + 1;
+                    while k < raw_kids.len() && (!raw_kids[k].is_named() || is_comment_kind(raw_kids[k].kind())) { k += 1; }
+                    if k < raw_kids.len() { entries.push((Some(ch), raw_kids[k])); i = k + 1; continue; }
+                }
+                entries.push((None, ch));
+                i += 1;
+            }
+            env.tasks.push(DTask::FinishExpr(ExprFin::NewObjInit { callee_name: String::new(), argc: 0, has_parens: false }));
+            env.tasks.push(DTask::FinishExpr(ExprFin::Object((0..entries.len()).map(|_| ObjSlot::Shorthand).collect())));
+            for (k, v) in entries.into_iter().rev() {
+                if let Some(kn) = k {
+                    env.tasks.push(DTask::FinishExpr(ExprFin::Assign(AssignOp::Assign)));
+                    env.tasks.push(DTask::Expr(v));
+                    env.tasks.push(DTask::Expr(kn));
+                } else { env.tasks.push(DTask::Expr(v)); }
+            }
+        }
+        _ => env.exprs.push(Expr::Ident(raw.to_string())),
     }
 }

@@ -8,6 +8,7 @@ impl<'a> CloneEnv<'a> {
         match e {
             Expr::Literal(l) => self.exprs.push(Expr::Literal(l.clone())),
             Expr::Ident(s) => self.exprs.push(Expr::Ident(s.clone())),
+            Expr::Raw(s) => self.exprs.push(Expr::Raw(s.clone())),
             Expr::Template { quasis, exprs } => {
                 self.tasks.push(CloneTask::FinishExpr(ExprFinish::Template(quasis.clone())));
                 for ex in exprs.iter().rev() { self.tasks.push(CloneTask::Expr(ex)); }

@@ -84,7 +84,7 @@ pub(crate) fn bin_op_native(op: BinaryOp) -> &'static str {
         BinaryOp::Shl => "<<", BinaryOp::Shr => ">>", BinaryOp::Ushr => ">>>",
         BinaryOp::In => "in", BinaryOp::NotIn => "not in",
         BinaryOp::Is => "is", BinaryOp::IsNot => "is not",
-        BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as",
+        BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as", BinaryOp::With => "with",
     }
 }
 

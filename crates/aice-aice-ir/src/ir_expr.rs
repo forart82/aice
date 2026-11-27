@@ -50,6 +50,7 @@ pub enum Expr {
         exprs: Vec<Expr>,
     },
     Ident(String),
+    Raw(String),
     Binary {
         op: BinaryOp,
         left: Box<Expr>,
@@ -148,6 +149,7 @@ pub enum BinaryOp {
     IsNot,
     Instanceof,
     As,
+    With,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -3,7 +3,8 @@ use crate::ir_types::AiceType;
 use crate::printer::assign_op_str;
 use crate::printer_domain::format_ident_or_quoted;
 use crate::printer_expr::{
-    bin_op_str, escape_template, needs_binary_parens, print_lit, unary_op_str,
+    bin_op_str, escape_template, format_raw_expr, needs_binary_parens, print_lit,
+    push_new_tagged_print, unary_op_str,
 };
 use crate::printer_stmt_inline::push_inline_stmt;
 use crate::printer_types::{push_pattern, push_type};
@@ -50,6 +51,7 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
     match expr {
         Expr::Literal(l) => out.push_str(&print_lit(l)),
         Expr::Ident(s) => out.push_str(s),
+        Expr::Raw(s) => out.push_str(&format_raw_expr(s)),
         Expr::Template { quasis, exprs } => {
             out.push('`');
             tasks.push(PTask::Lit("`"));
@@ -109,20 +111,7 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
         }
         Expr::Call { callee, args, is_optional, is_tagged, is_new } => {
             if *is_new && *is_tagged {
-                if let Some(Expr::Array(elems)) = args.first() {
-                    if elems.is_empty() {
-                        tasks.push(PTask::Lit(" {}"));
-                    } else {
-                        tasks.push(PTask::Lit(" }"));
-                        for (i, el) in elems.iter().enumerate().rev() {
-                            tasks.push(PTask::Expr(el));
-                            if i > 0 { tasks.push(PTask::Lit(", ")); }
-                        }
-                        tasks.push(PTask::Lit(" { "));
-                    }
-                }
-                tasks.push(PTask::Expr(callee));
-                out.push_str(if is_implicit_new_array(callee) { "new" } else { "new " });
+                push_new_tagged_print(tasks, out, callee, args, *is_optional);
                 return;
             }
             if *is_tagged && args.len() == 1 {
@@ -229,13 +218,6 @@ fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
             out.push_str("match ");
         }
     }
-}
-
-fn is_implicit_new_array(mut e: &Expr) -> bool {
-    while let Expr::Index { object, .. } = e {
-        e = object;
-    }
-    matches!(e, Expr::Ident(s) if s.is_empty())
 }
 
 fn push_closure_print<'a>(

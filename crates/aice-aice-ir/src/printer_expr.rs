@@ -46,6 +46,14 @@ pub(crate) fn escape_template(s: &str) -> String {
     s.replace('\\', "\\\\").replace('`', "\\`").replace("${", "\\${")
 }
 
+pub(crate) fn format_raw_expr(s: &str) -> String {
+    if s.contains('\n') && !s.contains("\"\"\"") {
+        format!("raw \"\"\"\n{s}\n\"\"\"")
+    } else {
+        format!("raw \"{}\"", escape_str(s))
+    }
+}
+
 fn bin_prec(op: BinaryOp) -> u8 {
     match op {
         BinaryOp::Or => 3, BinaryOp::And => 4, BinaryOp::Coalesce | BinaryOp::Elvis => 5,
@@ -57,7 +65,7 @@ fn bin_prec(op: BinaryOp) -> u8 {
         BinaryOp::Add | BinaryOp::Concat | BinaryOp::Sub => 12,
         BinaryOp::Mul | BinaryOp::Div | BinaryOp::FloorDiv | BinaryOp::Mod | BinaryOp::BitClear => 13,
         BinaryOp::Pow => 14,
-        BinaryOp::As => 15,
+        BinaryOp::As | BinaryOp::With => 15,
     }
 }
 
@@ -98,7 +106,7 @@ pub(crate) fn bin_op_str(op: BinaryOp) -> &'static str {
         BinaryOp::Shl => "<<", BinaryOp::Shr => ">>", BinaryOp::Ushr => ">>>",
         BinaryOp::In => "in", BinaryOp::NotIn => "not in",
         BinaryOp::Is => "is", BinaryOp::IsNot => "is not",
-        BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as",
+        BinaryOp::Instanceof => "instanceof", BinaryOp::As => "as", BinaryOp::With => "with",
     }
 }
 
@@ -112,4 +120,49 @@ pub(crate) fn unary_op_str(op: UnaryOp) -> &'static str {
         UnaryOp::Delete => "delete ", UnaryOp::Yield => "yield ",
         UnaryOp::YieldStar => "yield* ", UnaryOp::Generator => "",
     }
+}
+
+pub(crate) fn push_new_tagged_print<'a>(
+    tasks: &mut Vec<PTask<'a>>,
+    out: &mut String,
+    callee: &'a Expr,
+    args: &'a [Expr],
+    is_optional: bool,
+) {
+    if let Some(init_rec @ Expr::Record(_)) = args.last() {
+        let ctor_args = &args[..args.len() - 1];
+        tasks.push(PTask::Expr(init_rec));
+        tasks.push(PTask::Lit(" "));
+        if is_optional || !ctor_args.is_empty() {
+            tasks.push(PTask::Lit(")"));
+            for (i, a) in ctor_args.iter().enumerate().rev() {
+                tasks.push(PTask::Expr(a));
+                if i > 0 { tasks.push(PTask::Lit(", ")); }
+            }
+            tasks.push(PTask::Lit("("));
+        }
+        if matches!(callee, Expr::Ident(s) if s.is_empty()) {
+            out.push_str("new");
+        } else {
+            tasks.push(PTask::Expr(callee));
+            out.push_str("new ");
+        }
+        return;
+    }
+    if let Some(Expr::Array(elems)) = args.first() {
+        if elems.is_empty() {
+            tasks.push(PTask::Lit(" {}"));
+        } else {
+            tasks.push(PTask::Lit(" }"));
+            for (i, el) in elems.iter().enumerate().rev() {
+                tasks.push(PTask::Expr(el));
+                if i > 0 { tasks.push(PTask::Lit(", ")); }
+            }
+            tasks.push(PTask::Lit(" { "));
+        }
+    }
+    tasks.push(PTask::Expr(callee));
+    let mut e = callee;
+    while let Expr::Index { object, .. } = e { e = object; }
+    out.push_str(if matches!(e, Expr::Ident(s) if s.is_empty()) { "new" } else { "new " });
 }

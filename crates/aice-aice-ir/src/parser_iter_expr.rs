@@ -7,9 +7,10 @@ use crate::parser_expr::{
     lit_expr_from_tok, looks_like_gen_closure, looks_like_ternary, step_member_infix,
     try_contextual_infix, try_contextual_unary,
 };
-use crate::parser_iter::{ParseCont, ParseVal, parse_new_prefix};
+use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_lit::{looks_like_closure_after_fn, start_record_entry, step_closure_params, step_lit_cont};
 use crate::parser_iter_match::start_match;
+use crate::parser_new::{parse_new_prefix, try_attach_new_init};
 
 pub(crate) fn pop_expr(vals: &mut Vec<ParseVal>) -> Expr {
     match vals.pop().expect("expected Expr") {
@@ -47,6 +48,7 @@ pub(crate) fn step_expr_cont(
                 stack.push(ParseCont::Expr(next_prec));
                 return Ok(());
             }
+            if min_prec <= 17 && try_attach_new_init(p, min_prec, stack, vals) { return Ok(()); }
             let Some((prec, right_assoc)) = infix_prec(p.peek_kind()) else { return Ok(()); };
             if prec < min_prec { return Ok(()); }
             let lhs = pop_expr(vals);
@@ -62,13 +64,8 @@ pub(crate) fn step_expr_cont(
             let inner = Expr::Unary { op: inner_op, is_postfix: false, operand: Box::new(operand) };
             vals.push(ParseVal::Expr(Expr::Unary { op: UnaryOp::Ref, is_postfix: false, operand: Box::new(inner) }));
         }
-        ParseCont::ExprAwait => {
-            let e = pop_expr(vals);
-            vals.push(ParseVal::Expr(Expr::Await(Box::new(e))));
-        }
-        ParseCont::ExprParenClose => {
-            p.expect(TokenKind::RParen, "Expected ')'")?;
-        }
+        ParseCont::ExprAwait => { let e = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Await(Box::new(e)))); }
+        ParseCont::ExprParenClose => { p.expect(TokenKind::RParen, "Expected ')'")?; }
         ParseCont::ExprCallArg { callee, mut args, is_optional, is_new } => {
             args.push(pop_expr(vals));
             if p.eat(TokenKind::Comma) && p.peek_kind() != TokenKind::RParen && !p.at_eof() {
@@ -111,12 +108,10 @@ pub(crate) fn step_expr_cont(
             }));
         }
         ParseCont::ExprAssign { target, op } => {
-            let value = pop_expr(vals);
-            vals.push(ParseVal::Expr(Expr::Assign { target: Box::new(target), op, value: Box::new(value) }));
+            let v = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Assign { target: Box::new(target), op, value: Box::new(v) }));
         }
         ParseCont::ExprBinary { left, op } => {
-            let right = pop_expr(vals);
-            vals.push(ParseVal::Expr(Expr::Binary { op, left: Box::new(left), right: Box::new(right) }));
+            let r = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Binary { op, left: Box::new(left), right: Box::new(r) }));
         }
         ParseCont::ExprMatchWrap => {
             let sp = p.peek().span;
@@ -209,6 +204,9 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             vals.push(ParseVal::Expr(Expr::Ident(format!(":{}", p.advance().lexeme))));
         }
         _ if is_new_prefix_start(p, &tok) => parse_new_prefix(p, stack, vals)?,
+        TokenKind::Ident if tok.lexeme == "raw" && matches!(p.peek_n(1).kind, TokenKind::String | TokenKind::TripleString) => {
+            p.advance(); vals.push(ParseVal::Expr(Expr::Raw(p.advance().lexeme)));
+        }
         _ if let Some(op) = try_contextual_unary(p, &tok) => {
             p.advance();
             if op == UnaryOp::YieldStar { p.advance(); }
@@ -271,8 +269,7 @@ fn step_infix(
         }
         TokenKind::Question => {
             if is_elvis_ahead(p) {
-                p.advance();
-                p.advance();
+                p.advance(); p.advance();
                 stack.push(ParseCont::ExprBinary { left: lhs, op: BinaryOp::Elvis });
                 stack.push(ParseCont::Expr(6));
             } else {

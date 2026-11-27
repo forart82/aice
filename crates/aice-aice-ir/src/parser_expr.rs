@@ -64,6 +64,7 @@ pub(crate) fn is_new_prefix_start(p: &Parser<'_>, tok: &Token) -> bool {
     tok.kind == TokenKind::Ident
         && tok.lexeme == "new"
         && (p.peek_n(1).kind == TokenKind::Ident
+            || p.peek_n(1).kind == TokenKind::LBrace
             || (p.peek_n(1).kind == TokenKind::LBracket
                 && matches!(p.peek_n(2).kind, TokenKind::RBracket | TokenKind::Comma)))
 }
@@ -162,11 +163,15 @@ pub(crate) fn looks_like_ternary(p: &Parser<'_>) -> bool {
 }
 
 pub(crate) fn try_contextual_infix(p: &mut Parser<'_>, min_prec: u8) -> Option<(BinaryOp, u8)> {
+    let k0 = p.peek_kind();
+    let k1 = p.peek_n(1).kind;
+    if min_prec <= 15 && k0 == TokenKind::Ident && p.peek().lexeme == "with" && k1 == TokenKind::LBrace {
+        p.advance();
+        return Some((BinaryOp::With, 16));
+    }
     if min_prec > 10 {
         return None;
     }
-    let k0 = p.peek_kind();
-    let k1 = p.peek_n(1).kind;
     if k0 == TokenKind::Ident && p.peek().lexeme == "is" {
         if k1 == TokenKind::Not && can_start_expr_tok(p.peek_n(2).kind) {
             p.advance();

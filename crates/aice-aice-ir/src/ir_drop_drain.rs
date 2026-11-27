@@ -26,7 +26,7 @@ pub(crate) const fn is_leaf_stmt(s: &Stmt) -> bool {
 }
 
 pub(crate) const fn is_leaf_expr(e: &Expr) -> bool {
-    matches!(e, Expr::Literal(_) | Expr::Ident(_))
+    matches!(e, Expr::Literal(_) | Expr::Ident(_) | Expr::Raw(_))
 }
 
 pub(crate) const fn is_leaf_pat(p: &Pattern) -> bool {
@@ -127,7 +127,7 @@ pub(crate) fn drain_stmt(s: &mut Stmt, work: &mut Vec<DropWork>) {
 
 pub(crate) fn drain_expr(e: &mut Expr, work: &mut Vec<DropWork>) {
     match e {
-        Expr::Literal(_) | Expr::Ident(_) => {}
+        Expr::Literal(_) | Expr::Ident(_) | Expr::Raw(_) => {}
         Expr::Template { exprs, .. } | Expr::Array(exprs) => {
             work.extend(std::mem::take(exprs).into_iter().map(DropWork::Expr));
         }

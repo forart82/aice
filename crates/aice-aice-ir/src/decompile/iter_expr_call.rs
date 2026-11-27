@@ -2,7 +2,7 @@ use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
-use crate::decompile::expr_common::push_template_task;
+use crate::decompile::expr_common::{cs_init_elems, push_template_task};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::{ExprFin, ObjSlot};
 use crate::decompile::trivia::is_comment_kind;
@@ -16,6 +16,14 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
             .or_else(|| child_by_kind(node, "argument_list"))
             .map(named_children)
             .unwrap_or_default();
+        if let Some(init) = node.child_by_field_name("initializer").or_else(|| child_by_kind(node, "initializer_expression")) {
+            let Some(elems) = cs_init_elems(init) else { env.exprs.push(Expr::Raw(raw.to_string())); return; };
+            env.tasks.push(DTask::FinishExpr(ExprFin::NewObjInit { callee_name: String::new(), argc: arg_nodes.len(), has_parens: true }));
+            env.tasks.push(DTask::FinishExpr(ExprFin::Object((0..elems.len()).map(|_| ObjSlot::Shorthand).collect())));
+            for el in elems.into_iter().rev() { env.tasks.push(DTask::Expr(el)); }
+            for a in arg_nodes.into_iter().rev() { env.tasks.push(DTask::Expr(a)); }
+            return;
+        }
         env.tasks.push(DTask::FinishExpr(ExprFin::Call {
             has_callee_expr: false, callee_name: "new".into(), recv_prop: None, recv_safe: false,
             argc: arg_nodes.len(), has_ruby_blk: false, is_optional: false, is_new: false,
@@ -24,12 +32,32 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
         return;
     }
     if matches!(node.kind(), "new_expression" | "object_creation_expression") {
+        if node.kind() == "object_creation_expression"
+            && ((env.lang == LanguageId::Java && child_by_kind(node, "class_body").is_some())
+                || (env.lang == LanguageId::Php && child_by_kind(node, "anonymous_class").is_some()))
+        {
+            env.exprs.push(Expr::Raw(raw.to_string()));
+            return;
+        }
         let ctor_node = node.child_by_field_name("constructor").or_else(|| node.child_by_field_name("type"));
-        let arg_nodes = node.child_by_field_name("arguments")
+        let args_list = node.child_by_field_name("arguments")
             .or_else(|| child_by_kind(node, "arguments"))
-            .or_else(|| child_by_kind(node, "argument_list"))
-            .map(named_children)
-            .unwrap_or_default();
+            .or_else(|| child_by_kind(node, "argument_list"));
+        let arg_nodes = args_list.map(named_children).unwrap_or_default();
+        if env.lang == LanguageId::CSharp
+            && node.kind() == "object_creation_expression"
+            && let Some(init) = node.child_by_field_name("initializer").or_else(|| child_by_kind(node, "initializer_expression"))
+        {
+            let Some(elems) = cs_init_elems(init) else { env.exprs.push(Expr::Raw(raw.to_string())); return; };
+            let cls = ctor_node.map(|c| node_text(c, env.src))
+                .or_else(|| named_children(node).first().map(|c| node_text(*c, env.src)))
+                .unwrap_or("Object").trim().to_string();
+            env.tasks.push(DTask::FinishExpr(ExprFin::NewObjInit { callee_name: cls, argc: arg_nodes.len(), has_parens: args_list.is_some() }));
+            env.tasks.push(DTask::FinishExpr(ExprFin::Object((0..elems.len()).map(|_| ObjSlot::Shorthand).collect())));
+            for el in elems.into_iter().rev() { env.tasks.push(DTask::Expr(el)); }
+            for a in arg_nodes.into_iter().rev() { env.tasks.push(DTask::Expr(a)); }
+            return;
+        }
         if node.kind() == "new_expression"
             && let Some(cn) = ctor_node
             && matches!(cn.kind(), "identifier" | "member_expression" | "subscript_expression" | "call_expression")

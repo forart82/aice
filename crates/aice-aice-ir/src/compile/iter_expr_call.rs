@@ -14,6 +14,17 @@ pub(crate) fn push_eval_call<'a>(
 ) {
     let (is_optional, is_tagged, is_new) = flags;
     if is_new && is_tagged {
+        if let Some(init_rec @ Expr::Record(_)) = args.last() {
+            let ctor_args = &args[..args.len() - 1];
+            let tag = if is_optional || !ctor_args.is_empty() { "\0new_obj_parens" } else { "\0new_obj" };
+            tasks.push(CTask::MakeCall {
+                callee_lit: Some(tag.into()), class_new: None, n_args: args.len(), is_optional: false, is_new: true,
+            });
+            tasks.push(CTask::EvalExpr(init_rec));
+            for a in ctor_args.iter().rev() { tasks.push(CTask::EvalExpr(a)); }
+            tasks.push(CTask::EvalExpr(callee));
+            return;
+        }
         let init_elems = match args.first() {
             Some(Expr::Array(xs)) => Some(xs.as_slice()),
             _ => None,
@@ -128,6 +139,22 @@ pub(crate) fn finish_make_call(
     lang: LanguageId,
     st: &mut EvalState,
 ) {
+    if matches!(callee_lit.as_deref(), Some("\0new_obj" | "\0new_obj_parens")) {
+        let start = st.vals.len() - n_args;
+        let mut ps: Vec<String> = st.vals.drain(start..).collect();
+        let init_s = ps.pop().unwrap_or_else(|| "{}".into());
+        let cs = st.vals.pop().unwrap();
+        let has_parens = callee_lit.as_deref() == Some("\0new_obj_parens");
+        let out = if cs.is_empty() {
+            if has_parens { format!("new({}) {init_s}", ps.join(", ")) } else { format!("new {init_s}") }
+        } else if has_parens {
+            format!("new {cs}({}) {init_s}", ps.join(", "))
+        } else {
+            format!("new {cs} {init_s}")
+        };
+        st.vals.push(out);
+        return;
+    }
     if matches!(callee_lit.as_deref(), Some("\0new_arr" | "\0new_arr_init")) {
         let start = st.vals.len() - n_args;
         let ps: Vec<String> = st.vals.drain(start..).collect();

@@ -175,6 +175,12 @@ pub(crate) fn finish_expr_task(env: &mut DecompEnv<'_>, f: ExprFin) {
             let callee = Box::new(env.exprs.pop().expect("narr callee"));
             Expr::Call { callee, args, is_optional: false, is_tagged: true, is_new: true }
         }
+        ExprFin::NewObjInit { callee_name, argc, has_parens } => {
+            let init = env.exprs.pop().expect("obj init");
+            let mut args = env.exprs.split_off(env.exprs.len() - argc);
+            args.push(init);
+            Expr::Call { callee: Box::new(Expr::Ident(callee_name)), args, is_optional: has_parens, is_tagged: true, is_new: true }
+        }
         ExprFin::Template { quasis } => {
             let n = quasis.len().saturating_sub(1);
             let exprs = env.exprs.split_off(env.exprs.len() - n);

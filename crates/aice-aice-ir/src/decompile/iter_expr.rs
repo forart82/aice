@@ -3,7 +3,8 @@ use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_text, strip_quotes};
 use crate::decompile::expr_common::{
-    push_c_cast_task, push_index_task, push_new_array_task, push_template_task, push_yield_task,
+    push_c_cast_task, push_cs_special_expr, push_index_task, push_new_array_task,
+    push_template_task, push_yield_task,
 };
 use crate::decompile::expr_lit::decompile_string_lit;
 use crate::decompile::iter_env::{DTask, DecompEnv};
@@ -29,6 +30,7 @@ pub(crate) enum ExprFin {
     Index { is_optional: bool, argc: usize },
     EmptyIndex(String),
     NewArray { has_init: bool },
+    NewObjInit { callee_name: String, argc: usize, has_parens: bool },
     Call { has_callee_expr: bool, callee_name: String, recv_prop: Option<String>, recv_safe: bool, argc: usize, has_ruby_blk: bool, is_optional: bool, is_new: bool },
     Template { quasis: Vec<String> },
     TaggedTemplate,
@@ -258,11 +260,10 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         }
         "object" | "dictionary" | "hash" | "set_or_map_literal" => push_object_task(env, node, raw),
         "array_creation_expression" if env.lang == LanguageId::Php => push_php_array_task(env, node),
-        "array_creation_expression" | "implicit_array_creation_expression"
-            if matches!(env.lang, LanguageId::CSharp | LanguageId::Java) =>
-        {
-            push_new_array_task(env, node, raw);
-        }
+        "array_creation_expression" | "implicit_array_creation_expression" if matches!(env.lang, LanguageId::CSharp | LanguageId::Java) => push_new_array_task(env, node, raw),
+        "initializer_expression" | "element_binding_expression" | "with_expression" | "anonymous_object_creation_expression" if env.lang == LanguageId::CSharp => push_cs_special_expr(env, node, raw),
+        "object_literal" if env.lang == LanguageId::Kotlin => env.exprs.push(Expr::Raw(raw.to_string())),
+        "anonymous_class" if env.lang == LanguageId::Php => env.exprs.push(Expr::Raw(raw.to_string())),
         "array" | "array_expression" | "list" | "array_literal" | "list_literal" => {
             let xs: Vec<_> = named_children(node).into_iter()
                 .filter(|c| !matches!(c.kind(), "type_arguments" | "type_argument_list")).collect();

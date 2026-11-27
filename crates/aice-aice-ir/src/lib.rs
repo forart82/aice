@@ -42,6 +42,7 @@ mod parser_iter_lit;
 mod parser_iter_match;
 mod parser_iter_pat;
 mod parser_iter_stmt;
+mod parser_new;
 pub mod parser_stmt;
 pub mod parser_types;
 pub mod printer;

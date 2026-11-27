@@ -200,6 +200,7 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
     match e {
         Expr::Literal(l) => st.vals.push(emit_lit(l, lang)),
         Expr::Ident(s) => st.vals.push(emit_ident(s, lang)),
+        Expr::Raw(s) => st.vals.push(s.clone()),
         Expr::Template { quasis, exprs } => {
             tasks.push(CTask::MakeTemplate { quasis, n_exprs: exprs.len() });
             for ex in exprs.iter().rev() { tasks.push(CTask::EvalExpr(ex)); }
@@ -230,7 +231,9 @@ fn push_eval_expr<'a>(e: &'a Expr, lang: LanguageId, ectx: &ExprEmitCtx, st: &mu
         Expr::Call { callee, args, is_optional, is_tagged, is_new } => push_eval_call(callee, args, (*is_optional, *is_tagged, *is_new), lang, ectx, tasks),
         Expr::Member { object, property, kind } => {
             tasks.push(CTask::MakeMember { property, kind: *kind });
-            if matches!(object.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. }) {
+            if matches!(object.as_ref(), Expr::Binary { .. } | Expr::Conditional { .. } | Expr::Assign { .. })
+                || (lang == LanguageId::Php && matches!(object.as_ref(), Expr::Raw(s) if s.starts_with("new ")))
+            {
                 tasks.push(CTask::WrapParen);
             }
             tasks.push(CTask::EvalExpr(object));
