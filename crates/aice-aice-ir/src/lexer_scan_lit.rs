@@ -64,6 +64,18 @@ impl<'a> Scanner<'a> {
         self.out.push(RawTok { kind: RawKind::Tok(kind, lexeme), span: sp });
     }
 
+    pub fn try_scan_escaped_nil(&mut self, start: usize) -> bool {
+        let Some(rest) = self.src.get(start..).and_then(|r| r.strip_prefix("\\#nil")) else {
+            return false;
+        };
+        if rest.chars().next().is_some_and(|c| c.is_alphanumeric() || c == '_') {
+            return false;
+        }
+        self.i = start + 5;
+        self.push_tok(TokenKind::Ident, "nil".to_string(), start, self.i);
+        true
+    }
+
     pub fn scan_hash(&mut self, start: usize) -> Result<(), TranspileError> {
         let mut k = self.i + 1;
         while k < self.b.len() && self.b[k].is_ascii_hexdigit() {

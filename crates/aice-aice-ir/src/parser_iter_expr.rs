@@ -260,7 +260,7 @@ fn step_infix(
             if !matches!(lhs, Expr::Ident(_) | Expr::Member { kind: MemberKind::Scope, .. }) {
                 return Err(TranspileError::at("Invalid macro invocation target", tok.span));
             }
-            vals.push(ParseVal::Expr(Expr::Ident(format!("{}{}", crate::printer_expr::print_expr(&lhs), tok.lexeme))));
+            vals.push(ParseVal::Expr(Expr::Ident(format!("{}{}", crate::printer_expr::print_expr(&lhs).replace("\\#nil", "nil"), tok.lexeme))));
         }
         TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon | TokenKind::Turbofish => {
             step_member_infix(p, lhs, kind, stack, vals)?;

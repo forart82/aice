@@ -170,6 +170,7 @@ fn scan_token(s: &mut Scanner<'_>) -> Result<(), TranspileError> {
         b'0'..=b'9' => scan_number(s, start),
         b'a'..=b'z' | b'A'..=b'Z' | b'_' => scan_ident(s, start),
         b'\\' if s.peek(1).is_some_and(|c| c.is_ascii_alphabetic() || c == b'_') => scan_ident(s, start),
+        b'\\' if s.try_scan_escaped_nil(start) => Ok(()),
         _ if !ch.is_ascii() => {
             let u = s.src[start..].chars().next().unwrap_or('\0');
             if u.is_alphabetic() || u == '_' {

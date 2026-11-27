@@ -50,7 +50,7 @@ pub(crate) fn run_print_tasks<'a>(init: PTask<'a>) -> String {
 fn push_expr<'a>(tasks: &mut Vec<PTask<'a>>, expr: &'a Expr, out: &mut String) {
     match expr {
         Expr::Literal(l) => out.push_str(&print_lit(l)),
-        Expr::Ident(s) => out.push_str(s),
+        Expr::Ident(s) => out.push_str(if s == "nil" { "\\#nil" } else { s }),
         Expr::Raw(s) => out.push_str(&format_raw_expr(s)),
         Expr::Template { quasis, exprs } => {
             out.push('`');

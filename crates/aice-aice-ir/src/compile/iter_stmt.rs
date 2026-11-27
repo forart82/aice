@@ -36,23 +36,30 @@ pub(crate) fn step_stmt_task<'a>(
                     let t = if lang != LanguageId::JavaScript { ty.map(|x| format!(": {}", emit_type(x, lang))).unwrap_or_default() } else { String::new() };
                     format!("{kw} {name}{t} = {rhs}{semi}")
                 }
-                LanguageId::Rust => format!("{} {name}{} = {rhs};", if is_mut { "let mut" } else { "let" }, ty.map(|x| format!(": {}", emit_type(x, lang))).unwrap_or_default()),
+                LanguageId::Rust => format!(
+                    "{} {name}{} = {rhs};",
+                    if is_mut && !name.starts_with(['(', '[', '{']) { "let mut" } else { "let" },
+                    ty.map(|x| format!(": {}", emit_type(x, lang))).unwrap_or_default()
+                ),
                 LanguageId::Go => format!("{name} := {rhs}"),
                 LanguageId::Kotlin => format!("{} {name}{} = {rhs}", if is_mut { "var" } else { "val" }, ty.map(|x| format!(": {}", emit_type(x, lang))).unwrap_or_default()),
                 LanguageId::Php => format!("{} = {rhs};", if name.starts_with('$') { name.to_string() } else { format!("${name}") }),
+                LanguageId::Cpp => format!("{} {name} = {rhs};", ty.map(|x| emit_type(x, lang)).unwrap_or_else(|| "auto".into())),
                 _ => format!("{} {name} = {rhs};", ty.map(|x| emit_type(x, lang)).unwrap_or_else(|| "var".into())),
             };
             ec.line(&line);
         }
         CTask::BraceDestructure { names, is_mut } => {
             let rhs = st.vals.pop().unwrap();
-            if lang == LanguageId::Kotlin {
-                let kw = if is_mut { "var" } else { "val" };
-                ec.line(&format!("{kw} ({}) = {rhs}", names.join(", ")));
-            } else {
-                let kw = if is_mut { "let" } else { "const" };
-                ec.line(&format!("{kw} [{}] = {rhs}{semi}", names.join(", ")));
-            }
+            let line = match lang {
+                LanguageId::Kotlin => format!("{} ({}) = {rhs}", if is_mut { "var" } else { "val" }, names.join(", ")),
+                LanguageId::Rust => format!("let [{}] = {rhs};", names.join(", ")),
+                LanguageId::Cpp => format!("auto [{}] = {rhs};", names.join(", ")),
+                LanguageId::CSharp => format!("var ({}) = {rhs};", names.join(", ")),
+                LanguageId::Go => format!("{} := {rhs}", names.join(", ")),
+                _ => format!("{} [{}] = {rhs}{semi}", if is_mut { "let" } else { "const" }, names.join(", ")),
+            };
+            ec.line(&line);
         }
         CTask::BraceAssign(op) => {
             let r = st.vals.pop().unwrap();

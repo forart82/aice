@@ -102,7 +102,7 @@ pub(crate) fn push_pattern<'a>(tasks: &mut Vec<PTask<'a>>, pat: &'a Pattern, out
     match pat {
         Pattern::Wildcard => out.push('_'),
         Pattern::Literal(l) => out.push_str(&print_lit(l)),
-        Pattern::Ident(s) => out.push_str(s),
+        Pattern::Ident(s) => out.push_str(if s == "nil" { "\\#nil" } else { s }),
         Pattern::Constructor { name, args } => {
             out.push_str(name);
             out.push('(');

@@ -221,7 +221,7 @@ pub(crate) fn is_paren_destructure_ahead(p: &Parser<'_>) -> bool {
         }
         idx += 1;
     }
-    matches!(p.tokens.get(idx).map(|t| t.kind), Some(TokenKind::ColonEqual | TokenKind::ColonColonEqual))
+    is_walrus_or_typed_at(p, idx)
 }
 
 pub(crate) fn eat_assign_op(p: &mut Parser<'_>) -> Option<AssignOp> {

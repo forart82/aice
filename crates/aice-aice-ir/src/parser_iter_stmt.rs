@@ -250,15 +250,18 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::LParen if is_paren_destructure_ahead(p) => {
-            p.expect(TokenKind::LParen, "Expected '('")?;
-            let mut names = Vec::new();
-            while p.peek_kind() != TokenKind::RParen && !p.at_eof() {
-                names.push(p.expect_ident_or_kw("Expected binding name")?.lexeme);
-                if !p.eat(TokenKind::Comma) { break; }
+            let start = p.advance().span.start_byte;
+            let mut depth = 1usize;
+            let mut end = start + 1;
+            while !p.at_eof() && depth > 0 {
+                let tok = p.advance();
+                if tok.kind == TokenKind::LParen { depth += 1; }
+                else if tok.kind == TokenKind::RParen { depth -= 1; end = tok.span.end_byte; }
             }
-            p.expect(TokenKind::RParen, "Expected ')'")?;
+            let name = p.src.get(start..end).unwrap_or("()").trim().to_string();
+            let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
             let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
-            stack.push(ParseCont::StmtDestructure { names, is_mut });
+            stack.push(ParseCont::StmtLet { name, is_mut, ty });
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::LBrace if is_obj_destructure_ahead(p) => {
