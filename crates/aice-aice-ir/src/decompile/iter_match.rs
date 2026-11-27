@@ -13,15 +13,15 @@ use crate::ir_code::{BinaryOp, Expr, FnBody, Pattern, UnaryOp};
 use crate::ir_expr::LiteralVal;
 
 pub(crate) fn push_match_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, is_expr: bool) {
+    if let Some(hdr) = crate::decompile::iter_stmt_cf::extract_go_switch_init_hdr(env, node) {
+        env.tasks.push(DTask::StartMatchArms { node, is_expr, hdr_tr: None }); env.exprs.push(hdr); return;
+    }
     let (target_node, is_subjectless) = if node.kind() == "when_expression" {
-        let ws = child_by_kind(node, "when_subject").and_then(|s| named_children(s).into_iter().next());
-        (ws, ws.is_none())
+        let ws = child_by_kind(node, "when_subject").and_then(|s| named_children(s).into_iter().next()); (ws, ws.is_none())
     } else if node.kind() == "case" {
-        let val = node.child_by_field_name("value");
-        (val, val.is_none())
+        let val = node.child_by_field_name("value"); (val, val.is_none())
     } else {
-        let tn = node.child_by_field_name("value").or_else(|| node.child_by_field_name("condition"))
-            .or_else(|| named_children(node).into_iter().next());
+        let tn = node.child_by_field_name("value").or_else(|| node.child_by_field_name("condition")).or_else(|| named_children(node).into_iter().next());
         (tn, false)
     };
     let container = node.child_by_field_name("body").or_else(|| child_by_kind(node, "match_block"))

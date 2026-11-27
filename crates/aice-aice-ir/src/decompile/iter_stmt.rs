@@ -38,6 +38,7 @@ pub(crate) enum StmtFin {
         trivia: Trivia,
         has_thens: Vec<bool>,
         has_else_body: bool,
+        cond_overrides: Vec<Option<Expr>>,
     },
     Try { catch_len: usize, has_else: bool, else_trivia: Trivia, has_finally: bool, finally_trivia: Trivia, trivia: Trivia },
     Catch { param: Option<String>, ty: Option<AiceType>, has_body: bool, trivia: Trivia },
@@ -248,6 +249,17 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
                 env.tasks.push(DTask::Expr(node));
             }
+        }
+        "defer_statement" | "go_statement" if env.lang == LanguageId::Go => {
+            env.stmts.push(Stmt::Expr {
+                expr: Expr::Raw(node_text(node, env.src).trim().to_string()),
+                trivia: Trivia::default(),
+            });
+        }
+        "var_declaration" if env.lang == LanguageId::Go => {
+            let raw = node_text(node, env.src).trim().to_string();
+            let expr = if raw.contains('\n') { Expr::Raw(raw) } else { Expr::Ident(raw) };
+            env.stmts.push(Stmt::Expr { expr, trivia: Trivia::default() });
         }
         "function_declaration" if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) => {
             let name = field_text(node, "name", env.src).unwrap_or("fn_local").to_string();

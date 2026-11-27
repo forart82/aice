@@ -1,5 +1,7 @@
 use crate::ir::{AiceItem, AiceModule};
 use crate::ir_code::{Expr, FnBody, LiteralVal, RecordEntry, Stmt};
+use crate::lexer_tokens::{Token, TokenKind};
+use crate::parser::Parser;
 
 fn fix_nil_target(e: &mut Expr) {
     let mut stack = vec![e];
@@ -164,4 +166,97 @@ pub(crate) fn resolve_bound_nil_in_module(m: &mut AiceModule) {
             _ => {}
         }
     }
+}
+
+pub(crate) fn is_multi_walrus_ahead(p: &Parser<'_>) -> bool {
+    if !Parser::is_binding_tok(p.peek()) || p.peek_n(1).kind != TokenKind::Comma { return false; }
+    let (mut idx, mut count) = (p.pos, 0usize);
+    while let Some(tok) = p.tokens.get(idx) {
+        if !Parser::is_binding_tok(tok) { return false; }
+        count += 1; idx += 1;
+        if p.tokens.get(idx).is_some_and(|t| t.kind == TokenKind::Comma) { idx += 1; } else { break; }
+    }
+    count >= 2 && p.tokens.get(idx).is_some_and(|t| matches!(t.kind, TokenKind::ColonEqual | TokenKind::ColonColonEqual))
+}
+
+fn is_valid_lhs_target(tokens: &[Token]) -> bool {
+    if tokens.is_empty() { return false; }
+    let mut i = usize::from(matches!(tokens[0].kind, TokenKind::Star | TokenKind::At | TokenKind::Dollar));
+    if i >= tokens.len() { return false; }
+    if matches!(tokens[i].kind, TokenKind::LParen | TokenKind::LBracket) {
+        let (open, close) = if tokens[i].kind == TokenKind::LParen { (TokenKind::LParen, TokenKind::RParen) } else { (TokenKind::LBracket, TokenKind::RBracket) };
+        let mut depth = 1usize; i += 1;
+        while i < tokens.len() && depth > 0 {
+            if tokens[i].kind == open { depth += 1; } else if tokens[i].kind == close { depth -= 1; }
+            i += 1;
+        }
+        if depth != 0 { return false; }
+    } else if Parser::is_binding_tok(&tokens[i]) {
+        i += 1;
+    } else { return false; }
+    while i < tokens.len() {
+        if tokens[i].kind == TokenKind::Dot {
+            i += 1;
+            if !tokens.get(i).is_some_and(Parser::is_binding_tok) { return false; }
+            i += 1;
+        } else if tokens[i].kind == TokenKind::LBracket {
+            let mut depth = 1usize; i += 1;
+            while i < tokens.len() && depth > 0 {
+                if tokens[i].kind == TokenKind::LBracket { depth += 1; } else if tokens[i].kind == TokenKind::RBracket { depth -= 1; }
+                i += 1;
+            }
+            if depth != 0 { return false; }
+        } else { return false; }
+    }
+    true
+}
+
+pub(crate) fn find_multi_assign_eq(p: &Parser<'_>) -> Option<usize> {
+    let (mut idx, mut depth, mut seg_start, mut seg_count, mut has_comma) = (p.pos, 0usize, p.pos, 0usize, false);
+    while idx < p.tokens.len() {
+        match p.tokens[idx].kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => { if depth == 0 { return None; } depth -= 1; }
+            TokenKind::Comma if depth == 0 => {
+                if !is_valid_lhs_target(&p.tokens[seg_start..idx]) { return None; }
+                seg_count += 1; has_comma = true; seg_start = idx + 1;
+            }
+            TokenKind::Equal if depth == 0 => {
+                if !has_comma { return None; }
+                if seg_start < idx {
+                    if !is_valid_lhs_target(&p.tokens[seg_start..idx]) { return None; }
+                    seg_count += 1;
+                }
+                return (seg_count >= 1).then_some(idx);
+            }
+            TokenKind::Newline | TokenKind::Semicolon | TokenKind::Eof | TokenKind::Dedent | TokenKind::Indent
+            | TokenKind::Colon | TokenKind::FatArrow | TokenKind::ColonEqual | TokenKind::ColonColonEqual if depth == 0 => return None,
+            _ => {}
+        }
+        idx += 1;
+    }
+    None
+}
+
+pub(crate) fn is_var_decl_stmt_ahead(p: &Parser<'_>) -> bool {
+    if p.peek_kind() != TokenKind::Ident || p.peek().lexeme != "var" { return false; }
+    let t1 = p.peek_n(1);
+    if !Parser::is_binding_tok(t1) || t1.lexeme == "is"
+        || matches!(t1.kind, TokenKind::In | TokenKind::And | TokenKind::Or | TokenKind::Instanceof | TokenKind::As)
+    { return false; }
+    !matches!(p.peek_n(2).kind, TokenKind::Newline | TokenKind::Semicolon | TokenKind::Comment | TokenKind::Dedent | TokenKind::RBrace | TokenKind::Eof | TokenKind::Colon)
+}
+
+pub(crate) fn consume_raw_stmt_line(p: &mut Parser<'_>) -> String {
+    let start = p.peek().span.start_byte;
+    let (mut end, mut depth) = (start, 0usize);
+    while !p.at_eof() {
+        match p.peek_kind() {
+            TokenKind::Newline | TokenKind::Semicolon | TokenKind::Comment | TokenKind::Dedent | TokenKind::RBrace | TokenKind::Eof if depth == 0 => break,
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => { depth += 1; end = p.advance().span.end_byte; }
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => { depth = depth.saturating_sub(1); end = p.advance().span.end_byte; }
+            _ => { let tok = p.advance(); if tok.span.end_byte > tok.span.start_byte { end = tok.span.end_byte; } }
+        }
+    }
+    p.src.get(start..end).unwrap_or("").trim().to_string()
 }

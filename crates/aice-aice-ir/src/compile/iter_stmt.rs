@@ -3,7 +3,7 @@ use aice_lang_registry::LanguageId;
 use crate::compile::emit_ctx::CommentStyle;
 use crate::compile::expr_emit::assign_native;
 use crate::compile::iter_emit::{CTask, EvalState};
-use crate::compile::iter_stmt_match::step_brace_match_task;
+use crate::compile::iter_stmt_match::{is_wrapped_cond_clause, step_brace_match_task};
 use crate::compile::type_map::emit_type;
 use crate::ir_code::{Expr, RecordEntry, Stmt};
 
@@ -81,11 +81,13 @@ pub(crate) fn step_stmt_task<'a>(
         }
         CTask::BraceIfHdr => {
             let c = st.vals.pop().unwrap();
-            ec.line(&if matches!(lang, LanguageId::Rust | LanguageId::Go) { format!("if {c} {{") } else { format!("if ({c}) {{") });
+            let bare = matches!(lang, LanguageId::Rust | LanguageId::Go) || is_wrapped_cond_clause(&c);
+            ec.line(&if bare { format!("if {c} {{") } else { format!("if ({c}) {{") });
         }
         CTask::BraceElifHdr => {
             let c = st.vals.pop().unwrap();
-            ec.line(&if matches!(lang, LanguageId::Rust | LanguageId::Go) { format!("}} else if {c} {{") } else { format!("}} else if ({c}) {{") });
+            let bare = matches!(lang, LanguageId::Rust | LanguageId::Go) || is_wrapped_cond_clause(&c);
+            ec.line(&if bare { format!("}} else if {c} {{") } else { format!("}} else if ({c}) {{") });
         }
         CTask::BraceWhileHdr => {
             let c = st.vals.pop().unwrap();
@@ -119,7 +121,13 @@ pub(crate) fn step_stmt_task<'a>(
                         format!("foreach ({it} as ${binding}) {{")
                     }
                 }
-                _ => format!("for (auto& {binding} : {it}) {{"),
+                _ => {
+                    if lang == LanguageId::Cpp && binding.contains('[') && !binding.starts_with('[') {
+                        format!("for ({binding} : {it}) {{")
+                    } else {
+                        format!("for (auto& {binding} : {it}) {{")
+                    }
+                }
             };
             ec.line(&hdr);
         }

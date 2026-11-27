@@ -67,12 +67,22 @@ pub(crate) fn push_for_stmt<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {
         if let Some(it) = iter_n { env.tasks.push(DTask::Expr(it)); }
         return;
     }
-    let id_fb = child_by_kind(node, "identifier").map(|n| node_text(n, env.src));
-    let raw_b = field_text(node, "left", env.src).or_else(|| field_text(node, "pattern", env.src))
-        .or_else(|| field_text(node, "declarator", env.src)).or_else(|| field_text(node, "name", env.src))
-        .or(id_fb)
-        .unwrap_or("item");
-    let binding = normalize_for_binding(raw_b);
+    let binding = if env.lang == LanguageId::Cpp
+        && node.kind() == "for_range_loop"
+        && field_text(node, "declarator", env.src).is_some_and(|d| d.contains('['))
+        && let Some(lp) = (0..node.child_count()).filter_map(|i| node.child(i)).find(|c| !c.is_named() && c.kind() == "(")
+        && let Some(col) = (0..node.child_count()).filter_map(|i| node.child(i)).find(|c| !c.is_named() && c.kind() == ":")
+        && lp.end_byte() < col.start_byte()
+    {
+        env.src[lp.end_byte()..col.start_byte()].trim().to_string()
+    } else {
+        let id_fb = child_by_kind(node, "identifier").map(|n| node_text(n, env.src));
+        let raw_b = field_text(node, "left", env.src).or_else(|| field_text(node, "pattern", env.src))
+            .or_else(|| field_text(node, "declarator", env.src)).or_else(|| field_text(node, "name", env.src))
+            .or(id_fb)
+            .unwrap_or("item");
+        normalize_for_binding(raw_b)
+    };
     let iter_n = node.child_by_field_name("right").or_else(|| node.child_by_field_name("value"))
         .or_else(|| node.child_by_field_name("collection")).map(|c| {
             if env.lang == LanguageId::Ruby && c.kind() == "in" {
@@ -175,20 +185,22 @@ pub(crate) fn finish_stmt_task(env: &mut DecompEnv<'_>, f: StmtFin) {
             let target = env.exprs.pop().expect("as tgt");
             env.stmts.push(Stmt::Assign { target, op, value, trivia: Trivia::default() });
         }
-        StmtFin::If { elif_count, has_else, elif_trivias, else_trivia, trivia, has_thens, has_else_body } => {
+        StmtFin::If { elif_count, has_else, elif_trivias, else_trivia, trivia, has_thens, has_else_body, mut cond_overrides } => {
             let else_body = if has_else {
                 Some(if has_else_body { env.blocks.pop().unwrap_or_default() } else { Vec::new() })
             } else { None };
             let mut elifs = Vec::with_capacity(elif_count);
             let first_then = has_thens[0];
-            for has_tb in has_thens.into_iter().skip(1).rev() {
+            for (idx, has_tb) in has_thens.into_iter().enumerate().skip(1).rev() {
                 let eb = if has_tb { env.blocks.pop().unwrap_or_default() } else { Vec::new() };
-                let ec = env.exprs.pop().expect("elif cond");
+                let ec = cond_overrides.get_mut(idx).and_then(Option::take)
+                    .unwrap_or_else(|| env.exprs.pop().expect("elif cond"));
                 elifs.push((ec, eb));
             }
             elifs.reverse();
             let then_body = if first_then { env.blocks.pop().unwrap_or_default() } else { Vec::new() };
-            let cond = env.exprs.pop().expect("if cond");
+            let cond = cond_overrides.first_mut().and_then(Option::take)
+                .unwrap_or_else(|| env.exprs.pop().expect("if cond"));
             env.stmts.push(Stmt::If { cond, then_body, elifs, elif_trivias, else_body, else_trivia, trivia });
         }
         StmtFin::Try { catch_len, has_else, else_trivia, has_finally, finally_trivia, trivia } => {

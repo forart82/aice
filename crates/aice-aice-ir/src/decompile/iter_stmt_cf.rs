@@ -11,8 +11,38 @@ use crate::ir::Trivia;
 use crate::ir_code::Expr;
 use crate::ir_expr::LiteralVal;
 
+fn extract_if_init_cond(env: &DecompEnv<'_>, node: Node<'_>, cond_n: Option<Node<'_>>) -> Option<Expr> {
+    if env.lang == LanguageId::Go
+        && let Some(init_n) = node.child_by_field_name("initializer")
+    {
+        let end = cond_n.map_or(init_n.end_byte(), |c| c.end_byte());
+        let txt = env.src.get(init_n.start_byte()..end)?.trim();
+        if !txt.is_empty() {
+            return Some(if txt.contains('\n') { Expr::Raw(txt.to_string()) } else { Expr::Ident(txt.to_string()) });
+        }
+    }
+    None
+}
+
+pub(crate) fn extract_go_switch_init_hdr(env: &DecompEnv<'_>, node: Node<'_>) -> Option<Expr> {
+    if env.lang != LanguageId::Go || node.kind() != "expression_switch_statement" {
+        return None;
+    }
+    let init_n = node.child_by_field_name("initializer")?;
+    let brace_pos = (0..node.child_count())
+        .filter_map(|i| node.child(i))
+        .find(|c| !c.is_named() && c.kind() == "{")
+        .map_or(node.end_byte(), |b| b.start_byte());
+    let hdr = env.src.get(init_n.start_byte()..brace_pos)?.trim();
+    if hdr.is_empty() {
+        return None;
+    }
+    Some(if hdr.contains('\n') { Expr::Raw(hdr.to_string()) } else { Expr::Ident(hdr.to_string()) })
+}
+
 pub(crate) fn push_if_task<'a>(env: &mut DecompEnv<'a>, root: Node<'a>) {
     let mut cond_nodes: Vec<Option<Node<'a>>> = Vec::new();
+    let mut cond_overrides: Vec<Option<Expr>> = Vec::new();
     let mut then_nodes: Vec<Option<Node<'a>>> = Vec::new();
     let mut elif_trivias: Vec<Trivia> = Vec::new();
     let mut else_node: Option<Node<'a>> = None;
@@ -31,7 +61,16 @@ pub(crate) fn push_if_task<'a>(env: &mut DecompEnv<'a>, root: Node<'a>) {
         } else {
             elif_trivias.push(Trivia { trailing: tr, ..Trivia::default() });
         }
-        cond_nodes.push(cond_n);
+        if let Some(ov) = extract_if_init_cond(env, node, cond_n) {
+            cond_nodes.push(None);
+            cond_overrides.push(Some(ov));
+        } else if cond_n.is_none() {
+            cond_nodes.push(None);
+            cond_overrides.push(Some(Expr::Literal(LiteralVal::Bool(true))));
+        } else {
+            cond_nodes.push(cond_n);
+            cond_overrides.push(None);
+        }
         then_nodes.push(then_n);
 
         if let Some(alt) = node.child_by_field_name("alternative")
@@ -61,7 +100,14 @@ pub(crate) fn push_if_task<'a>(env: &mut DecompEnv<'a>, root: Node<'a>) {
                     trailing: ebn.and_then(|bn| collect_header_trailing(bn, env.src, env.opts)),
                     ..Trivia::default()
                 });
-                cond_nodes.push(ch.child_by_field_name("condition"));
+                let c = ch.child_by_field_name("condition");
+                if c.is_none() {
+                    cond_nodes.push(None);
+                    cond_overrides.push(Some(Expr::Literal(LiteralVal::Bool(true))));
+                } else {
+                    cond_nodes.push(c);
+                    cond_overrides.push(None);
+                }
                 then_nodes.push(ebn);
             } else if matches!(ch.kind(), "else_clause" | "else") && else_node.is_none() && cur.is_none() {
                 let kids = named_children(ch);
@@ -86,16 +132,15 @@ pub(crate) fn push_if_task<'a>(env: &mut DecompEnv<'a>, root: Node<'a>) {
         trivia: Trivia { trailing: root_trailing, ..Trivia::default() },
         has_thens,
         has_else_body: else_node.is_some(),
+        cond_overrides,
     }));
     if let Some(en) = else_node { env.tasks.push(DTask::Block(en)); }
     for i in (1..cond_nodes.len()).rev() {
         if let Some(tn) = then_nodes[i] { env.tasks.push(DTask::Block(tn)); }
         if let Some(cn) = cond_nodes[i] { env.tasks.push(DTask::Expr(cn)); }
-        else { env.exprs.push(Expr::Literal(LiteralVal::Bool(true))); }
     }
     if let Some(tn) = then_nodes[0] { env.tasks.push(DTask::Block(tn)); }
     if let Some(cn) = cond_nodes[0] { env.tasks.push(DTask::Expr(cn)); }
-    else { env.exprs.push(Expr::Literal(LiteralVal::Bool(true))); }
 }
 
 pub(crate) fn push_try_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>) {

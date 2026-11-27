@@ -138,7 +138,10 @@ fn push_brace_match_stmt<'a>(target: &'a Expr, cases: &'a [MatchCase], lang: Lan
             }
         }
     } else {
-        ec.line(&format!("switch ({subj}) {{")); ec.push(); tasks.push(CTask::BraceLine("}")); tasks.push(CTask::BracePop);
+        let bare = (lang == LanguageId::Go && (matches!(target, Expr::Raw(_)) || subj.contains(';')))
+            || (lang != LanguageId::Go && is_wrapped_cond_clause(&subj));
+        ec.line(&if bare { format!("switch {subj} {{") } else { format!("switch ({subj}) {{") });
+        ec.push(); tasks.push(CTask::BraceLine("}")); tasks.push(CTask::BracePop);
         for mc in cases.iter().rev() {
             tasks.push(CTask::BracePop);
             if lang != LanguageId::Go && !arm_ends_with_terminator(&mc.body) {
@@ -190,4 +193,52 @@ fn arm_ends_with_terminator(body: &FnBody) -> bool {
         }
     }
     true
+}
+
+pub(crate) fn is_wrapped_cond_clause(c: &str) -> bool {
+    let bytes = c.as_bytes();
+    if bytes.len() < 2 || bytes[0] != b'(' || bytes[bytes.len() - 1] != b')' {
+        return false;
+    }
+    let (mut depth, mut in_str, mut esc) = (0usize, 0u8, false);
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_str != 0 {
+            if esc { esc = false; } else if b == b'\\' { esc = true; } else if b == in_str { in_str = 0; }
+            continue;
+        }
+        match b {
+            b'"' | b'\'' => in_str = b,
+            b'(' => depth += 1,
+            b')' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 && i + 1 < bytes.len() { return false; }
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 { return false; }
+    let inner = &c[1..c.len() - 1];
+    let ib = inner.as_bytes();
+    let (mut d, mut q, mut e) = (0usize, 0u8, false);
+    for (i, &b) in ib.iter().enumerate() {
+        if q != 0 {
+            if e { e = false; } else if b == b'\\' { e = true; } else if b == q { q = 0; }
+            continue;
+        }
+        match b {
+            b'"' | b'\'' => q = b,
+            b'(' | b'[' | b'{' => d += 1,
+            b')' | b']' | b'}' => d = d.saturating_sub(1),
+            b';' if d == 0 => return true,
+            b'=' if d == 0
+                && !matches!(ib.get(i.wrapping_sub(1)), Some(b'=' | b'!' | b'<' | b'>'))
+                && ib.get(i + 1) != Some(&b'=') =>
+            {
+                let lhs = inner[..i].trim();
+                return lhs.contains(char::is_whitespace) && !lhs.starts_with(['(', '*', '&']);
+            }
+            _ => {}
+        }
+    }
+    false
 }
