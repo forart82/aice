@@ -43,9 +43,19 @@ fn collect_ruby(root: Node<'_>, src: &str, opts: &TranspileOpts, m: &mut AiceMod
                         vis: Visibility::Default, source: arg, specifiers: Vec::new(),
                         is_type_only: false, trivia: tr, span: node_span(node),
                     }));
+                } else {
+                    let txt = node_text(node, src).trim();
+                    if !txt.is_empty() {
+                        m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(node) });
+                    }
                 }
             }
-            _ => {}
+            _ => {
+                let txt = node_text(node, src).trim();
+                if !txt.is_empty() {
+                    m.items.push(AiceItem::Directive { text: txt.into(), trivia: tr, span: node_span(node) });
+                }
+            }
         }
     }
 }

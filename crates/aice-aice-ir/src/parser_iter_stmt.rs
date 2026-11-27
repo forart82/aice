@@ -5,10 +5,11 @@ use crate::parser::Parser;
 use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_cf::step_cf_cont;
 use crate::parser_iter_expr::pop_expr;
-use crate::parser_iter_match::{start_match, step_match_cont};
+use crate::parser_iter_match::{is_match_ahead, start_match, step_match_cont};
 use crate::parser_stmt::{
-    attach_stmt_trivia, eat_assign_op, is_destructure_ahead, is_obj_destructure_ahead,
-    is_paren_destructure_ahead, is_walrus_ahead, parse_array_destructure_elems,
+    attach_stmt_trivia, eat_assign_op, is_decl_kw_stmt_ahead, is_destructure_ahead,
+    is_obj_destructure_ahead, is_paren_destructure_ahead, is_ret_stmt_ahead, is_walrus_ahead,
+    parse_array_destructure_elems,
 };
 use crate::parser_types::parse_type_expr;
 
@@ -149,9 +150,25 @@ pub(crate) fn step_stmt_cont(
 }
 
 fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<ParseVal>) -> Result<(), TranspileError> {
+    if Parser::is_binding_tok(p.peek()) && is_walrus_ahead(p) {
+        let name = p.advance().lexeme;
+        let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
+        let is_mut = if p.eat(TokenKind::ColonColonEqual) { true } else { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
+        stack.push(ParseCont::StmtLet { name, is_mut, ty });
+        stack.push(ParseCont::Expr(1));
+        return Ok(());
+    }
     match p.peek_kind() {
-        TokenKind::Pass => { p.advance(); vals.push(ParseVal::Stmt(Box::new(Stmt::Pass))); }
-        TokenKind::Ret => {
+        TokenKind::Pass
+            if matches!(
+                p.peek_n(1).kind,
+                TokenKind::Newline | TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment
+            ) =>
+        {
+            p.advance();
+            vals.push(ParseVal::Stmt(Box::new(Stmt::Pass)));
+        }
+        TokenKind::Ret if is_ret_stmt_ahead(p) => {
             p.advance();
             if matches!(p.peek_kind(), TokenKind::Newline | TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) {
                 vals.push(ParseVal::Stmt(Box::new(Stmt::Return { value: None, trivia: Trivia::default() })));
@@ -161,7 +178,7 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             }
         }
         TokenKind::If => { p.advance(); stack.push(ParseCont::StmtIfAfterCond); stack.push(ParseCont::Expr(1)); }
-        TokenKind::Match => start_match(p, stack)?,
+        TokenKind::Match if is_match_ahead(p, true) => start_match(p, stack)?,
         TokenKind::For => {
             p.advance();
             let binding = if p.eat(TokenKind::LParen) {
@@ -178,14 +195,14 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             stack.push(ParseCont::Expr(1));
         }
         TokenKind::While => { p.advance(); stack.push(ParseCont::StmtWhileAfterCond); stack.push(ParseCont::Expr(1)); }
-        TokenKind::Loop => {
+        TokenKind::Loop if p.peek_n(1).kind == TokenKind::Colon => {
             p.advance();
             p.expect(TokenKind::Colon, "Expected ':' after loop")?;
             let trailing = p.take_trailing_comment();
             stack.push(ParseCont::StmtLoopFinish { trailing });
             push_parse_block(p, stack, vals);
         }
-        TokenKind::Try => {
+        TokenKind::Try if p.peek_n(1).kind == TokenKind::Colon => {
             p.advance();
             p.expect(TokenKind::Colon, "Expected ':'")?;
             let trailing = p.take_trailing_comment();
@@ -205,9 +222,15 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             let label = if p.peek_kind() == TokenKind::Ident { Some(p.advance().lexeme) } else { None };
             vals.push(ParseVal::Stmt(Box::new(Stmt::Continue { label, trivia: Trivia::default() })));
         }
-        TokenKind::Let | TokenKind::Const | TokenKind::Val | TokenKind::Mut => {
+        TokenKind::Let | TokenKind::Const | TokenKind::Val | TokenKind::Mut if is_decl_kw_stmt_ahead(p) => {
             let mut is_mut = p.eat(TokenKind::Mut);
-            if !is_mut { p.advance(); is_mut = p.eat(TokenKind::Mut); }
+            if !is_mut {
+                p.advance();
+                if p.peek_kind() == TokenKind::Mut && Parser::is_binding_tok(p.peek_n(1)) {
+                    p.advance();
+                    is_mut = true;
+                }
+            }
             let name = p.expect_ident_or_kw("Expected variable name")?.lexeme;
             let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
             if p.eat(TokenKind::ColonColonEqual) { is_mut = true; }
@@ -250,13 +273,6 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
             let name = p.src.get(start..end).unwrap_or("{}").trim().to_string();
             let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
             let is_mut = p.eat(TokenKind::ColonColonEqual) || { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
-            stack.push(ParseCont::StmtLet { name, is_mut, ty });
-            stack.push(ParseCont::Expr(1));
-        }
-        TokenKind::Ident if is_walrus_ahead(p) => {
-            let name = p.advance().lexeme;
-            let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
-            let is_mut = if p.eat(TokenKind::ColonColonEqual) { true } else { p.expect(TokenKind::ColonEqual, "Expected ':='")?; false };
             stack.push(ParseCont::StmtLet { name, is_mut, ty });
             stack.push(ParseCont::Expr(1));
         }

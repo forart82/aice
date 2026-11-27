@@ -3,8 +3,8 @@ use std::collections::HashMap;
 use aice_lang_registry::LanguageId;
 
 use crate::compile::csharp_java::{
-    emit_java_class_hdr, emit_java_iface_ext, emit_java_type_params, has_attr, j_vis,
-    java_nested_parent, parse_nested_tag,
+    emit_j_params, emit_java_class_hdr, emit_java_enum, emit_java_iface_ext, emit_java_type_params,
+    has_attr, j_vis, java_has_dec, java_nested_parent, java_synth_class_name, parse_nested_tag,
 };
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
@@ -12,7 +12,7 @@ use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Visibility};
 use crate::ir_code::{AccessorKind, ClassDecl, Expr, FnBody, FnDecl, MethodDecl, PropDecl, Stmt};
-use crate::ir_types::{EnumDecl, ParamDecl, TypeDecl};
+use crate::ir_types::{EnumDecl, TypeDecl};
 
 enum JavaNested<'a> {
     Class(&'a ClassDecl),
@@ -120,18 +120,6 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     Ok(ec.out)
 }
 
-fn java_synth_class_name(mod_name: &str) -> String {
-    let seg = mod_name.rsplit(['/', '.']).next().unwrap_or("").trim();
-    if seg.is_empty() || seg == "module" || seg == "java" || !seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
-        return "Module".into();
-    }
-    let mut chars = seg.chars();
-    match chars.next() {
-        Some(c) if c.is_ascii_alphabetic() => format!("{}{}", c.to_ascii_uppercase(), chars.as_str()),
-        _ => "Module".into(),
-    }
-}
-
 fn emit_java_static_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&f.trivia, CommentStyle::Slash);
@@ -147,16 +135,6 @@ fn emit_java_static_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
         FnBody::Expr(e) => ec.line(&format!("return {};", emit_expr(e, LanguageId::Java, ectx))),
         FnBody::Block(stmts) => emit_brace_stmts(stmts, LanguageId::Java, ec, ectx, false),
     }
-    ec.pop();
-    ec.line("}");
-}
-
-fn emit_java_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
-    ec.blank();
-    ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
-    ec.line(&format!("{}enum {} {{", j_vis(ed.vis), ed.name));
-    ec.push();
-    for v in &ed.variants { ec.line(&format!("{},", v.name)); }
     ec.pop();
     ec.line("}");
 }
@@ -202,17 +180,31 @@ fn emit_java_static_blocks(ec: &mut EmitCtx, blocks: &[Vec<Stmt>], ectx: &ExprEm
 fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<String, Vec<JavaNested<'_>>>, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
-    let has_dec = |k: &str| cd.decorators.iter().any(|d| d.trim_start_matches('@') == k);
     let kids = nested.get(path).map(Vec::as_slice).unwrap_or(&[]);
-    if has_dec("enum") {
-        let imp = if cd.implements.is_empty() { String::new() } else { format!(" implements {}", cd.implements.join(", ")) };
+    if java_has_dec(cd, "enum") {
+        let imp = if cd.implements.is_empty() { String::new() } else {
+            let items: Vec<String> = cd.implements.iter().map(|s| s.replace("::", ".")).collect();
+            format!(" implements {}", items.join(", "))
+        };
         ec.line(&format!("{}enum {}{imp} {{", j_vis(cd.vis), cd.name));
         ec.push();
         let variants: Vec<&PropDecl> = cd.props.iter().filter(|p| has_attr(&p.trivia, "variant")).collect();
         let fields: Vec<&PropDecl> = cd.props.iter().filter(|p| !has_attr(&p.trivia, "variant")).collect();
-        let has_body = !fields.is_empty() || !cd.static_blocks.is_empty() || !cd.methods.is_empty() || !kids.is_empty();
+        let (var_bodies, other_kids): (Vec<&ClassDecl>, Vec<&JavaNested<'_>>) = {
+            let (mut vb, mut ok) = (Vec::new(), Vec::new());
+            for k in kids {
+                if let JavaNested::Class(c) = k && java_has_dec(c, "variant_body") { vb.push(*c); }
+                else { ok.push(k); }
+            }
+            (vb, ok)
+        };
+        let has_body = !fields.is_empty() || !cd.static_blocks.is_empty() || !cd.methods.is_empty() || !other_kids.is_empty();
         for (idx, v) in variants.iter().enumerate() {
             let entry = match &v.init {
+                Some(Expr::Raw(r)) => {
+                    let rt = r.trim();
+                    if rt.starts_with('{') { format!("{} {rt}", v.name) } else { format!("{}{rt}", v.name) }
+                }
                 Some(Expr::Call { args, .. }) => {
                     let a: Vec<String> = args.iter().map(|e| emit_expr(e, LanguageId::Java, ectx)).collect();
                     format!("{}({})", v.name, a.join(", "))
@@ -221,18 +213,31 @@ fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMa
                 None => v.name.clone(),
             };
             let sep = if idx + 1 == variants.len() && has_body { ";" } else { "," };
-            ec.line(&format!("{entry}{sep}"));
+            if let Some(vb) = var_bodies.iter().find(|c| c.name == v.name) {
+                let vpath = format!("{path}.{}", vb.name);
+                let vkids = nested.get(&vpath).map(Vec::as_slice).unwrap_or(&[]);
+                ec.line(&format!("{entry} {{"));
+                ec.push();
+                for p in &vb.props { emit_java_prop(ec, p, ectx); }
+                emit_java_static_blocks(ec, &vb.static_blocks, ectx);
+                for m in &vb.methods { emit_java_method(ec, m, &vb.name, false, ectx); }
+                emit_java_nested_kids(ec, &vpath, vkids, nested, ectx);
+                ec.pop();
+                ec.line(&format!("}}{sep}"));
+            } else {
+                ec.line(&format!("{entry}{sep}"));
+            }
         }
         for p in fields { emit_java_prop(ec, p, ectx); }
         emit_java_static_blocks(ec, &cd.static_blocks, ectx);
         for m in &cd.methods { emit_java_method(ec, m, &cd.name, false, ectx); }
-        emit_java_nested_kids(ec, path, kids, nested, ectx);
+        for kid in other_kids { emit_java_nested_kids(ec, path, std::slice::from_ref(kid), nested, ectx); }
         ec.pop();
         ec.line("}");
         return;
     }
     let tps = emit_java_type_params(&cd.type_params);
-    let ctor = has_dec("record").then(|| emit_j_params(&cd.primary_ctor));
+    let ctor = java_has_dec(cd, "record").then(|| emit_j_params(&cd.primary_ctor));
     ec.line(&emit_java_class_hdr(cd, j_vis(cd.vis), &tps, ctor.as_deref()));
     ec.push();
     for p in &cd.props { emit_java_prop(ec, p, ectx); }
@@ -287,11 +292,4 @@ fn emit_java_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, cls_abs: b
     }
     ec.pop();
     ec.line("}");
-}
-
-fn emit_j_params(params: &[ParamDecl]) -> String {
-    params.iter().map(|p| {
-        let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Java)).unwrap_or_else(|| "Object".into());
-        format!("{t} {}", p.name)
-    }).collect::<Vec<_>>().join(", ")
 }

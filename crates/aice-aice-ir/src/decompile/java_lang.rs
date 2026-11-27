@@ -2,7 +2,8 @@ use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
 use crate::decompile::csharp_java::{
-    extract_java_heritage, extract_java_iface_extends, extract_java_type_params, java_has_mod,
+    extract_java_heritage, extract_java_iface_extends, extract_java_type_params,
+    java_body_has_unhandled, java_has_mod,
 };
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
@@ -97,7 +98,7 @@ fn decompile_java_enum(
         Some(p) => format!("{p}.{name}"),
         None => name.clone(),
     };
-    let mut consts: Vec<(String, Option<Vec<Expr>>, Trivia)> = Vec::new();
+    let mut consts = Vec::new();
     let mut members = JavaBodyMembers::default();
     let mut nested = Vec::new();
     if let Some(body) = node.child_by_field_name("body") {
@@ -105,36 +106,48 @@ fn decompile_java_enum(
             if c.kind() == "enum_constant" {
                 let vn = field_text(c, "name", src).unwrap_or("V").to_string();
                 let ctr = collect_trivia(c, src, opts);
-                let args = c.child_by_field_name("arguments")
-                    .or_else(|| child_by_kind(c, "argument_list"))
-                    .map(|al| {
-                        named_children(al).into_iter()
-                            .filter(|a| !is_comment_kind(a.kind()))
-                            .map(|a| decompile_expr(a, src, LanguageId::Java))
-                            .collect::<Vec<_>>()
-                    });
-                consts.push((vn, args, ctr));
+                let args = c.child_by_field_name("arguments").or_else(|| child_by_kind(c, "argument_list")).map(|al| {
+                    named_children(al).into_iter().filter(|a| !is_comment_kind(a.kind()))
+                        .map(|a| decompile_expr(a, src, LanguageId::Java)).collect::<Vec<_>>()
+                });
+                let cbody = c.child_by_field_name("body").or_else(|| child_by_kind(c, "class_body"));
+                consts.push((vn, args, cbody, ctr));
             } else if c.kind() == "enum_body_declarations" {
                 decompile_java_body_members(c, &name, &cur_path, src, opts, &mut members, &mut nested);
             }
         }
     }
-    let has_args = consts.iter().any(|(_, a, _)| a.is_some());
-    let is_rich = has_args || !members.props.is_empty() || !members.methods.is_empty() || !members.static_blocks.is_empty();
+    let implements = extract_java_heritage(node, src).1;
+    let is_rich = !implements.is_empty()
+        || consts.iter().any(|(_, a, b, _)| a.is_some() || b.is_some())
+        || !members.props.is_empty() || !members.methods.is_empty() || !members.static_blocks.is_empty();
     if is_rich {
         let mut decorators = Vec::new();
         if let Some(p) = parent { decorators.push(format!("nested({p})")); }
         decorators.push("enum".into());
-        let mut all_props = Vec::with_capacity(consts.len() + members.props.len());
-        for (vn, args, mut ctr) in consts {
+        let (mut all_props, mut variant_bodies) = (Vec::with_capacity(consts.len() + members.props.len()), Vec::new());
+        for (vn, args, cbody, mut ctr) in consts {
             push_attrs_to_trivia(&mut ctr, vec!["@variant".into()]);
-            let init = args.map(|a| Expr::Call {
-                callee: Box::new(Expr::Ident(name.clone())),
-                args: a,
-                is_new: false,
-                is_optional: false,
-                is_tagged: false,
+            let mut init = args.map(|a| Expr::Call {
+                callee: Box::new(Expr::Ident(name.clone())), args: a, is_new: false, is_optional: false, is_tagged: false,
             });
+            if let Some(bn) = cbody {
+                if java_body_has_unhandled(bn) {
+                    let s = bn.parent().and_then(|p| p.child_by_field_name("arguments").or_else(|| child_by_kind(p, "argument_list")))
+                        .map_or(bn.start_byte(), |a| a.start_byte());
+                    init = Some(Expr::Raw(src[s..bn.end_byte()].trim().to_string()));
+                } else {
+                    let mut cm = JavaBodyMembers::default();
+                    decompile_java_body_members(bn, &vn, &format!("{cur_path}.{vn}"), src, opts, &mut cm, &mut nested);
+                    variant_bodies.push(AiceItem::Class(ClassDecl {
+                        vis: Visibility::Default, is_abstract: false,
+                        decorators: vec![format!("nested({cur_path})"), "variant_body".into()],
+                        name: vn.clone(), type_params: Vec::new(), primary_ctor: Vec::new(),
+                        extends: None, implements: Vec::new(), props: cm.props, methods: cm.methods,
+                        static_blocks: cm.static_blocks, trivia: Trivia::default(), span: node_span(bn),
+                    }));
+                }
+            }
             all_props.push(PropDecl {
                 name: vn, aliases: Vec::new(), vis: Visibility::Default, is_static: false,
                 is_readonly: false, is_mut: false, is_optional: false, ty: None, init, trivia: ctr,
@@ -142,15 +155,16 @@ fn decompile_java_enum(
         }
         all_props.extend(members.props);
         out.push(AiceItem::Class(ClassDecl {
-            vis, is_abstract: false, decorators, name, type_params: Vec::new(),
-            primary_ctor: Vec::new(), extends: None, implements: extract_java_heritage(node, src).1,
-            props: all_props, methods: members.methods, static_blocks: members.static_blocks, trivia: tr, span: node_span(node),
+            vis, is_abstract: false, decorators, name, type_params: Vec::new(), primary_ctor: Vec::new(),
+            extends: None, implements, props: all_props, methods: members.methods,
+            static_blocks: members.static_blocks, trivia: tr, span: node_span(node),
         }));
+        out.extend(variant_bodies);
     } else {
         if let Some(p) = parent {
             out.push(AiceItem::Directive { text: format!("@nested({p})"), trivia: Trivia::default(), span: node_span(node) });
         }
-        let variants = consts.into_iter().map(|(vn, _, ctr)| EnumVariant {
+        let variants = consts.into_iter().map(|(vn, _, _, ctr)| EnumVariant {
             name: vn, payload: VariantPayload::Unit, discriminant: None, trivia: ctr,
         }).collect();
         out.push(AiceItem::Enum(EnumDecl { vis, name, type_params: Vec::new(), variants, trivia: tr, span: node_span(node) }));

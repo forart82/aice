@@ -1,11 +1,12 @@
 use aice_lang_registry::LanguageId;
 
 use crate::compile::csharp;
+use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::java_lang;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
 use crate::ir_code::ClassDecl;
-use crate::ir_types::TypeParam;
+use crate::ir_types::{EnumDecl, ParamDecl, TypeParam};
 
 pub fn compile(module: &AiceModule, target: LanguageId) -> Result<String, TranspileError> {
     match target {
@@ -95,4 +96,37 @@ pub(crate) fn j_vis(v: Visibility) -> &'static str {
         Visibility::Public => "public ", Visibility::Private => "private ",
         Visibility::Protected => "protected ", _ => "",
     }
+}
+
+pub(crate) fn java_synth_class_name(mod_name: &str) -> String {
+    let seg = mod_name.rsplit(['/', '.']).next().unwrap_or("").trim();
+    if seg.is_empty() || seg == "module" || seg == "java" || !seg.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_') {
+        return "Module".into();
+    }
+    let mut chars = seg.chars();
+    match chars.next() {
+        Some(c) if c.is_ascii_alphabetic() => format!("{}{}", c.to_ascii_uppercase(), chars.as_str()),
+        _ => "Module".into(),
+    }
+}
+
+pub(crate) fn emit_java_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
+    ec.blank();
+    ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
+    ec.line(&format!("{}enum {} {{", j_vis(ed.vis), ed.name));
+    ec.push();
+    for v in &ed.variants { ec.line(&format!("{},", v.name)); }
+    ec.pop();
+    ec.line("}");
+}
+
+pub(crate) fn java_has_dec(cd: &ClassDecl, k: &str) -> bool {
+    cd.decorators.iter().any(|d| d.trim_start_matches('@') == k)
+}
+
+pub(crate) fn emit_j_params(params: &[ParamDecl]) -> String {
+    params.iter().map(|p| {
+        let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Java)).unwrap_or_else(|| "Object".into());
+        format!("{t} {}", p.name)
+    }).collect::<Vec<_>>().join(", ")
 }

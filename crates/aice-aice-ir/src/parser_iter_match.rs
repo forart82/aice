@@ -6,6 +6,81 @@ use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_expr::pop_expr;
 use crate::parser_iter_stmt::{pop_block, push_parse_block};
 
+pub(crate) fn is_match_ahead(p: &Parser<'_>, is_stmt_start: bool) -> bool {
+    if p.peek_kind() != TokenKind::Match { return false; }
+    let t1 = p.peek_n(1);
+    if crate::parser_expr::assign_op_from_tok(t1.kind).is_some()
+        || matches!(
+            t1.kind,
+            TokenKind::Newline | TokenKind::Indent | TokenKind::Dedent | TokenKind::Eof
+                | TokenKind::Comment | TokenKind::Semicolon | TokenKind::Comma | TokenKind::Colon
+                | TokenKind::ColonEqual | TokenKind::ColonColonEqual | TokenKind::RParen
+                | TokenKind::RBracket | TokenKind::RBrace | TokenKind::Dot | TokenKind::QuestionDot
+                | TokenKind::ColonColon | TokenKind::FatArrow | TokenKind::Arrow | TokenKind::Question
+                | TokenKind::EqEq | TokenKind::NotEq | TokenKind::Lt | TokenKind::LtEq
+                | TokenKind::Gt | TokenKind::GtEq | TokenKind::Spaceship | TokenKind::Shl
+                | TokenKind::Shr | TokenKind::Ushr | TokenKind::Slash | TokenKind::TildeSlash
+                | TokenKind::Percent | TokenKind::StarStar | TokenKind::Concat | TokenKind::Pipe
+                | TokenKind::Caret | TokenKind::AmpCaret | TokenKind::PipePipe
+                | TokenKind::QuestionQuestion | TokenKind::In | TokenKind::Instanceof
+                | TokenKind::As | TokenKind::And | TokenKind::Or | TokenKind::Elif
+                | TokenKind::Else | TokenKind::Catch | TokenKind::Finally
+        )
+    {
+        return false;
+    }
+    let (mut idx, mut depth) = (p.pos + 1, 0usize);
+    while idx < p.tokens.len() {
+        match p.tokens[idx].kind {
+            TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+            TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                if depth == 0 { return false; }
+                depth -= 1;
+            }
+            TokenKind::Colon if depth == 0 => {
+                let mut k = idx + 1;
+                while p.tokens.get(k).is_some_and(|t| matches!(t.kind, TokenKind::Comment | TokenKind::Newline | TokenKind::Semicolon)) {
+                    k += 1;
+                }
+                let Some(blk) = p.tokens.get(k) else { return is_stmt_start; };
+                if !matches!(blk.kind, TokenKind::LBrace | TokenKind::Indent) {
+                    return is_stmt_start
+                        && p.tokens.get(idx + 1).is_some_and(|t| matches!(t.kind, TokenKind::Newline | TokenKind::Comment | TokenKind::Eof));
+                }
+                k += 1;
+                while p.tokens.get(k).is_some_and(|t| {
+                    matches!(t.kind, TokenKind::Comment | TokenKind::Newline | TokenKind::Semicolon | TokenKind::Indent | TokenKind::Dedent)
+                }) {
+                    k += 1;
+                }
+                let Some(first) = p.tokens.get(k) else { return true; };
+                if matches!(first.kind, TokenKind::RBrace | TokenKind::Dedent | TokenKind::Eof) || first.lexeme == "case" {
+                    return true;
+                }
+                let mut adepth = 0usize;
+                while k < p.tokens.len() {
+                    match p.tokens[k].kind {
+                        TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => adepth += 1,
+                        TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                            if adepth == 0 { return false; }
+                            adepth -= 1;
+                        }
+                        TokenKind::FatArrow if adepth == 0 => return true,
+                        TokenKind::Newline | TokenKind::Semicolon | TokenKind::Dedent | TokenKind::Eof if adepth == 0 => return false,
+                        _ => {}
+                    }
+                    k += 1;
+                }
+                return false;
+            }
+            TokenKind::Newline | TokenKind::Semicolon | TokenKind::Eof | TokenKind::Comment if depth == 0 => return false,
+            _ => {}
+        }
+        idx += 1;
+    }
+    false
+}
+
 pub(crate) fn start_match(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>) -> Result<(), TranspileError> {
     p.expect(TokenKind::Match, "Expected 'match'")?;
     stack.push(ParseCont::StmtMatchAfterTarget);

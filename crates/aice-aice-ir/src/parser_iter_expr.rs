@@ -9,7 +9,7 @@ use crate::parser_expr::{
 };
 use crate::parser_iter::{ParseCont, ParseVal};
 use crate::parser_iter_lit::{looks_like_closure_after_fn, start_record_entry, step_closure_params, step_lit_cont};
-use crate::parser_iter_match::start_match;
+use crate::parser_iter_match::{is_match_ahead, start_match};
 use crate::parser_new::{parse_new_prefix, try_attach_new_init};
 
 pub(crate) fn pop_expr(vals: &mut Vec<ParseVal>) -> Expr {
@@ -155,7 +155,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             stack.push(ParseCont::Expr(16));
         }
         TokenKind::Await => { p.advance(); stack.push(ParseCont::ExprAwait); stack.push(ParseCont::Expr(16)); }
-        _ if let Some(e) = lit_expr_from_tok(&tok) => { p.advance(); vals.push(ParseVal::Expr(e)); }
+        _ if let Some(e) = lit_expr_from_tok(p, &tok) => { p.advance(); vals.push(ParseVal::Expr(e)); }
         TokenKind::TemplateHead => {
             let head = p.advance();
             stack.push(ParseCont::ExprTemplate { quasis: vec![head.lexeme], exprs: Vec::new() });
@@ -193,7 +193,7 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             p.expect(TokenKind::LParen, "Expected '('")?;
             step_closure_params(p, true, Vec::new(), stack, vals)?;
         }
-        TokenKind::Match => { stack.push(ParseCont::ExprMatchWrap); start_match(p, stack)?; }
+        TokenKind::Match if is_match_ahead(p, false) => { stack.push(ParseCont::ExprMatchWrap); start_match(p, stack)?; }
         TokenKind::Dollar => {
             p.advance();
             let name = p.expect_ident_or_kw("Expected identifier after '$'")?.lexeme;

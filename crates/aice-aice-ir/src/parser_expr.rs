@@ -218,7 +218,7 @@ pub(crate) fn try_contextual_unary(p: &Parser<'_>, tok: &Token) -> Option<UnaryO
     Some(op)
 }
 
-pub(crate) fn lit_expr_from_tok(tok: &Token) -> Option<Expr> {
+pub(crate) fn lit_expr_from_tok(p: &Parser<'_>, tok: &Token) -> Option<Expr> {
     Some(match tok.kind {
         TokenKind::Number => {
             let lit = if tok.lexeme.contains('.') || tok.lexeme.contains('e') || tok.lexeme.contains('E') {
@@ -231,7 +231,16 @@ pub(crate) fn lit_expr_from_tok(tok: &Token) -> Option<Expr> {
         TokenKind::String => Expr::Literal(LiteralVal::Str { value: tok.lexeme.clone(), multiline: false }),
         TokenKind::TripleString => Expr::Literal(LiteralVal::Str { value: tok.lexeme.clone(), multiline: true }),
         TokenKind::Boolean => Expr::Literal(LiteralVal::Bool(tok.lexeme == "true")),
-        TokenKind::Nil => Expr::Literal(LiteralVal::Nil),
+        TokenKind::Nil => {
+            let k1 = p.peek_n(1).kind;
+            if assign_op_from_tok(k1).is_some()
+                || matches!(k1, TokenKind::LParen | TokenKind::LBracket | TokenKind::PlusPlus | TokenKind::MinusMinus)
+            {
+                Expr::Ident(tok.lexeme.clone())
+            } else {
+                Expr::Literal(LiteralVal::Nil)
+            }
+        }
         TokenKind::HexColor => Expr::Literal(LiteralVal::HexColor(tok.lexeme.clone())),
         TokenKind::Regex => Expr::Literal(LiteralVal::Regex(tok.lexeme.clone())),
         TokenKind::TemplateNoSubst => Expr::Template { quasis: vec![tok.lexeme.clone()], exprs: Vec::new() },

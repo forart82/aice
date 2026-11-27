@@ -5,7 +5,7 @@ use crate::lexer_tokens::TokenKind;
 use crate::parser::Parser;
 use crate::parser_class::parse_method_decl;
 use crate::parser_expr::parse_expr;
-use crate::parser_stmt::parse_optional_body_with_trivia;
+use crate::parser_stmt::{is_walrus_ahead, parse_optional_body_with_trivia};
 pub(crate) use crate::parser_types::{parse_type_expr, parse_type_params};
 
 pub(crate) fn parse_import(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) -> Result<AiceItem, TranspileError> {
@@ -173,7 +173,7 @@ pub(crate) fn parse_fn_decl(p: &mut Parser<'_>, vis: Visibility, is_async: bool,
 pub(crate) fn parse_const_or_var(p: &mut Parser<'_>, vis: Visibility, trivia: Trivia) -> Result<AiceItem, TranspileError> {
     let sp = p.peek().span;
     let mut tr = trivia;
-    if p.eat(TokenKind::Const) {
+    if !is_walrus_ahead(p) && p.eat(TokenKind::Const) {
         let name = p.expect_ident_or_kw("Expected const name")?.lexeme;
         let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
         p.expect(TokenKind::Equal, "Expected '='")?;
@@ -181,8 +181,12 @@ pub(crate) fn parse_const_or_var(p: &mut Parser<'_>, vis: Visibility, trivia: Tr
         if tr.trailing.is_none() { tr.trailing = p.take_trailing_comment(); }
         return Ok(AiceItem::Const(ConstDecl { vis, name, ty, value, trivia: tr, span: sp }));
     }
-    let mut is_mut = p.eat(TokenKind::Mut);
-    if p.eat(TokenKind::Let) { is_mut = p.eat(TokenKind::Mut); } else { p.eat(TokenKind::Val); }
+    let mut is_mut = false;
+    if !is_walrus_ahead(p) {
+        is_mut = p.eat(TokenKind::Mut);
+        if p.eat(TokenKind::Let) { is_mut = p.peek_kind() == TokenKind::Mut && Parser::is_binding_tok(p.peek_n(1)) && p.eat(TokenKind::Mut); }
+        else { p.eat(TokenKind::Val); }
+    }
     let name = p.expect_ident_or_kw("Expected binding name")?.lexeme;
     let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };
     if p.eat(TokenKind::ColonColonEqual) { is_mut = true; }
@@ -193,12 +197,16 @@ pub(crate) fn parse_const_or_var(p: &mut Parser<'_>, vis: Visibility, trivia: Tr
     Ok(AiceItem::Var(VarDecl { vis, is_mut, name, ty, value, trivia: tr, span: sp }))
 }
 
+fn is_param_mod_next(p: &Parser<'_>) -> bool {
+    !matches!(p.peek_n(1).kind, TokenKind::Colon | TokenKind::Equal | TokenKind::Comma | TokenKind::RParen | TokenKind::Question)
+}
+
 pub(crate) fn parse_param_list(p: &mut Parser<'_>) -> Result<Vec<ParamDecl>, TranspileError> {
     let mut params = Vec::new();
     while p.peek_kind() != TokenKind::RParen && !p.at_eof() {
-        let vis = p.parse_visibility();
-        let is_readonly = p.peek().lexeme == "readonly" && { p.advance(); true };
-        let is_mut = p.eat(TokenKind::Mut);
+        let vis = if is_param_mod_next(p) { p.parse_visibility() } else { Visibility::Default };
+        let is_readonly = p.peek().lexeme == "readonly" && is_param_mod_next(p) && { p.advance(); true };
+        let is_mut = p.peek_kind() == TokenKind::Mut && is_param_mod_next(p) && p.eat(TokenKind::Mut);
         let is_rest = p.eat(TokenKind::Ellipsis);
         let name = if p.peek_kind() == TokenKind::Dollar {
             p.advance(); format!("${}", p.expect_ident_or_kw("Expected param name")?.lexeme)
@@ -217,9 +225,13 @@ pub(crate) fn parse_param_list(p: &mut Parser<'_>) -> Result<Vec<ParamDecl>, Tra
     Ok(params)
 }
 
+fn is_field_mod_next(p: &Parser<'_>) -> bool {
+    !matches!(p.peek_n(1).kind, TokenKind::Colon | TokenKind::Equal | TokenKind::Question | TokenKind::Bang | TokenKind::Sigil | TokenKind::Comma | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::RBrace)
+}
+
 fn parse_field_decl(p: &mut Parser<'_>, trivia: Trivia) -> Result<FieldDecl, TranspileError> {
-    let vis = p.parse_visibility();
-    let is_readonly = p.peek().lexeme == "readonly" && { p.advance(); true };
+    let vis = if is_field_mod_next(p) { p.parse_visibility() } else { Visibility::Default };
+    let is_readonly = p.peek().lexeme == "readonly" && is_field_mod_next(p) && { p.advance(); true };
     let name = p.expect_ident_or_kw("Expected field name")?.lexeme;
     let sigil = if p.peek_kind() == TokenKind::Sigil {
         match p.advance().lexeme.as_str() {

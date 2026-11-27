@@ -82,7 +82,7 @@ pub(crate) fn start_record_entry(
 ) -> Result<(), TranspileError> {
     if p.eat(TokenKind::Ellipsis) {
         stack.push(ParseCont::ExprRecord { entries, key: None, is_spread: true });
-    } else if (p.peek_kind() == TokenKind::Ident || p.peek().is_keyword() || p.peek_kind() == TokenKind::String)
+    } else if (Parser::is_binding_tok(p.peek()) || p.peek_kind() == TokenKind::String)
         && p.peek_n(1).kind == TokenKind::Colon
     {
         let key = p.advance().lexeme;
@@ -123,9 +123,12 @@ pub(crate) fn step_closure_params(
     vals: &mut Vec<ParseVal>,
 ) -> Result<(), TranspileError> {
     while p.peek_kind() != TokenKind::RParen && !p.at_eof() {
-        let vis = p.parse_visibility();
-        let is_readonly = p.peek().lexeme == "readonly" && { p.advance(); true };
-        let is_mut = p.eat(TokenKind::Mut);
+        let mod_ok = |p: &Parser<'_>| {
+            !matches!(p.peek_n(1).kind, TokenKind::Colon | TokenKind::Equal | TokenKind::Comma | TokenKind::RParen | TokenKind::Question)
+        };
+        let vis = if mod_ok(p) { p.parse_visibility() } else { crate::ir::Visibility::Default };
+        let is_readonly = p.peek().lexeme == "readonly" && mod_ok(p) && { p.advance(); true };
+        let is_mut = p.peek_kind() == TokenKind::Mut && mod_ok(p) && p.eat(TokenKind::Mut);
         let is_rest = p.eat(TokenKind::Ellipsis);
         let name = if p.peek_kind() == TokenKind::Dollar {
             p.advance(); format!("${}", p.expect_ident_or_kw("Expected param name")?.lexeme)

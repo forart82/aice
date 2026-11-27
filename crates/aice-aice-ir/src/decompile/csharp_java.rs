@@ -120,6 +120,18 @@ pub(crate) fn extract_java_iface_extends(node: Node<'_>, src: &str) -> Vec<Strin
         .unwrap_or_default()
 }
 
+pub(crate) fn java_body_has_unhandled(body: Node<'_>) -> bool {
+    named_children(body).into_iter().any(|ch| {
+        !is_comment_kind(ch.kind())
+            && !matches!(
+                ch.kind(),
+                "static_initializer" | "field_declaration" | "method_declaration"
+                    | "constructor_declaration" | "record_declaration" | "class_declaration"
+                    | "interface_declaration" | "enum_declaration"
+            )
+    })
+}
+
 pub(crate) fn cs_has_mod(node: Node<'_>, src: &str, kw: &str) -> bool {
     named_children(node)
         .into_iter()

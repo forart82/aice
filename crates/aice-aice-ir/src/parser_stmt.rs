@@ -83,33 +83,64 @@ pub(crate) fn attach_stmt_trivia(st: &mut Stmt, mut tr: Trivia, trailing: Option
 }
 
 pub(crate) fn is_walrus_ahead(p: &Parser<'_>) -> bool {
-    let k1 = p.peek_n(1).kind;
-    if matches!(k1, TokenKind::ColonEqual | TokenKind::ColonColonEqual) { return true; }
-    if k1 == TokenKind::Colon {
-        let mut idx = p.pos + 2;
-        while idx < p.tokens.len() {
-            let k = p.tokens[idx].kind;
-            if matches!(k, TokenKind::ColonEqual | TokenKind::ColonColonEqual) { return true; }
-            if matches!(k, TokenKind::Newline | TokenKind::Eof | TokenKind::Equal | TokenKind::Semicolon) { return false; }
-            idx += 1;
-        }
-    }
-    false
+    is_walrus_or_typed_at(p, p.pos + 1)
 }
 
 fn is_walrus_or_typed_at(p: &Parser<'_>, idx: usize) -> bool {
     let Some(t) = p.tokens.get(idx) else { return false; };
     if matches!(t.kind, TokenKind::ColonEqual | TokenKind::ColonColonEqual) { return true; }
     if t.kind == TokenKind::Colon {
-        let mut i = idx + 1;
+        let (mut i, mut depth) = (idx + 1, 0usize);
         while i < p.tokens.len() {
-            let k = p.tokens[i].kind;
-            if matches!(k, TokenKind::ColonEqual | TokenKind::ColonColonEqual) { return true; }
-            if matches!(k, TokenKind::Newline | TokenKind::Eof | TokenKind::Equal | TokenKind::Semicolon) { return false; }
+            match p.tokens[i].kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace => {
+                    if depth == 0 { return false; }
+                    depth -= 1;
+                }
+                TokenKind::ColonEqual | TokenKind::ColonColonEqual if depth == 0 => return true,
+                TokenKind::Newline | TokenKind::Eof | TokenKind::Equal | TokenKind::Semicolon if depth == 0 => {
+                    return false;
+                }
+                _ => {}
+            }
             i += 1;
         }
     }
     false
+}
+
+pub(crate) fn is_decl_kw_stmt_ahead(p: &Parser<'_>) -> bool {
+    let mut idx = p.pos + 1;
+    if p.peek_kind() != TokenKind::Mut
+        && p.tokens.get(idx).is_some_and(|t| t.kind == TokenKind::Mut)
+        && p.tokens.get(idx + 1).is_some_and(Parser::is_binding_tok)
+    {
+        idx += 1;
+    }
+    p.tokens.get(idx).is_some_and(Parser::is_binding_tok)
+        && p.tokens.get(idx + 1).is_some_and(|t| {
+            matches!(t.kind, TokenKind::Colon | TokenKind::Equal | TokenKind::ColonEqual | TokenKind::ColonColonEqual)
+        })
+}
+
+pub(crate) fn is_ret_stmt_ahead(p: &Parser<'_>) -> bool {
+    let next = p.peek_n(1);
+    if crate::parser_expr::assign_op_from_tok(next.kind).is_some()
+        || matches!(
+            next.kind,
+            TokenKind::Dot | TokenKind::QuestionDot | TokenKind::ColonColon
+                | TokenKind::ColonEqual | TokenKind::ColonColonEqual
+        )
+    {
+        return false;
+    }
+    if matches!(next.kind, TokenKind::LParen | TokenKind::LBracket | TokenKind::PlusPlus | TokenKind::MinusMinus)
+        && p.peek().span.end_byte == next.span.start_byte
+    {
+        return false;
+    }
+    true
 }
 
 pub(crate) fn is_destructure_ahead(p: &Parser<'_>) -> bool {

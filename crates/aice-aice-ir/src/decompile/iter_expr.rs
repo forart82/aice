@@ -66,6 +66,9 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                     return;
                 }
             }
+            "value_argument" if named_children(node).len() == 1 && !node_text(node, env.src).trim_start().starts_with('*') => {
+                node = named_children(node)[0];
+            }
             "expression_list" if named_children(node).len() == 1 => { node = named_children(node)[0]; }
             "condition_clause" => {
                 if node.child_by_field_name("initializer").is_none()

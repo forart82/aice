@@ -29,6 +29,18 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Import(imp) => ec.line(&format!("require '{}'", imp.source)),
             AiceItem::Class(cd) => emit_rb_class(&mut ec, cd, &ectx),
             AiceItem::Fn(fd) => emit_rb_fn(&mut ec, fd, &ectx),
+            AiceItem::Const(cd) => {
+                ec.emit_trivia(&cd.trivia, CommentStyle::Hash);
+                ec.line(&format!("{} = {}", cd.name, emit_expr(&cd.value, LanguageId::Ruby, &ectx)));
+            }
+            AiceItem::Var(vd) => {
+                ec.emit_trivia(&vd.trivia, CommentStyle::Hash);
+                ec.line(&format!("{} = {}", vd.name, emit_expr(&vd.value, LanguageId::Ruby, &ectx)));
+            }
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.emit_trivia(trivia, CommentStyle::Hash);
+                for line in text.lines() { ec.line(line); }
+            }
             _ => {}
         }
     }

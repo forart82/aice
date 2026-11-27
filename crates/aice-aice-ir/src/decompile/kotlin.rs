@@ -3,7 +3,10 @@ use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, field_text, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
-use crate::decompile::kotlin_dart::{extract_kt_type_params, kt_return_type, kt_type_node};
+use crate::decompile::kotlin_dart::{
+    extract_kt_type_params, kt_has_mod, kt_member_attrs, kt_param_has_kw, kt_return_type,
+    kt_supertypes, kt_type_node,
+};
 use crate::decompile::stmt_common::decompile_block;
 use crate::decompile::trivia::{collect_trivia, is_comment_kind};
 use crate::decompile::ts_helpers::push_attrs_to_trivia;
@@ -66,22 +69,30 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
     let name = kt_ident(node, src).unwrap_or_else(|| "Class".into());
     let cur_path = parent.map(|p| format!("{p}.{name}")).unwrap_or_else(|| name.clone());
     let (mut decorators, is_abstract) = kt_class_decorators(node, src, parent);
+    let is_data = decorators.iter().any(|d| d == "data");
     let type_params = extract_kt_type_params(node, src);
     let mut primary_ctor = Vec::new();
     if let Some(ctor) = child_by_kind(node, "primary_constructor") {
         let container = child_by_kind(ctor, "class_parameters").unwrap_or(ctor);
         for cp in named_children(container) {
             if cp.kind() == "class_parameter" {
+                let pname = kt_ident(cp, src).unwrap_or_else(|| "p".into());
+                let pvis = kt_param_vis(cp, src);
+                let is_mut = kt_param_has_kw(cp, src, "var");
+                let has_val = kt_param_has_kw(cp, src, "val");
+                if kt_has_mod(cp, src, "override") { decorators.push(format!("ctor_override({pname})")); }
+                if kt_has_mod(cp, src, "open") { decorators.push(format!("ctor_open({pname})")); }
+                let is_readonly = has_val && !is_data
+                    && !matches!(pvis, Visibility::Private | Visibility::Protected | Visibility::Package);
                 primary_ctor.push(ParamDecl {
-                    name: kt_ident(cp, src).unwrap_or_else(|| "p".into()),
-                    vis: kt_param_vis(cp, src), is_readonly: false, is_mut: node_text(cp, src).contains("var "),
+                    name: pname, vis: pvis, is_readonly, is_mut,
                     is_optional: false, is_rest: false, ty: kt_type_node(cp, src),
                     default: kt_default_expr(cp, src), trivia: Trivia::default(),
                 });
             }
         }
     }
-    let implements = kt_supertypes(node, src);
+    let (extends, implements) = kt_supertypes(node, src);
     let (mut props, mut methods, mut nested_items, mut direct_nested) = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
     if let Some(body) = child_by_kind(node, "class_body") {
         for ch in named_children(body) {
@@ -117,7 +128,7 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
     decorators.dedup();
     out.push(AiceItem::Class(ClassDecl {
         vis: kt_vis(node, src), is_abstract, decorators, name, type_params,
-        primary_ctor, extends: None, implements, props, methods,
+        primary_ctor, extends, implements, props, methods,
         static_blocks: Vec::new(), trivia: tr, span: node_span(node),
     }));
     out.extend(nested_items);
@@ -131,7 +142,7 @@ fn kt_class_decorators(node: Node<'_>, src: &str, parent: Option<&str>) -> (Vec<
         for m in named_children(mods) {
             match node_text(m, src).trim() {
                 "abstract" => is_abstract = true,
-                kw @ ("sealed" | "data" | "inner" | "enum" | "value" | "annotation") => decs.push(kw.into()),
+                kw @ ("open" | "sealed" | "data" | "inner" | "enum" | "value" | "annotation") => decs.push(kw.into()),
                 _ => {}
             }
         }
@@ -139,16 +150,6 @@ fn kt_class_decorators(node: Node<'_>, src: &str, parent: Option<&str>) -> (Vec<
     if node.kind() == "object_declaration" { decs.push("object".into()); }
     else if has_anon_kw(node, "interface") { decs.push("interface".into()); }
     (decs, is_abstract)
-}
-
-fn kt_supertypes(node: Node<'_>, src: &str) -> Vec<String> {
-    let Some(ds) = child_by_kind(node, "delegation_specifiers") else { return Vec::new(); };
-    named_children(ds).into_iter().filter_map(|ch| {
-        let tn = child_by_kind(ch, "user_type")
-            .or_else(|| child_by_kind(ch, "constructor_invocation").and_then(|c| child_by_kind(c, "user_type")))?;
-        let txt = node_text(tn, src).split('<').next().unwrap_or("").trim();
-        (!txt.is_empty() && txt.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '.')).then(|| txt.to_string())
-    }).collect()
 }
 
 fn decompile_kt_companion(
@@ -183,10 +184,9 @@ fn decompile_kt_prop(node: Node<'_>, src: &str, mut tr: Trivia, is_static: bool,
     let vd = child_by_kind(node, "variable_declaration")?;
     let name = kt_ident(vd, src)?;
     let is_mut = has_anon_kw(node, "var");
-    let is_const = child_by_kind(node, "modifiers").is_some_and(|m| node_text(m, src).contains("const"));
     let mut attrs = Vec::new();
     if let Some(a) = extra_attr { attrs.push(a.to_string()); }
-    if is_const { attrs.push("@const".into()); }
+    attrs.extend(kt_member_attrs(node, src));
     push_attrs_to_trivia(&mut tr, attrs);
     let init = named_children(node).into_iter()
         .find(|c| c.start_byte() > vd.end_byte() && !is_comment_kind(c.kind()) && !matches!(c.kind(), "getter" | "setter"))
@@ -205,8 +205,9 @@ fn kt_fn_to_method(f: FnDecl, is_static: bool) -> MethodDecl {
     }
 }
 
-fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia) -> FnDecl {
+fn decompile_kt_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, mut tr: Trivia) -> FnDecl {
     let name = kt_ident(node, src).unwrap_or_else(|| "fn_anon".into());
+    push_attrs_to_trivia(&mut tr, kt_member_attrs(node, src));
     let type_params = extract_kt_type_params(node, src);
     let mut params = Vec::new();
     if let Some(pl) = child_by_kind(node, "function_value_parameters") {

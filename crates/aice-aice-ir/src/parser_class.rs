@@ -37,19 +37,26 @@ pub(crate) fn parse_class_decl(
                 if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
                 p.collect_member_attrs(&mut mtr);
                 if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
-                if p.eat(TokenKind::Pass) { p.eat_stmt_end(); continue; }
-                let mvis = p.parse_visibility();
-                let is_static = p.peek().lexeme == "static" && { p.advance(); true };
+                if p.peek_kind() == TokenKind::Pass
+                    && matches!(p.peek_n(1).kind, TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment)
+                {
+                    p.advance();
+                    p.eat_stmt_end();
+                    continue;
+                }
+                let prop_delim = |k: TokenKind| {
+                    matches!(k, TokenKind::Colon | TokenKind::Equal | TokenKind::ColonEqual | TokenKind::Question | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof)
+                };
+                let mvis = if !prop_delim(p.peek_n(1).kind) { p.parse_visibility() } else { Visibility::Default };
+                let is_static = p.peek().lexeme == "static"
+                    && (p.peek_n(1).kind == TokenKind::Colon || !prop_delim(p.peek_n(1).kind))
+                    && { p.advance(); true };
                 if is_static && p.peek_kind() == TokenKind::Colon {
                     p.advance();
                     static_blocks.push(parse_block(p)?);
-                } else if matches!(p.peek_kind(), TokenKind::Fn | TokenKind::Async | TokenKind::Star)
-                    || (matches!(p.peek().lexeme.as_str(), "get" | "set")
-                        && !matches!(
-                            p.peek_n(1).kind,
-                            TokenKind::Colon | TokenKind::Equal | TokenKind::ColonEqual
-                                | TokenKind::Question | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof
-                        ))
+                } else if (matches!(p.peek_kind(), TokenKind::Fn | TokenKind::Async) && !prop_delim(p.peek_n(1).kind))
+                    || p.peek_kind() == TokenKind::Star
+                    || (matches!(p.peek().lexeme.as_str(), "get" | "set") && !prop_delim(p.peek_n(1).kind))
                     || p.peek().lexeme == "constructor"
                 {
                     methods.push(parse_method_decl(p, mvis, is_static, mtr)?);
@@ -92,6 +99,21 @@ pub(crate) fn parse_heritage_name(p: &mut Parser<'_>) -> Result<String, Transpil
         }
         if end > start { name.push_str(&p.src[start..end]); }
     }
+    if p.peek_kind() == TokenKind::LParen {
+        let start = p.peek().span.start_byte;
+        let mut end = start;
+        let mut depth = 0usize;
+        while !p.at_eof() {
+            let tok = p.advance();
+            if tok.span.end_byte > end { end = tok.span.end_byte; }
+            if tok.kind == TokenKind::LParen { depth += 1; }
+            else if tok.kind == TokenKind::RParen {
+                depth = depth.saturating_sub(1);
+                if depth == 0 { break; }
+            }
+        }
+        if end > start { name.push_str(&p.src[start..end]); }
+    }
     Ok(name)
 }
 
@@ -108,9 +130,16 @@ fn parse_member_name(p: &mut Parser<'_>, msg: &str) -> Result<String, TranspileE
 }
 
 fn parse_prop_decl(p: &mut Parser<'_>, vis: Visibility, is_static: bool, trivia: Trivia) -> Result<PropDecl, TranspileError> {
-    if p.peek().lexeme == "prop" { p.advance(); }
-    let is_readonly = p.peek().lexeme == "readonly" && { p.advance(); true };
-    let is_mut = p.eat(TokenKind::Mut);
+    let mod_ok = |p: &Parser<'_>| {
+        !matches!(
+            p.peek_n(1).kind,
+            TokenKind::Colon | TokenKind::Equal | TokenKind::ColonEqual | TokenKind::Question
+                | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof
+        )
+    };
+    if p.peek().lexeme == "prop" && mod_ok(p) { p.advance(); }
+    let is_readonly = p.peek().lexeme == "readonly" && mod_ok(p) && { p.advance(); true };
+    let is_mut = p.peek_kind() == TokenKind::Mut && mod_ok(p) && p.eat(TokenKind::Mut);
     let name = parse_member_name(p, "Expected property name")?;
     let is_optional = p.eat(TokenKind::Question);
     let ty = if p.eat(TokenKind::Colon) { Some(parse_type_expr(p)?) } else { None };

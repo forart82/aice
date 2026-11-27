@@ -8,6 +8,8 @@ use crate::lexer::lex_with_trivia;
 use crate::lexer_tokens::{Token, TokenKind};
 use crate::parser_class::{parse_class_decl, parse_directive_or_decorated};
 use crate::parser_decl::{parse_const_or_var, parse_enum_decl, parse_fn_decl, parse_import, parse_type_decl};
+use crate::parser_iter::resolve_bound_nil_in_module;
+use crate::parser_stmt::is_walrus_ahead;
 use crate::parser_domain::{parse_component, parse_style, parse_tokens};
 use crate::parser_domain_data::{parse_data, parse_doc, parse_sh};
 use crate::parser_domain_db::parse_db_item;
@@ -116,9 +118,13 @@ impl<'a> Parser<'a> {
         if self.peek_kind() == TokenKind::Comment { Some(self.advance().lexeme) } else { None }
     }
 
+    pub fn is_binding_tok(t: &Token) -> bool {
+        t.kind == TokenKind::Ident || t.is_keyword() || t.kind == TokenKind::Nil
+    }
+
     pub fn expect_ident_or_kw(&mut self, msg: &str) -> Result<Token, TranspileError> {
         let t = self.peek().clone();
-        if t.kind == TokenKind::Ident || t.is_keyword() {
+        if Self::is_binding_tok(&t) {
             self.advance();
             Ok(t)
         } else {
@@ -166,7 +172,8 @@ impl<'a> Parser<'a> {
     pub fn parse_module(&mut self) -> Result<AiceModule, TranspileError> {
         let module_trivia = self.collect_leading_trivia();
         let mut module_name = "module".to_string();
-        if self.eat(TokenKind::Module) {
+        if self.peek_kind() == TokenKind::Module && !is_walrus_ahead(self) {
+            self.advance();
             let mut parts = vec![self.expect_ident_or_kw("Expected module name")?.lexeme];
             while self.eat(TokenKind::Slash) || self.eat(TokenKind::Dot) || self.eat(TokenKind::ColonColon) {
                 parts.push(self.expect_ident_or_kw("Expected module path segment")?.lexeme);
@@ -183,11 +190,18 @@ impl<'a> Parser<'a> {
             m.items.push(self.parse_item(trivia)?);
             self.eat_stmt_end();
         }
+        resolve_bound_nil_in_module(&mut m);
         Ok(m)
     }
 
     pub fn parse_item(&mut self, trivia: Trivia) -> Result<AiceItem, TranspileError> {
+        if Self::is_binding_tok(self.peek()) && is_walrus_ahead(self) {
+            return parse_const_or_var(self, Visibility::Default, trivia);
+        }
         let vis = self.parse_visibility();
+        if Self::is_binding_tok(self.peek()) && is_walrus_ahead(self) {
+            return parse_const_or_var(self, vis, trivia);
+        }
         let sp = self.peek().span;
         match self.peek_kind() {
             TokenKind::From | TokenKind::Import => parse_import(self, vis, trivia),

@@ -5,6 +5,7 @@ use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_
 use crate::decompile::dart;
 use crate::decompile::kotlin;
 use crate::decompile::trivia::is_comment_kind;
+use crate::decompile::ts_helpers::normalize_single_line;
 use crate::ir::{AiceModule, TranspileError, TranspileOpts};
 use crate::ir_types::{AiceType, PrimitiveType, TypeParam};
 
@@ -180,4 +181,49 @@ pub(crate) fn extract_dart_heritage(node: Node<'_>, src: &str) -> (Option<String
         }
     }
     (extends, implements, decs)
+}
+
+pub(crate) fn kt_has_mod(node: Node<'_>, src: &str, kw: &str) -> bool {
+    let Some(mods) = child_by_kind(node, "modifiers") else { return false; };
+    named_children(mods).into_iter().any(|m| node_text(m, src).trim() == kw)
+}
+
+pub(crate) fn kt_param_has_kw(cp: Node<'_>, src: &str, kw: &str) -> bool {
+    if child_by_kind(cp, "binding_pattern_kind").is_some_and(|b| node_text(b, src).trim() == kw) {
+        return true;
+    }
+    (0..cp.child_count()).filter_map(|i| cp.child(i)).any(|c| !c.is_named() && c.kind() == kw)
+}
+
+pub(crate) fn kt_member_attrs(node: Node<'_>, src: &str) -> Vec<String> {
+    let mut attrs = Vec::new();
+    for kw in ["override", "open", "abstract", "const"] {
+        if kt_has_mod(node, src, kw) {
+            attrs.push(format!("@{kw}"));
+        }
+    }
+    attrs
+}
+
+pub(crate) fn kt_supertypes(node: Node<'_>, src: &str) -> (Option<String>, Vec<String>) {
+    let Some(ds) = child_by_kind(node, "delegation_specifiers") else { return (None, Vec::new()); };
+    let mut extends = None;
+    let mut implements = Vec::new();
+    for ch in named_children(ds) {
+        if is_comment_kind(ch.kind()) { continue; }
+        let ctor = if ch.kind() == "constructor_invocation" { Some(ch) } else { child_by_kind(ch, "constructor_invocation") };
+        if let Some(ci) = ctor {
+            let txt = normalize_single_line(node_text(ci, src));
+            if !txt.is_empty() {
+                if extends.is_none() { extends = Some(txt); } else { implements.push(txt); }
+            }
+            continue;
+        }
+        let ut = if ch.kind() == "user_type" { Some(ch) } else { child_by_kind(ch, "user_type") };
+        if let Some(tn) = ut {
+            let txt = normalize_single_line(node_text(tn, src));
+            if !txt.is_empty() { implements.push(txt); }
+        }
+    }
+    (extends, implements)
 }

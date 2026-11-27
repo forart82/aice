@@ -89,7 +89,7 @@ class Holder {
     let (aice2, native2) = roundtrip(LanguageId::Kotlin, "nested.kt", nested_kt);
     assert!(!aice2.contains("class Outer:\n  pass"), "F-65 Outer erased to pass:\n{aice2}");
     assert!(!aice2.contains("class Holder:\n  pass"), "F-65 Holder erased to pass:\n{aice2}");
-    for expected in ["class Outer", "class Inner(x:int)", "TAG = \"outer\"", "fn make() -> Outer", "class Singleton", "ID:int = 42"] {
+    for expected in ["class Outer", "class Inner(readonly x:int)", "TAG = \"outer\"", "fn make() -> Outer", "class Singleton", "ID:int = 42"] {
         assert!(aice2.contains(expected), "F-65 nested AICE missing `{expected}`:\n{aice2}");
     }
     for expected in [

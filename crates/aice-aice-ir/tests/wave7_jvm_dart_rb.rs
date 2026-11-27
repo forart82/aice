@@ -93,9 +93,9 @@ fun <T : Comparable<T>> pick(a: T, b: T): T = a
 "#;
     let (aice, native) = roundtrip(LanguageId::Kotlin, "Box.kt", src);
     for exp in [
-        "pub class Box[T: Number](items:List[T]):",
+        "pub class Box[T: Number](readonly items:List[T]):",
         "pub fn id[U](x:U) -> U = x",
-        "pub class Multi[T: Comparable[T] + CharSequence, U](a:T, b:U):",
+        "pub class Multi[T: Comparable[T] + CharSequence, U](readonly a:T, readonly b:U):",
         "pub fn wrap[V: Comparable[V] + CharSequence](v:V) -> V = v",
         "pub fn pick[T: Comparable[T]](a:T, b:T) -> T = a",
     ] {
@@ -283,7 +283,7 @@ fun passthrough(cb: (Int) -> String): (Int) -> String {
 "#;
     let (aice, native) = roundtrip(LanguageId::Kotlin, "fn_types.kt", src);
     for exp in [
-        "pub class Producer[T: any](item:T)",
+        "pub class Producer[T: any](readonly item:T)",
         "cb:fn(int) -> str",
         "cb2:fn(int, str) -> bool",
         "cb3:(fn() -> void)?",

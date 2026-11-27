@@ -82,28 +82,36 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     let mut hdr = String::new();
     hdr.push_str(kt_vis(cd.vis));
     if cd.is_abstract { hdr.push_str("abstract "); }
-    for m in ["sealed", "data", "inner", "enum", "value", "annotation"] {
+    for m in ["open", "sealed", "data", "inner", "enum", "value", "annotation"] {
         if has_dec(m) { hdr.push_str(m); hdr.push(' '); }
     }
+    let is_iface = has_dec("interface");
     if has_dec("object") { hdr.push_str("object "); }
-    else if has_dec("interface") { hdr.push_str("interface "); }
+    else if is_iface { hdr.push_str("interface "); }
     else { hdr.push_str("class "); }
     let (tps, wh) = emit_kt_type_params(&cd.type_params);
     hdr.push_str(&cd.name);
     hdr.push_str(&tps);
     if !cd.primary_ctor.is_empty() {
+        let is_data = has_dec("data");
         let ps: Vec<String> = cd.primary_ctor.iter().map(|p| {
             let v = kt_vis(p.vis);
-            let kw = if p.is_mut { "var " } else { "val " };
+            let ovr = if has_dec(&format!("ctor_override({})", p.name)) { "override " } else { "" };
+            let opn = if has_dec(&format!("ctor_open({})", p.name)) { "open " } else { "" };
+            let kw = if p.is_mut { "var " }
+                else if p.is_readonly || is_data || !ovr.is_empty() || !opn.is_empty()
+                    || matches!(p.vis, Visibility::Private | Visibility::Protected | Visibility::Package)
+                { "val " }
+                else { "" };
             let t = p.ty.as_ref().map(emit_kt_type).unwrap_or_else(|| "Any".into());
             let d = p.default.as_ref().map(|e| format!(" = {}", emit_kt_typed_expr(e, &t, ectx))).unwrap_or_default();
-            format!("{v}{kw}{}: {t}{d}", p.name)
+            format!("{v}{ovr}{opn}{kw}{}: {t}{d}", p.name)
         }).collect();
         hdr.push_str(&format!("({})", ps.join(", ")));
     }
     let mut supers: Vec<String> = Vec::new();
-    if let Some(ref ext) = cd.extends { supers.push(ext.replace("::", ".")); }
-    for imp in &cd.implements { supers.push(imp.replace("::", ".")); }
+    if let Some(ref ext) = cd.extends { supers.push(kt_super_path(ext)); }
+    for imp in &cd.implements { supers.push(kt_super_path(imp)); }
     if !supers.is_empty() { hdr.push_str(&format!(" : {}", supers.join(", "))); }
     hdr.push_str(&wh);
 
@@ -126,7 +134,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     ec.line(&format!("{hdr} {{"));
     ec.push();
     for p in own_props { emit_kt_prop(ec, p, ectx); }
-    for m in own_methods { emit_kt_method(ec, m, cd.is_abstract, ectx); }
+    for m in own_methods { emit_kt_method(ec, m, cd.is_abstract, is_iface, ectx); }
     for kid in kids {
         let kid_path = format!("{path}.{}", kid.name);
         emit_kt_class(ec, kid, &kid_path, nested, ectx);
@@ -140,7 +148,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
         }
         ec.push();
         for p in comp_props { emit_kt_prop(ec, p, ectx); }
-        for m in comp_methods { emit_kt_method(ec, m, false, ectx); }
+        for m in comp_methods { emit_kt_method(ec, m, false, false, ectx); }
         ec.pop();
         ec.line("}");
     }
@@ -148,14 +156,22 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
     ec.line("}");
 }
 
+fn kt_super_path(s: &str) -> String {
+    let cut = s.find(['<', '(']).unwrap_or(s.len());
+    format!("{}{}", s[..cut].replace("::", "."), &s[cut..])
+}
+
 fn emit_kt_prop(ec: &mut EmitCtx, p: &PropDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&p.trivia, CommentStyle::Slash);
+    let ovr = if has_attr(&p.trivia, "override") { "override " } else { "" };
+    let opn = if has_attr(&p.trivia, "open") { "open " } else { "" };
+    let abs = if has_attr(&p.trivia, "abstract") { "abstract " } else { "" };
     let cst = if has_attr(&p.trivia, "const") { "const " } else { "" };
     let kw = if p.is_mut { "var " } else { "val " };
     let t_str = p.ty.as_ref().map(emit_kt_type);
     let t = t_str.as_deref().map(|s| format!(": {s}")).unwrap_or_default();
     let init = p.init.as_ref().map(|e| format!(" = {}", emit_kt_typed_expr(e, t_str.as_deref().unwrap_or(""), ectx))).unwrap_or_default();
-    ec.line(&format!("{}{cst}{kw}{}{t}{init}", kt_vis(p.vis), p.name));
+    ec.line(&format!("{}{ovr}{opn}{abs}{cst}{kw}{}{t}{init}", kt_vis(p.vis), p.name));
 }
 
 fn emit_kt_typed_expr(e: &crate::ir_code::Expr, ty: &str, ectx: &ExprEmitCtx) -> String {
@@ -165,17 +181,23 @@ fn emit_kt_typed_expr(e: &crate::ir_code::Expr, ty: &str, ectx: &ExprEmitCtx) ->
     emit_expr(e, LanguageId::Kotlin, ectx)
 }
 
-fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, cls_abs: bool, ectx: &ExprEmitCtx) {
+fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, cls_abs: bool, is_iface: bool, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let (tps, wh) = emit_kt_type_params(&m.type_params);
     let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };
     let ps = emit_kt_params(&m.params, ectx);
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
-    if cls_abs && matches!(m.body, FnBody::SignatureOnly) {
-        ec.line(&format!("{}abstract fun {tps_sp}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
+    let ovr = if has_attr(&m.trivia, "override") { "override " } else { "" };
+    let opn = if has_attr(&m.trivia, "open") { "open " } else { "" };
+    if is_iface && matches!(m.body, FnBody::SignatureOnly) {
+        ec.line(&format!("{}{ovr}fun {tps_sp}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
         return;
     }
-    ec.line(&format!("{}fun {tps_sp}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
+    if has_attr(&m.trivia, "abstract") || (cls_abs && matches!(m.body, FnBody::SignatureOnly)) {
+        ec.line(&format!("{}{ovr}abstract fun {tps_sp}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
+        return;
+    }
+    ec.line(&format!("{}{ovr}{opn}fun {tps_sp}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
     ec.push();
     match &m.body {
         FnBody::SignatureOnly => {}
