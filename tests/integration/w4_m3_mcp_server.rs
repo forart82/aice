@@ -905,3 +905,57 @@ fn mcp_split_multi_selector_targets_and_ct_only_eof_single_parse_error() {
     assert_eq!(frames.len(), 1, "expected single -32700 frame, got: {frames:?}");
     assert_eq!(err_code(&frames[0]), -32700);
 }
+
+#[test]
+fn mcp_inline_size_advisory_appends_only_on_large_non_json_mcp_reads_with_zero_data_loss() {
+    let ws = Tw::new("mcp_inline_tip");
+    ws.write("aice.config.json", "{\"enabled\":true}\n");
+    ws.write("src/small.txt", "line-one\nline-two\n");
+
+    // Plaintext >9_216 bytes (~11KB, well under 5000-token budget so zero lines dropped)
+    let mut big = String::new();
+    for i in 0..200 {
+        big.push_str(&format!(
+            "record_{i:03}: alpha_beta_gamma_delta_epsilon_zeta_eta_theta_0123456789\n"
+        ));
+    }
+    assert!(big.len() > 9_216);
+    ws.write("src/large.txt", &big);
+
+    let (code, msgs, stderr) = run_mcp_newline(
+        ws.path(),
+        &[
+            r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"aice_read","arguments":{"path":"src/small.txt"}}}"#,
+            r#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"aice_read","arguments":{"path":"src/large.txt"}}}"#,
+            r#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"aice_read","arguments":{"path":"src/large.txt","json":true}}}"#,
+        ],
+    );
+    assert_eq!(code, 0, "stderr: {stderr}");
+    assert_eq!(msgs.len(), 3);
+
+    let small_txt = resp_text(&msgs[0]);
+    assert!(!small_txt.contains("// [aice-tip]"), "small MCP read must not emit tip: {small_txt}");
+
+    let large_txt = resp_text(&msgs[1]);
+    assert!(large_txt.contains("record_000:"), "first line missing");
+    assert!(large_txt.contains("record_199:"), "last line missing (zero data loss violated)");
+    assert!(
+        large_txt.contains("// [aice-tip] >9KB output may spill to output.txt"),
+        "expected >9KB MCP inline advisory footer"
+    );
+
+    let json_txt = resp_text(&msgs[2]);
+    assert!(parse_json(json_txt).is_ok(), "MCP json:true read must remain valid JSON");
+    assert!(!json_txt.contains("// [aice-tip]"), "JSON read must not append text tip");
+
+    // CLI surface must NOT append the MCP-only advisory footer
+    let cli_out = Command::new(aice_bin())
+        .args(["read", "src/large.txt"])
+        .current_dir(ws.path())
+        .env("HOME", ws.path())
+        .output()
+        .expect("run aice read");
+    assert_eq!(cli_out.status.code(), Some(0));
+    let cli_txt = String::from_utf8_lossy(&cli_out.stdout);
+    assert!(!cli_txt.contains("// [aice-tip]"), "CLI read must not emit MCP advisory");
+}

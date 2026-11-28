@@ -129,3 +129,16 @@ fn agents_setup_status_and_remove_across_all_seven_agents() {
 
     let _ = std::fs::remove_dir_all(&home);
 }
+
+#[test]
+fn rules_markdown_enforces_parallel_inline_batching_without_output_txt_paging() {
+    use aice_governance::{ALWAYS_ON_AICE_RULE_FILE, MANDATORY_AGENT_RULES_MARKDOWN};
+
+    for doc in [MANDATORY_AGENT_RULES_MARKDOWN, ALWAYS_ON_AICE_RULE_FILE] {
+        assert!(doc.contains("2-4 targets (`<8KB`)"), "missing 2-4 targets (<8KB) rule: {doc}");
+        assert!(doc.contains("5+ targets"), "missing 5+ parallel guidance: {doc}");
+        assert!(doc.contains("parallel `aice_read`/`aice read`"), "missing parallel rule: {doc}");
+        assert!(doc.contains("output.txt"), "missing output.txt spill warning: {doc}");
+        assert!(doc.len() <= 1600, "rule block unexpectedly large: {} bytes", doc.len());
+    }
+}

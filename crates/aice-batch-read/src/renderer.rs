@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use aice_aice_ir::DefaultAiceTranspiler;
 use aice_ast_engine::EngineRegistry;
 use aice_find_engine::{FindWalkOpts, walk_governed_with_opts};
-use aice_governance::{Governed, ReadOp};
+use aice_governance::{Governed, OutputSurface, ReadOp};
 use aice_lang_registry::LanguageId;
 
 use crate::BatchReadPack;
@@ -18,6 +18,9 @@ use crate::render_json::{
 use crate::render_single::{SingleRenderResult, render_resolved_target};
 use crate::selector::{ParsedTargetSpec, TargetSelector};
 use crate::topo_order::build_topo_pack;
+
+const MCP_INLINE_SIZE_THRESHOLD_BYTES: usize = 9_216;
+const MCP_INLINE_SIZE_TIP: &str = "// [aice-tip] >9KB output may spill to output.txt in CLI hosts; split 5+ targets across parallel 2-4 target aice_read calls in 1 turn.";
 
 pub fn render_pack(
     governed: &Governed,
@@ -165,6 +168,24 @@ pub fn render_pack(
             target_chars,
             op.max_tokens,
         );
+    }
+
+    if governed.surface() == OutputSurface::Mcp
+        && !op.json
+        && !emitted_output.is_empty()
+        && emitted_output.len() > MCP_INLINE_SIZE_THRESHOLD_BYTES
+    {
+        let footer = if emitted_output.ends_with('\n') {
+            format!("{MCP_INLINE_SIZE_TIP}\n")
+        } else {
+            format!("\n{MCP_INLINE_SIZE_TIP}\n")
+        };
+        let fits_budget = op
+            .max_tokens
+            .is_none_or(|mt| count_cl100k_exact(&format!("{emitted_output}{footer}")) <= mt);
+        if fits_budget {
+            emitted_output.push_str(&footer);
+        }
     }
 
     let language = resolve_pack_language(&detected_langs);

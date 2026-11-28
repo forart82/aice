@@ -12,7 +12,7 @@ pub const MANDATORY_AGENT_RULES_MARKDOWN: &str = concat!(
     "### Batch Read & Splice\n",
     "- ONLY aice read/search/find (aice_read) & aice splice/aice write (aice_splice); no shell writes or `sed`/`grep`/`cat`/`find`.\n",
     "- Read: `aice read f1:sym f2:L1-L50`, quote 'f:/a|b/', `aice search <pat> [dir]`, `aice find -d 2`.\n",
-    "- No paging: NEVER walk `:L1-L150` -> `:L151-L300` across turns; batch `f:sym1 f:sym2` (or multi-file) in 1 `aice read` or `aice search <pat> f`.\n",
+    "- No paging: NEVER walk `:L1-L150` -> `:L151-L300` across turns; batch 2-4 targets (`<8KB`) per call (`f:sym1 f:sym2` or `aice search <pat> f`); for 5+ targets run parallel `aice_read`/`aice read` calls in 1 turn so output stays inline (no `output.txt` paging).\n",
     "- Splice: `aice splice --stdin << 'EOF'` (=== f:sym ===, === f:L1-L20 ===, --delete, === f ===), multi-line `<<< === >>>` (no 1L).\n",
     "- Briefs: \"Use AICE (aice read / aice splice) for all file exploration and edits.\"\n",
     "<!-- AICE:END -->"
@@ -35,7 +35,7 @@ pub const ALWAYS_ON_AICE_RULE_FILE: &str = concat!(
     "### Batch Read & Splice\n",
     "- ONLY aice read/search/find (aice_read) & aice splice/aice write (aice_splice); no shell writes or `sed`/`grep`/`cat`/`find`.\n",
     "- Read: `aice read f1:sym f2:L1-L50`, quote 'f:/a|b/', `aice search <pat> [dir]`, `aice find -d 2`.\n",
-    "- No paging: NEVER walk `:L1-L150` -> `:L151-L300` across turns; batch `f:sym1 f:sym2` (or multi-file) in 1 `aice read` or `aice search <pat> f`.\n",
+    "- No paging: NEVER walk `:L1-L150` -> `:L151-L300` across turns; batch 2-4 targets (`<8KB`) per call (`f:sym1 f:sym2` or `aice search <pat> f`); for 5+ targets run parallel `aice_read`/`aice read` calls in 1 turn so output stays inline (no `output.txt` paging).\n",
     "- Splice: `aice splice --stdin << 'EOF'` (=== f:sym ===, === f:L1-L20 ===, --delete, === f ===), multi-line `<<< === >>>` (no 1L).\n",
     "- Briefs: \"Use AICE (aice read / aice splice) for all file exploration and edits.\"\n",
     "<!-- AICE:END -->\n"

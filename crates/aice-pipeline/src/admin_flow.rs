@@ -78,7 +78,10 @@ pub(crate) fn run(
                 let refs: Vec<(&str, &str)> =
                     files.iter().map(|(n, c)| (*n, c.as_str())).collect();
                 write_mcp_schema_files(dir, &refs).map_err(PipelineError::Execution)?;
-                let out = format!("✔ Generated 2 MCP tool schema files in {}\n", dir.display());
+                let out = format!(
+                    "✔ Generated 2 MCP tool schema files and instructions.md in {}\n",
+                    dir.display()
+                );
                 Ok(seal_simple(governed, out, String::new(), 0))
             }
             None => Ok(seal_simple(

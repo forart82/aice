@@ -88,21 +88,36 @@ fn splice_input_schema() -> JsonValue {
     ])
 }
 
+const AICE_READ_DESCRIPTION: &str = "Read files, dirs, symbols, :L, search, or file list. Batch 2-4 targets (<8KB/~200L) in path/paths; for 5+ targets, fan out parallel aice_read calls in the SAME turn (never 1-by-1 across turns or one >10KB blob).";
+const AICE_SPLICE_DESCRIPTION: &str = "Create, overwrite, or splice files/symbols/:L/hunks. Batch multi-file atomic edits in one === file:sym === code stream (auto SyntaxFirewall + rollback).";
+
+const MCP_INSTRUCTIONS_MD: &str = "\
+# AICE MCP Server Instructions
+
+AICE exposes strictly 2 stdio tools: `aice_read` (read/outline/search/find) and `aice_splice` (atomic create/edit/delete).
+
+## Zero-Turn Inline Batching (`aice_read`)
+- Keep EACH `aice_read` call to `2-4` targets (`<= 200` lines / `< 8 KB`) so host tool-output caps (`~10 KB`) never spill to `output.txt`.
+- For `5+` files/slices, issue `2-4` **parallel** `aice_read` calls in the **SAME turn** (`~2 ms` each on persistent `aice mcp`, 100% inline, zero paging turns). Never loop 1-by-1 across turns or cram 5+ slices into one `> 10 KB` call.
+- Prefer `file:Symbol`, `outline: true`, or `search` over `200+` line `:L` dumps.
+- Inputs: `path` (single or space-separated targets like `\"a.rs:foo b.rs:bar\"`), `paths`/`targets` (array), `symbol`, `search`, `outline`, `filesOnly`, `depth`, `maxTokens`.
+
+## Atomic Multi-File Edits (`aice_splice`)
+- Use `aice_splice` with `=== file:sym ===`, `=== file:L1-L20 ===`, `=== file ===`, or multi-line `<<< === >>>` hunks in `code` for multi-file atomic edits (auto SyntaxFirewall + rollback).
+
+## Gate
+- Active only when project `aice.config.json` has `\"enabled\": true`; use `aice disable` / `aice enable` if blocked.
+";
+
 pub fn build_tools_list_result() -> JsonValue {
     let read_tool = obj(vec![
         ("name", jstr("aice_read")),
-        (
-            "description",
-            jstr("Read files, dirs, symbols, :L, search, or file list. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch in path or paths."),
-        ),
+        ("description", jstr(AICE_READ_DESCRIPTION)),
         ("inputSchema", read_input_schema()),
     ]);
     let splice_tool = obj(vec![
         ("name", jstr("aice_splice")),
-        (
-            "description",
-            jstr("Create, overwrite, or splice files/symbols/:L/hunks. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code."),
-        ),
+        ("description", jstr(AICE_SPLICE_DESCRIPTION)),
         ("inputSchema", splice_input_schema()),
     ]);
     obj(vec![("tools", JsonValue::Array(vec![read_tool, splice_tool]))])
@@ -119,10 +134,8 @@ fn schema_doc(name: &str, description: &str, schema: JsonValue) -> JsonValue {
 }
 
 pub fn render_mcp_schema_files() -> Vec<(&'static str, String)> {
-    let read_desc = "Read files, dirs, symbols, :L, search, or file list. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Batch in path or paths.";
-    let splice_desc = "Create, overwrite, or splice files/symbols/:L/hunks. MULTI-FILE STREAM ENGINE: NEVER call this tool multiple times in a file-by-file loop! Use === file:sym === in code.";
-    let read_doc = schema_doc("aice_read", read_desc, read_input_schema());
-    let splice_doc = schema_doc("aice_splice", splice_desc, splice_input_schema());
+    let read_doc = schema_doc("aice_read", AICE_READ_DESCRIPTION, read_input_schema());
+    let splice_doc = schema_doc("aice_splice", AICE_SPLICE_DESCRIPTION, splice_input_schema());
     let tools_doc = obj(vec![
         ("server", jstr("aice")),
         ("version", jstr(env!("CARGO_PKG_VERSION"))),
@@ -132,5 +145,6 @@ pub fn render_mcp_schema_files() -> Vec<(&'static str, String)> {
         ("aice_read.json", format!("{}\n", read_doc.to_pretty_string())),
         ("aice_splice.json", format!("{}\n", splice_doc.to_pretty_string())),
         ("tools.json", format!("{}\n", tools_doc.to_pretty_string())),
+        ("instructions.md", MCP_INSTRUCTIONS_MD.to_string()),
     ]
 }

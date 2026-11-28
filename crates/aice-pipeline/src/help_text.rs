@@ -168,7 +168,7 @@ USAGE:
   aice mcp [OPTIONS]
 
 OPTIONS:
-  --generate-schemas [DIR]  Write aice_read.json, aice_splice.json, tools.json
+  --generate-schemas [DIR]  Write aice_read.json, aice_splice.json, tools.json, instructions.md
                             (default: ${AICE_AGENT_HOME:-$HOME}/.gemini/antigravity-cli/mcp/aice)
   -h, --help                Show this help and exit
 

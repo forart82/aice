@@ -590,4 +590,43 @@ fn wave3_f39_mcp_schemas_expose_required_empty_array_on_both_tools() {
             .and_then(JsonValue::as_array);
         assert_eq!(req, Some([].as_slice()), "aice_splice.json {key} missing required: []");
     }
+
+    // Emit compact instructions.md alongside the 3 JSON schema files, zero legacy anti-pattern
+    assert_eq!(rendered.len(), 4);
+    for (fname, body) in &rendered {
+        assert!(
+            !body.contains("NEVER call this tool multiple times"),
+            "{fname} still contains legacy anti-pattern:\n{body}"
+        );
+    }
+    let inst = rendered
+        .iter()
+        .find(|(name, _)| *name == "instructions.md")
+        .map(|(_, body)| body.as_str())
+        .expect("instructions.md rendered");
+    assert!(inst.lines().count() <= 30, "instructions.md lines {} > 30", inst.lines().count());
+    assert!(inst.len() < 1600, "instructions.md len {} >= 1600", inst.len());
+    for kw in ["aice_read", "aice_splice", "2-4", "parallel", "output.txt", "outline", "=== file:sym ==="] {
+        assert!(inst.contains(kw), "instructions.md missing '{kw}':\n{inst}");
+    }
+
+    // aice_read description teaches parallel inline batching and stays byte-exact with telemetry SSOT
+    let tools_val = list.as_object().unwrap().get("tools").unwrap();
+    let read_desc = tools[0]
+        .as_object()
+        .unwrap()
+        .get("description")
+        .and_then(JsonValue::as_str)
+        .unwrap();
+    assert!(!read_desc.contains("NEVER call this tool multiple times in a file-by-file loop!"));
+    assert!(read_desc.contains("2-4") && read_desc.contains("parallel") && read_desc.contains("SAME turn"));
+    assert_eq!(
+        aice_telemetry::economics_reconcile::CANONICAL_MCP_TOOLS_JSON,
+        tools_val.to_compact_string(),
+        "CANONICAL_MCP_TOOLS_JSON must stay byte-exact with build_tools_list_result()"
+    );
+    assert_eq!(
+        aice_telemetry::economics_reconcile::mcp_schema_budget_cl100k(),
+        aice_telemetry::count_cl100k(&tools_val.to_compact_string())
+    );
 }

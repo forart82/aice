@@ -582,8 +582,12 @@ sync_opted_projects() {
 
 if [[ "$DRY_RUN" -eq 1 ]]; then
   if [[ "$NO_AGENTS" -eq 0 ]]; then
+    AGENT_HOME="${AICE_AGENT_HOME:-${HOME}}"
     printf '  [dry-run] %s agents setup\n' "$AICE_BIN"
-    printf '  [dry-run] %s mcp --generate-schemas %s/.gemini/antigravity-cli/mcp/aice\n' "$AICE_BIN" "${AICE_AGENT_HOME:-${HOME}}"
+    printf '  [dry-run] %s mcp --generate-schemas %s/.gemini/antigravity-cli/mcp/aice\n' "$AICE_BIN" "$AGENT_HOME"
+    if [[ -d "${AGENT_HOME}/.gemini/antigravity" ]]; then
+      printf '  [dry-run] %s mcp --generate-schemas %s/.gemini/antigravity/mcp/aice\n' "$AICE_BIN" "$AGENT_HOME"
+    fi
     if [[ "$SYNC_PROJECTS" -eq 1 ]] || [[ -n "${AICE_PROJECTS_DIR:-}" ]]; then
       printf '  [dry-run] refresh explicit aice.config.json projects in %s\n' "${SYNC_PROJECTS_DIR:-${AICE_PROJECTS_DIR:-~/dev}}"
     fi
@@ -595,9 +599,16 @@ else
     log_info "Configuring global CLI coding agents (aice agents setup)..."
     "$AICE_BIN" agents setup
 
-    MCP_SCHEMA_DIR="${AICE_AGENT_HOME:-${HOME}}/.gemini/antigravity-cli/mcp/aice"
-    log_info "Regenerating MCP tool schemas in ${MCP_SCHEMA_DIR}..."
+    AGENT_HOME="${AICE_AGENT_HOME:-${HOME}}"
+    MCP_SCHEMA_DIR="${AGENT_HOME}/.gemini/antigravity-cli/mcp/aice"
+    log_info "Regenerating MCP tool schemas + instructions.md in ${MCP_SCHEMA_DIR}..."
     "$AICE_BIN" mcp --generate-schemas "$MCP_SCHEMA_DIR"
+
+    if [[ -d "${AGENT_HOME}/.gemini/antigravity" ]]; then
+      AGY_IDE_MCP_SCHEMA_DIR="${AGENT_HOME}/.gemini/antigravity/mcp/aice"
+      log_info "Regenerating MCP tool schemas + instructions.md in ${AGY_IDE_MCP_SCHEMA_DIR}..."
+      "$AICE_BIN" mcp --generate-schemas "$AGY_IDE_MCP_SCHEMA_DIR"
+    fi
 
     if [[ "$SYNC_PROJECTS" -eq 1 ]] || [[ -n "${AICE_PROJECTS_DIR:-}" ]]; then
       TARGET_PROJECTS_DIR="${SYNC_PROJECTS_DIR:-${AICE_PROJECTS_DIR:-}}"

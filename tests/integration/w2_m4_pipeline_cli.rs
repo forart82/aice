@@ -1402,6 +1402,7 @@ fn w5_m5_subcommand_help_mcp_schemas_and_benchmark() {
     // 1. Default schema dir uses AICE_AGENT_HOME / HOME
     let default_out = tw.run_isolated(&["mcp", "--generate-schemas"], true);
     assert_eq!(default_out.status.code(), Some(0), "{}", stderr_str(&default_out));
+    assert!(stdout_str(&default_out).contains("Generated 2 MCP tool schema files"));
     let default_dir = tw.home.join(".gemini/antigravity-cli/mcp/aice");
     for fname in ["aice_read.json", "aice_splice.json", "tools.json"] {
         let p = default_dir.join(fname);
@@ -1410,6 +1411,12 @@ fn w5_m5_subcommand_help_mcp_schemas_and_benchmark() {
         assert!(!raw.contains("\"dsl\""), "dead dsl in {}", p.display());
         assert!(parse_json(&raw).is_ok(), "invalid json in {}", p.display());
     }
+    let inst_path = default_dir.join("instructions.md");
+    assert!(inst_path.is_file(), "missing instructions.md in {}", default_dir.display());
+    let inst_md = fs::read_to_string(&inst_path).unwrap();
+    assert!(inst_md.lines().count() <= 30, "instructions.md exceeds 30 lines: {}", inst_md.lines().count());
+    assert!(inst_md.len() < 1600, "instructions.md exceeds 1.6KB: {} bytes", inst_md.len());
+    assert!(inst_md.contains("aice_read") && inst_md.contains("aice_splice") && inst_md.contains("output.txt"));
 
     // 2. Explicit schema dir + stale file pruning
     let custom_dir = tw.root.join("custom_schemas");
@@ -1421,6 +1428,7 @@ fn w5_m5_subcommand_help_mcp_schemas_and_benchmark() {
     );
     assert_eq!(custom_out.status.code(), Some(0), "{}", stderr_str(&custom_out));
     assert!(custom_dir.join("tools.json").is_file());
+    assert!(custom_dir.join("instructions.md").is_file());
     assert!(!custom_dir.join("aice_stale_legacy.json").exists());
 
     // 3. Empty schema dir rejected
