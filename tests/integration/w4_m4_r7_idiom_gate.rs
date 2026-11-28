@@ -241,17 +241,23 @@ fn r7_report_schema_and_exact_bpe_verification() {
         // C-07 [+3/+3]), Wave 19 fidelity fixes (F-160 Go `func_literal` in C-04 [+3/+4],
         // F-161 Kotlin trailing lambdas in C-07 [+39/+40]), Wave 20 fidelity fixes
         // (F-168 Go package-level `var (...)` in C-04 `types.go` [+51/+46], F-165 Kotlin `else`
-        // branch in C-07 `SyncState.kt` [+21/+22]), & Wave 21 fidelity fixes (F-177/F-182a
-        // lossless TS complex cast quoting on C-01 `api_client.ts` `as OrderRecord[]` [+2/+2]).
-        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-Wave-21 counts.
+        // branch in C-07 `SyncState.kt` [+21/+22]), Wave 21 fidelity fixes (F-177/F-182a
+        // lossless TS complex cast quoting on C-01 `api_client.ts` `as OrderRecord[]` [+2/+2]),
+        // & Layer 1 structural IR fallback (safe `Expr::Raw` / `Stmt::Raw` / member preservation:
+        // C-03 Python chained cmp [+7/+7], C-05 Java `Long::sum` [+2/+2], C-07 Dart named args
+        // & assignable lhs [+26/+26], C-08 preserved Ruby `MAX_RETRIES = 3`, PHP `$missing[]`,
+        // Ruby keyword args/`retry`/`%w[...]` [+22/+28]; total 18,992 cl100k / 19,124 o200k vs
+        // raw 19,613 / 19,775).
+        // Keep docs/IDIOM_GATE_REPORT.md historically untouched and lock exact post-v23 counts.
         let (exp_cl, exp_o2) = match wid.as_str() {
             "C-01" => (2157, 2195),
             "C-02" => (1713, 1683),
+            "C-03" => (1670, 1680),
             "C-04" => (1734, 1748),
-            "C-05" => (1572, 1595),
+            "C-05" => (1574, 1597),
             "C-06" => (1541, 1550),
-            "C-07" => (1583, 1603),
-            "C-08" => (1432, 1441),
+            "C-07" => (1609, 1629),
+            "C-08" => (1454, 1469),
             "C-09" => (1262, 1264),
             "C-10" => (1415, 1432),
             "C-11" => (1480, 1499),
