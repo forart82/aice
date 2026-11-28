@@ -119,12 +119,13 @@ fn emit_php_method(ec: &mut EmitCtx, m: &MethodDecl, is_interface: bool, allow_a
     let ps = emit_php_params(&m.params, ectx);
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, LanguageId::Php))).unwrap_or_default();
     let st = if m.is_static { "static " } else { "" };
+    let fn_name = if m.accessor == AccessorKind::Constructor || m.name == "constructor" { "__construct" } else { m.name.as_str() };
     if matches!(m.body, FnBody::SignatureOnly) && (is_interface || allow_abs) {
         let abs = if is_interface { "" } else { "abstract " };
-        ec.line(&format!("{abs}{}{st}function {}({ps}){rt};", php_vis(m.vis), m.name));
+        ec.line(&format!("{abs}{}{st}function {fn_name}({ps}){rt};", php_vis(m.vis)));
         return;
     }
-    ec.line(&format!("{}{st}function {}({ps}){rt} {{", php_vis(m.vis), m.name));
+    ec.line(&format!("{}{st}function {fn_name}({ps}){rt} {{", php_vis(m.vis)));
     ec.push();
     match &m.body {
         FnBody::SignatureOnly => {}

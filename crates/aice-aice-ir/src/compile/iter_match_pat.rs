@@ -18,7 +18,8 @@ pub(crate) fn step_pat_task<'a>(
             Pattern::Wildcard => st.vals.push("_".into()),
             Pattern::Literal(l) => st.vals.push(emit_lit(l, lang)),
             Pattern::Ident(s) => {
-                let out = if matches!(lang, LanguageId::Rust | LanguageId::Cpp | LanguageId::Php | LanguageId::Ruby) {
+                let is_scoped = s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == ':');
+                let out = if matches!(lang, LanguageId::Rust | LanguageId::Cpp | LanguageId::Php | LanguageId::Ruby) || !is_scoped {
                     s.clone()
                 } else {
                     s.replace("::", ".")

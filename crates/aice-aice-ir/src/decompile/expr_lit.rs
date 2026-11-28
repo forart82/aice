@@ -189,7 +189,7 @@ pub(crate) fn parse_interp_text(s: &str, open: &str, close: &str, raw: &str) -> 
                         kind: MemberKind::Dot,
                     }
                 } else {
-                    Expr::Ident(ex_txt.to_string())
+                    crate::decompile::fallback::interp_expr_or_raw(ex_txt)
                 };
                 quasis.push(std::mem::take(&mut cur));
                 exprs.push(ex);
@@ -234,7 +234,7 @@ pub(crate) fn parse_dollar_interp(s: &str, raw: &str, lang: LanguageId) -> Expr 
                         return Expr::Raw(raw.trim().to_string());
                     }
                     quasis.push(std::mem::take(&mut cur));
-                    exprs.push(Expr::Ident(ex_txt.to_string()));
+                    exprs.push(crate::decompile::fallback::interp_expr_or_raw(ex_txt));
                     i = end_idx + 1;
                     continue;
                 }

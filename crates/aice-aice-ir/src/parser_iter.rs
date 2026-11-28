@@ -26,6 +26,7 @@ pub(crate) enum ParseCont {
     ExprDblRef { inner_op: crate::ir_code::UnaryOp },
     ExprAwait,
     ExprParenClose,
+    ExprWalrusClose { name: String, rhs_start: usize },
     ExprCallArg { callee: Expr, args: Vec<Expr>, is_optional: bool, is_new: bool },
     ExprNewArrayRankCont,
     ExprNewArrayInit { callee: Expr, items: Vec<Expr> },
@@ -143,7 +144,7 @@ pub(crate) fn run_parse_loop(p: &mut Parser<'_>, init: ParseCont) -> Result<Pars
     while let Some(cont) = stack.pop() {
         match cont {
             ParseCont::Expr(_) | ParseCont::ExprInfix(_) | ParseCont::ExprUnary { .. }
-            | ParseCont::ExprDblRef { .. } | ParseCont::ExprAwait | ParseCont::ExprParenClose
+            | ParseCont::ExprDblRef { .. } | ParseCont::ExprAwait | ParseCont::ExprParenClose | ParseCont::ExprWalrusClose { .. }
             | ParseCont::ExprCallArg { .. } | ParseCont::ExprTaggedTemplate { .. }
             | ParseCont::ExprIndex { .. }
             | ParseCont::ExprTernaryThen { .. } | ParseCont::ExprTernaryElse { .. }

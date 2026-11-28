@@ -5,21 +5,18 @@ use crate::parser::Parser;
 use crate::parser_iter::{ParseCont, ParseVal, run_parse_loop};
 
 pub(crate) fn parse_expr(p: &mut Parser<'_>) -> Result<Expr, TranspileError> {
-    match run_parse_loop(p, ParseCont::Expr(1))? {
-        ParseVal::Expr(e) => Ok(e),
-        _ => unreachable!(),
-    }
+    match run_parse_loop(p, ParseCont::Expr(1))? { ParseVal::Expr(e) => Ok(e), _ => unreachable!() }
 }
 
 pub(crate) fn step_paren_open(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<ParseVal>) {
     p.advance();
     if p.eat(TokenKind::RParen) {
-        vals.push(ParseVal::Expr(Expr::Call {
-            callee: Box::new(Expr::Ident(String::new())), args: Vec::new(), is_optional: false, is_tagged: false, is_new: false,
-        }));
+        vals.push(ParseVal::Expr(Expr::Call { callee: Box::new(Expr::Ident(String::new())), args: Vec::new(), is_optional: false, is_tagged: false, is_new: false }));
+    } else if Parser::is_binding_tok(p.peek()) && p.peek_n(1).kind == TokenKind::ColonEqual {
+        let name = p.advance().lexeme; p.advance();
+        stack.push(ParseCont::ExprWalrusClose { name, rhs_start: p.peek().span.start_byte }); stack.push(ParseCont::Expr(1));
     } else {
-        stack.push(ParseCont::ExprParenClose);
-        stack.push(ParseCont::Expr(1));
+        stack.push(ParseCont::ExprParenClose); stack.push(ParseCont::Expr(1));
     }
 }
 

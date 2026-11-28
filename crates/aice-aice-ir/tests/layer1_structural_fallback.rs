@@ -522,3 +522,191 @@ class Vault {
         assert!(n2.contains(needle), "TypeScript missing `{needle}`:\n{n2}");
     }
 }
+
+#[test]
+fn layer1_v23_torture_six_defects_compiler_backed_2x() {
+    // 1. Rust macro_invocation inside impl/trait keeps trailing `;` + slice pattern `[a, .., b]`
+    let rs = r#"macro_rules! mk_getter {
+    ($name:ident, $val:expr) => {
+        pub fn $name(&self) -> i32 { $val }
+    };
+}
+
+pub struct Holder;
+
+impl Holder {
+    mk_getter!(plus_five, 5);
+}
+
+pub fn sum_ends(xs: &[i32]) -> i32 {
+    match xs {
+        [a, .., b] => a + b,
+        _ => 0,
+    }
+}
+"#;
+    let (_a1, rs_n1, _, rs_n2) = roundtrip_2x(LanguageId::Rust, "holder.rs", rs);
+    assert!(rs_n2.contains("mk_getter!(plus_five, 5);"), "Rust impl macro lost semi:\n{rs_n2}");
+    assert!(rs_n2.contains("[a, .., b] => a + b"), "Rust slice pattern lost:\n{rs_n2}");
+    if has_tool("rustc") {
+        let dir = std::env::temp_dir().join(format!("aice_l1_v23_rs_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fp = dir.join("holder.rs");
+        let out_lib = dir.join("libholder.rlib");
+        std::fs::write(&fp, &rs_n1).unwrap();
+        let out = Command::new("rustc")
+            .args(["--edition", "2021", "-D", "warnings", "--crate-type", "lib", fp.to_str().unwrap(), "-o", out_lib.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.status.success(), "rustc failed: {}\n{rs_n1}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    // 2. C# parenthesized LINQ query receiver keeps parens `(from ...).ToArray()`
+    let cs = r#"using System.Linq;
+
+public class QueryBox {
+    public int[] Filter(int[] ns) {
+        return (from n in ns where n > 1 select n * 2).ToArray();
+    }
+}
+"#;
+    let (_a1, _cs_n1, _, cs_n2) = roundtrip_2x(LanguageId::CSharp, "QueryBox.cs", cs);
+    assert!(
+        cs_n2.contains("return (from n in ns where n > 1 select n * 2).ToArray();"),
+        "C# parenthesized LINQ receiver lost parens:\n{cs_n2}"
+    );
+
+    // 3. Kotlin class delegation `by` + infix interpolation `${e plusTwice 6}`
+    let kt = r#"interface Greeter {
+    fun greet(): String
+}
+
+class RealGreeter : Greeter {
+    override fun greet(): String {
+        return "hi"
+    }
+}
+
+class WrapGreeter(g: Greeter) : Greeter by g
+
+class Adder {
+    infix fun plusTwice(x: Int): Int {
+        return x * 2
+    }
+}
+
+fun main() {
+    val w = WrapGreeter(RealGreeter())
+    val e = Adder()
+    println("${w.greet()}:${e plusTwice 6}")
+}
+"#;
+    let (_a1, kt_n1, _, kt_n2) = roundtrip_2x(LanguageId::Kotlin, "Deleg.kt", kt);
+    assert!(kt_n2.contains("class WrapGreeter(g: Greeter) : Greeter by g"), "Kotlin by delegation lost:\n{kt_n2}");
+    assert!(kt_n2.contains("${e plusTwice 6}"), "Kotlin infix interpolation lost:\n{kt_n2}");
+    if has_tool("kotlinc") {
+        let dir = std::env::temp_dir().join(format!("aice_l1_v23_kt_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fp = dir.join("Deleg.kt");
+        let jar = dir.join("deleg.jar");
+        std::fs::write(&fp, &kt_n1).unwrap();
+        let out = Command::new("kotlinc")
+            .args([fp.to_str().unwrap(), "-include-runtime", "-d", jar.to_str().unwrap()])
+            .output()
+            .unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.status.success(), "kotlinc failed: {}\n{kt_n1}", String::from_utf8_lossy(&out.stderr));
+    }
+
+    // 4. Python walrus `if (d := x * 2) > 4:` + mapping pattern `case {"k": v}:`
+    let py = r#"def check_walrus(x: int) -> int:
+    if (d := x * 2) > 4:
+        return d
+    return 0
+
+def extract_k(d: dict) -> int:
+    match d:
+        case {"k": v}:
+            return v
+        case _:
+            return -1
+
+print(f"{check_walrus(3)}|{extract_k({'k': 42})}")
+"#;
+    let (_a1, py_n1, _, py_n2) = roundtrip_2x(LanguageId::Python, "walrus_match.py", py);
+    assert!(py_n2.contains("if (d := x * 2) > 4:"), "Python walrus lost:\n{py_n2}");
+    assert!(py_n2.contains("case {\"k\": v}:"), "Python dict pattern lost:\n{py_n2}");
+    if has_tool("python3") {
+        let out = Command::new("python3").args(["-c", &py_n1]).output().unwrap();
+        assert!(out.status.success(), "python3 failed: {}\n{py_n1}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "6|42");
+    }
+
+    // 5. PHP `__construct` must compile back to `__construct` (not `constructor`)
+    let php = r#"<?php
+declare(strict_types=1);
+
+class Runner {
+    private int $val;
+
+    public function __construct(int $val) {
+        $this->val = $val;
+    }
+
+    public function getVal(): int {
+        return $this->val;
+    }
+}
+"#;
+    let (_a1, php_n1, _, php_n2) = roundtrip_2x(LanguageId::Php, "Runner.php", php);
+    assert!(php_n2.contains("public function __construct(int $val)"), "PHP __construct broken:\n{php_n2}");
+    assert!(!php_n2.contains("function constructor("), "PHP emitted JS constructor:\n{php_n2}");
+    if has_tool("php") {
+        let dir = std::env::temp_dir().join(format!("aice_l1_v23_php_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fp = dir.join("Runner.php");
+        let run_src = format!("{php_n1}\n$r = new Runner(77);\necho $r->getVal();\n");
+        std::fs::write(&fp, &run_src).unwrap();
+        let out = Command::new("php").arg(fp.to_str().unwrap()).output().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(out.status.success(), "php run failed: {}\n{run_src}", String::from_utf8_lossy(&out.stderr));
+        assert_eq!(String::from_utf8_lossy(&out.stdout).trim(), "77");
+    }
+
+    // 6. Java class annotation `@AuditTag("v23")` preserved at runtime via reflection
+    let java = r#"import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
+@Retention(RetentionPolicy.RUNTIME)
+@interface AuditTag {
+    String value();
+}
+
+@AuditTag("v23")
+public class JavaCheck {
+    public static void main(String[] args) {
+        AuditTag tag = JavaCheck.class.getAnnotation(AuditTag.class);
+        System.out.println(tag == null ? "null" : tag.value());
+    }
+}
+"#;
+    let (_a1, java_n1, _, java_n2) = roundtrip_2x(LanguageId::Java, "JavaCheck.java", java);
+    assert!(java_n2.contains("@AuditTag(\"v23\")"), "Java class annotation dropped:\n{java_n2}");
+    if has_tool("javac") && has_tool("java") {
+        let dir = std::env::temp_dir().join(format!("aice_l1_v23_java_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let fp = dir.join("JavaCheck.java");
+        std::fs::write(&fp, &java_n1).unwrap();
+        let c = Command::new("javac").arg(fp.to_str().unwrap()).output().unwrap();
+        assert!(c.status.success(), "javac failed: {}\n{java_n1}", String::from_utf8_lossy(&c.stderr));
+        let r = Command::new("java").args(["-cp", dir.to_str().unwrap(), "JavaCheck"]).output().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+        assert!(r.status.success(), "java run failed: {}\n{java_n1}", String::from_utf8_lossy(&r.stderr));
+        assert_eq!(String::from_utf8_lossy(&r.stdout).trim(), "v23");
+    }
+}

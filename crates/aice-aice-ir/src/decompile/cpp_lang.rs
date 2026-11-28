@@ -283,9 +283,9 @@ fn decompile_cpp_fn(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivia)
             .filter_map(|fi| {
                 let kids = named_children(fi);
                 (kids.len() >= 2).then(|| crate::ir_code::Stmt::Assign {
-                    target: crate::ir_code::Expr::Ident(node_text(kids[0], src).trim().into()),
+                    target: crate::decompile::fallback::ident_or_raw(node_text(kids[0], src).trim()),
                     op: crate::ir_code::AssignOp::Assign,
-                    value: crate::ir_code::Expr::Ident(node_text(kids[1], src).trim_matches(|c| c == '(' || c == ')').trim().into()),
+                    value: crate::decompile::fallback::ident_or_raw(node_text(kids[1], src).trim_matches(|c| c == '(' || c == ')').trim()),
                     trivia: Trivia::default(),
                 })
             }).collect();

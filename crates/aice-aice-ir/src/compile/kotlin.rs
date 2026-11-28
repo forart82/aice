@@ -185,7 +185,7 @@ fn emit_kt_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<
 }
 
 fn kt_super_path(s: &str) -> String {
-    let cut = s.find(['<', '(']).unwrap_or(s.len());
+    let cut = s.find(['<', '(', ' ']).unwrap_or(s.len());
     format!("{}{}", s[..cut].replace("::", "."), &s[cut..])
 }
 
@@ -218,6 +218,14 @@ fn kt_receiver_prefix(decs: &[String], tr: &Trivia) -> String {
     from_dec.or(from_tr).filter(|s| !s.is_empty()).map(|s| format!("{s}.")).unwrap_or_default()
 }
 
+fn kt_fn_mods(decs: &[String], tr: &Trivia) -> String {
+    let mut out = String::new();
+    for kw in ["inline", "tailrec", "suspend", "operator", "infix"] {
+        if has_attr(tr, kw) || decs.iter().any(|d| d.trim_start_matches('@') == kw) { out.push_str(kw); out.push(' '); }
+    }
+    out
+}
+
 fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, cls_abs: bool, is_iface: bool, ectx: &ExprEmitCtx) {
     if m.accessor == AccessorKind::Raw { ec.emit_trivia(&m.trivia, CommentStyle::Slash); ec.emit_raw_block(&m.name); return; }
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
@@ -228,23 +236,21 @@ fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, cls_abs: bool, is_iface: boo
     let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
     let ovr = if has_attr(&m.trivia, "override") { "override " } else { "" };
     let opn = if has_attr(&m.trivia, "open") { "open " } else { "" };
+    let fmods = kt_fn_mods(&[], &m.trivia);
     if is_iface && matches!(m.body, FnBody::SignatureOnly) {
-        ec.line(&format!("{}{ovr}fun {tps_sp}{recv}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
-        return;
+        ec.line(&format!("{}{ovr}{fmods}fun {tps_sp}{recv}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name)); return;
     }
     if has_attr(&m.trivia, "abstract") || (cls_abs && matches!(m.body, FnBody::SignatureOnly)) {
-        ec.line(&format!("{}{ovr}abstract fun {tps_sp}{recv}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name));
-        return;
+        ec.line(&format!("{}{ovr}abstract {fmods}fun {tps_sp}{recv}{}({ps}){rt}{wh}", kt_vis(m.vis), m.name)); return;
     }
-    ec.line(&format!("{}{ovr}{opn}fun {tps_sp}{recv}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
+    ec.line(&format!("{}{ovr}{opn}{fmods}fun {tps_sp}{recv}{}({ps}){rt}{wh} {{", kt_vis(m.vis), m.name));
     ec.push();
     match &m.body {
         FnBody::SignatureOnly => {}
         FnBody::Expr(e) => ec.line(&format!("return {}", emit_expr(e, LanguageId::Kotlin, ectx))),
         FnBody::Block(stmts) => emit_brace_stmts(stmts, LanguageId::Kotlin, ec, ectx, false),
     }
-    ec.pop();
-    ec.line("}");
+    ec.pop(); ec.line("}");
 }
 
 fn emit_kt_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
@@ -255,7 +261,8 @@ fn emit_kt_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
     let recv = kt_receiver_prefix(&f.decorators, &f.trivia);
     let ps = emit_kt_params(&f.params, ectx);
     let rt = f.return_type.as_ref().map(|t| format!(": {}", emit_kt_type(t))).unwrap_or_default();
-    ec.line(&format!("{}fun {tps_sp}{recv}{}({ps}){rt}{wh} {{", kt_vis(f.vis), f.name));
+    let fmods = kt_fn_mods(&f.decorators, &f.trivia);
+    ec.line(&format!("{}{fmods}fun {tps_sp}{recv}{}({ps}){rt}{wh} {{", kt_vis(f.vis), f.name));
     ec.push();
     match &f.body {
         FnBody::SignatureOnly => {}
@@ -281,16 +288,11 @@ fn emit_kt_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
     ec.push();
     for (idx, v) in ed.variants.iter().enumerate() {
         ec.emit_trivia(&v.trivia, CommentStyle::Slash);
-        let comma = if idx + 1 < ed.variants.len() { "," } else { "" };
-        ec.line(&format!("{}{comma}", v.name));
+        ec.line(&format!("{}{}", v.name, if idx + 1 < ed.variants.len() { "," } else { "" }));
     }
-    ec.pop();
-    ec.line("}");
+    ec.pop(); ec.line("}");
 }
 
 fn kt_vis(v: Visibility) -> &'static str {
-    match v {
-        Visibility::Private => "private ", Visibility::Protected => "protected ",
-        Visibility::Package => "internal ", _ => "",
-    }
+    match v { Visibility::Private => "private ", Visibility::Protected => "protected ", Visibility::Package => "internal ", _ => "" }
 }

@@ -3,8 +3,9 @@ use std::collections::HashMap;
 use aice_lang_registry::LanguageId;
 
 use crate::compile::csharp_java::{
-    emit_j_params, emit_java_class_hdr, emit_java_enum, emit_java_iface_ext, emit_java_type_params,
-    has_attr, j_vis, java_has_dec, java_nested_parent, java_synth_class_name, parse_nested_tag,
+    emit_j_params, emit_java_attrs, emit_java_class_hdr, emit_java_decs, emit_java_enum,
+    emit_java_iface_ext, emit_java_type_params, has_attr, j_vis, java_has_dec, java_nested_parent,
+    java_synth_class_name, parse_nested_tag,
 };
 use crate::compile::emit_ctx::{CommentStyle, EmitCtx};
 use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
@@ -139,6 +140,7 @@ fn emit_java_static_fn(ec: &mut EmitCtx, f: &FnDecl, ectx: &ExprEmitCtx) {
 fn emit_java_interface(ec: &mut EmitCtx, td: &TypeDecl) {
     ec.blank();
     ec.emit_trivia(&td.trivia, CommentStyle::Slash);
+    emit_java_attrs(ec, &td.trivia);
     let tps = emit_java_type_params(&td.type_params);
     let ext = emit_java_iface_ext(&td.extends);
     ec.line(&format!("{}interface {}{tps}{ext} {{", j_vis(td.vis), td.name));
@@ -157,6 +159,7 @@ fn emit_java_interface(ec: &mut EmitCtx, td: &TypeDecl) {
 
 fn emit_java_prop(ec: &mut EmitCtx, p: &PropDecl, ectx: &ExprEmitCtx) {
     ec.emit_trivia(&p.trivia, CommentStyle::Slash);
+    emit_java_attrs(ec, &p.trivia);
     let st = if p.is_static { "static " } else { "" };
     let fin = if p.is_readonly { "final " } else { "" };
     let t = p.ty.as_ref().map(|x| emit_type(x, LanguageId::Java)).unwrap_or_else(|| "Object".into());
@@ -178,6 +181,7 @@ fn emit_java_static_blocks(ec: &mut EmitCtx, blocks: &[Vec<Stmt>], ectx: &ExprEm
 fn emit_java_class(ec: &mut EmitCtx, cd: &ClassDecl, path: &str, nested: &HashMap<String, Vec<JavaNested<'_>>>, ectx: &ExprEmitCtx) {
     ec.blank();
     ec.emit_trivia(&cd.trivia, CommentStyle::Slash);
+    emit_java_decs(ec, &cd.decorators);
     let kids = nested.get(path).map(Vec::as_slice).unwrap_or(&[]);
     if java_has_dec(cd, "enum") {
         let imp = if cd.implements.is_empty() { String::new() } else {
@@ -266,6 +270,7 @@ fn emit_java_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, cls_abs: b
     if m.accessor == AccessorKind::Raw { ec.emit_trivia(&m.trivia, CommentStyle::Slash); ec.emit_raw_block(&m.name); return; }
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+    emit_java_attrs(ec, &m.trivia);
     let ps = emit_j_params(&m.params);
     let tps = emit_java_type_params(&m.type_params);
     let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };

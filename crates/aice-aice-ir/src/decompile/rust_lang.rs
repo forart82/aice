@@ -87,7 +87,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     }
                     impls.push(RsImpl { tname, target_args, trait_nm, tps, attrs, assoc_props, methods });
                 }
-                _ => m.items.push(AiceItem::Directive { text: node_text(ch, src).trim().into(), trivia: tr, span: node_span(ch) }),
+                _ => crate::decompile::fallback::push_top_directive(&mut m, ch, src, tr),
             }
         }
         attach_rs_impls(&mut m, impls);

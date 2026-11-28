@@ -116,6 +116,9 @@ fn step_single_pattern(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mu
         TokenKind::String => vals.push(ParseVal::Pat(Pattern::Literal(LiteralVal::Str { value: p.advance().lexeme, multiline: false }))),
         TokenKind::Boolean => vals.push(ParseVal::Pat(Pattern::Literal(LiteralVal::Bool(p.advance().lexeme == "true")))),
         TokenKind::Nil => { p.advance(); vals.push(ParseVal::Pat(Pattern::Literal(LiteralVal::Nil))); }
+        TokenKind::Ident if p.peek().lexeme == "raw" && matches!(p.peek_n(1).kind, TokenKind::String | TokenKind::TripleString) => {
+            p.advance(); vals.push(ParseVal::Pat(Pattern::Ident(p.advance().lexeme)));
+        }
         _ => {
             let mut name = p.expect_ident_or_kw("Expected pattern")?.lexeme;
             while p.eat(TokenKind::ColonColon) || p.eat(TokenKind::Dot) {

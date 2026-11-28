@@ -2,8 +2,8 @@ use aice_lang_registry::{LanguageId, ParsedTree};
 use tree_sitter::Node;
 
 use crate::decompile::csharp_java::{
-    extract_java_heritage, extract_java_iface_extends, extract_java_type_params,
-    java_body_has_unhandled, java_has_mod,
+    extract_java_annotations, extract_java_heritage, extract_java_iface_extends,
+    extract_java_type_params, java_body_has_unhandled, java_has_mod,
 };
 use crate::decompile::cst_util::{child_by_kind, field_text, map_type_str, named_children, node_span, node_text, with_ts_root};
 use crate::decompile::expr_common::decompile_expr;
@@ -59,15 +59,16 @@ fn decompile_java_type_item(
 ) {
     match node.kind() {
         "interface_declaration" => {
-            let mut nested = Vec::new();
-            let cd = decompile_java_class(node, src, opts, tr.clone(), parent, &mut nested);
+            let (mut nested, mut itr) = (Vec::new(), tr);
+            push_attrs_to_trivia(&mut itr, extract_java_annotations(node, src));
+            let cd = decompile_java_class(node, src, opts, itr.clone(), parent, &mut nested);
             if let Some(p) = parent {
                 out.push(AiceItem::Directive { text: format!("@nested({p})"), trivia: Trivia::default(), span: node_span(node) });
             }
             out.push(AiceItem::Type(TypeDecl {
                 vis: cd.vis, kind: TypeKind::Interface, name: cd.name, type_params: cd.type_params,
                 extends: extract_java_iface_extends(node, src), fields: Vec::new(), methods: cd.methods,
-                alias_target: None, trivia: tr, span: cd.span,
+                alias_target: None, trivia: itr, span: cd.span,
             }));
             out.extend(nested);
         }
@@ -94,10 +95,7 @@ fn decompile_java_enum(
 ) {
     let name = field_text(node, "name", src).unwrap_or("Enum").to_string();
     let vis = java_vis(node, src);
-    let cur_path = match parent {
-        Some(p) => format!("{p}.{name}"),
-        None => name.clone(),
-    };
+    let cur_path = match parent { Some(p) => format!("{p}.{name}"), None => name.clone() };
     let mut consts = Vec::new();
     let mut members = JavaBodyMembers::default();
     let mut nested = Vec::new();
@@ -122,7 +120,7 @@ fn decompile_java_enum(
         || consts.iter().any(|(_, a, b, _)| a.is_some() || b.is_some())
         || !members.props.is_empty() || !members.methods.is_empty() || !members.static_blocks.is_empty();
     if is_rich {
-        let mut decorators = Vec::new();
+        let mut decorators: Vec<String> = extract_java_annotations(node, src).into_iter().map(|a| a.trim_start_matches('@').to_string()).collect();
         if let Some(p) = parent { decorators.push(format!("nested({p})")); }
         decorators.push("enum".into());
         let (mut all_props, mut variant_bodies) = (Vec::with_capacity(consts.len() + members.props.len()), Vec::new());
@@ -161,13 +159,15 @@ fn decompile_java_enum(
         }));
         out.extend(variant_bodies);
     } else {
+        let mut etr = tr;
+        push_attrs_to_trivia(&mut etr, extract_java_annotations(node, src));
         if let Some(p) = parent {
             out.push(AiceItem::Directive { text: format!("@nested({p})"), trivia: Trivia::default(), span: node_span(node) });
         }
         let variants = consts.into_iter().map(|(vn, _, _, ctr)| EnumVariant {
             name: vn, payload: VariantPayload::Unit, discriminant: None, trivia: ctr,
         }).collect();
-        out.push(AiceItem::Enum(EnumDecl { vis, name, type_params: Vec::new(), variants, trivia: tr, span: node_span(node) }));
+        out.push(AiceItem::Enum(EnumDecl { vis, name, type_params: Vec::new(), variants, trivia: etr, span: node_span(node) }));
     }
     out.extend(nested);
 }
@@ -194,6 +194,8 @@ fn decompile_java_body_members(
                 out.static_blocks.push(decompile_block(blk, src, LanguageId::Java, opts));
             }
             "field_declaration" => {
+                let mut mtr = mtr;
+                push_attrs_to_trivia(&mut mtr, extract_java_annotations(ch, src));
                 let ty = field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Java));
                 let mod_txt = child_by_kind(ch, "modifiers").map(|m| node_text(m, src)).unwrap_or("");
                 for d in named_children(ch) {
@@ -216,9 +218,8 @@ fn decompile_java_body_members(
                 let ret = if is_ctor { None } else { field_text(ch, "type", src).map(|t| map_type_str(t, LanguageId::Java)) };
                 let mbody = ch.child_by_field_name("body").map(|b| FnBody::Block(decompile_block(b, src, LanguageId::Java, opts))).unwrap_or(FnBody::SignatureOnly);
                 let mut mtr = mtr;
-                if !is_ctor && java_has_mod(ch, src, "abstract") {
-                    push_attrs_to_trivia(&mut mtr, vec!["@abstract".into()]);
-                }
+                push_attrs_to_trivia(&mut mtr, extract_java_annotations(ch, src));
+                if !is_ctor && java_has_mod(ch, src, "abstract") { push_attrs_to_trivia(&mut mtr, vec!["@abstract".into()]); }
                 out.methods.push(MethodDecl {
                     vis: mvis, is_static: java_has_mod(ch, src, "static"), is_async: false, is_const: false,
                     accessor: if is_ctor { AccessorKind::Constructor } else { AccessorKind::Normal },
@@ -245,15 +246,12 @@ fn decompile_java_class(
     let name = field_text(node, "name", src).unwrap_or("Class").to_string();
     let vis = java_vis(node, src);
     let type_params = extract_java_type_params(node, src);
-    let cur_path = match parent {
-        Some(p) => format!("{p}.{name}"),
-        None => name.clone(),
-    };
+    let cur_path = match parent { Some(p) => format!("{p}.{name}"), None => name.clone() };
     let mut members = JavaBodyMembers::default();
     if let Some(body) = node.child_by_field_name("body") {
         decompile_java_body_members(body, &name, &cur_path, src, opts, &mut members, nested_out);
     }
-    let mut decorators = Vec::new();
+    let mut decorators: Vec<String> = extract_java_annotations(node, src).into_iter().map(|a| a.trim_start_matches('@').to_string()).collect();
     if let Some(p) = parent { decorators.push(format!("nested({p})")); }
     if parent.is_some() && java_has_mod(node, src, "static") { decorators.push("static".into()); }
     if node.kind() == "record_declaration" { decorators.push("record".into()); }

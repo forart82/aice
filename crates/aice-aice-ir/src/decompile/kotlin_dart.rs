@@ -198,13 +198,8 @@ pub(crate) fn kt_param_has_kw(cp: Node<'_>, src: &str, kw: &str) -> bool {
 }
 
 pub(crate) fn kt_member_attrs(node: Node<'_>, src: &str) -> Vec<String> {
-    let mut attrs = Vec::new();
-    for kw in ["override", "open", "abstract", "const"] {
-        if kt_has_mod(node, src, kw) {
-            attrs.push(format!("@{kw}"));
-        }
-    }
-    attrs
+    ["override", "open", "abstract", "const", "infix", "operator", "inline", "tailrec", "suspend"].into_iter()
+        .filter(|kw| kt_has_mod(node, src, kw)).map(|kw| format!("@{kw}")).collect()
 }
 
 pub(crate) fn kt_supertypes(node: Node<'_>, src: &str) -> (Option<String>, Vec<String>) {
@@ -213,6 +208,12 @@ pub(crate) fn kt_supertypes(node: Node<'_>, src: &str) -> (Option<String>, Vec<S
     let mut implements = Vec::new();
     for ch in named_children(ds) {
         if is_comment_kind(ch.kind()) { continue; }
+        let deleg = if ch.kind() == "explicit_delegation" { Some(ch) } else { child_by_kind(ch, "explicit_delegation") };
+        if let Some(ed) = deleg {
+            let txt = normalize_single_line(node_text(ed, src));
+            if !txt.is_empty() { implements.push(txt); }
+            continue;
+        }
         let ctor = if ch.kind() == "constructor_invocation" { Some(ch) } else { child_by_kind(ch, "constructor_invocation") };
         if let Some(ci) = ctor {
             let txt = normalize_single_line(node_text(ci, src));
@@ -222,10 +223,8 @@ pub(crate) fn kt_supertypes(node: Node<'_>, src: &str) -> (Option<String>, Vec<S
             continue;
         }
         let ut = if ch.kind() == "user_type" { Some(ch) } else { child_by_kind(ch, "user_type") };
-        if let Some(tn) = ut {
-            let txt = normalize_single_line(node_text(tn, src));
-            if !txt.is_empty() { implements.push(txt); }
-        }
+        let txt = normalize_single_line(node_text(ut.unwrap_or(ch), src));
+        if !txt.is_empty() { implements.push(txt); }
     }
     (extends, implements)
 }

@@ -13,10 +13,7 @@ use crate::parser_iter_match::{is_match_ahead, start_match};
 use crate::parser_new::{parse_new_prefix, try_attach_new_init};
 
 pub(crate) fn pop_expr(vals: &mut Vec<ParseVal>) -> Expr {
-    match vals.pop().expect("expected Expr") {
-        ParseVal::Expr(e) => e,
-        _ => unreachable!("expected ParseVal::Expr"),
-    }
+    match vals.pop().expect("expected Expr") { ParseVal::Expr(e) => e, _ => unreachable!("expected ParseVal::Expr") }
 }
 
 pub(crate) fn step_expr_cont(
@@ -76,6 +73,10 @@ pub(crate) fn step_expr_cont(
         }
         ParseCont::ExprAwait => { let e = pop_expr(vals); vals.push(ParseVal::Expr(Expr::Await(Box::new(e)))); }
         ParseCont::ExprParenClose => step_paren_close(p, stack, vals)?,
+        ParseCont::ExprWalrusClose { name, rhs_start } => {
+            let rhs_end = p.peek().span.start_byte; p.expect(TokenKind::RParen, "Expected ')'")?; let _ = pop_expr(vals);
+            vals.push(ParseVal::Expr(Expr::Ident(format!("({name} := {})", p.src.get(rhs_start..rhs_end.max(rhs_start)).unwrap_or("").trim()))));
+        }
         ParseCont::ExprCallArg { callee, mut args, is_optional, is_new } => {
             let a = pop_expr(vals);
             if args.is_empty() && crate::parser_iter_comp::is_comp_for_ahead(p) {

@@ -65,8 +65,10 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                     env.exprs.push(Expr::Raw(node_text(node, env.src).trim().into())); return;
                 }
                 if let Some(ch) = named_children(node).into_iter().next() {
-                    if node.kind() == "parenthesized_expression" && ch.kind() == "named_expression" {
-                        env.exprs.push(Expr::Ident(crate::decompile::ts_helpers::normalize_single_line(node_text(node, env.src))));
+                    if node.kind() == "parenthesized_expression"
+                        && let Some(raw_ex) = crate::decompile::fallback::paren_raw_if_needed(node, ch, env.src, env.lang)
+                    {
+                        env.exprs.push(raw_ex);
                         return;
                     }
                     node = ch;
@@ -83,7 +85,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 {
                     node = val;
                 } else {
-                    env.exprs.push(Expr::Ident(node_text(node, env.src).trim().into()));
+                    env.exprs.push(crate::decompile::fallback::cond_clause_or_raw(node_text(node, env.src).trim()));
                     return;
                 }
             }

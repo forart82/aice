@@ -89,6 +89,15 @@ pub(crate) fn java_has_mod(node: Node<'_>, src: &str, kw: &str) -> bool {
     mods.children(&mut cur).any(|c| !c.is_named() && node_text(c, src).trim() == kw)
 }
 
+pub(crate) fn extract_java_annotations(node: Node<'_>, src: &str) -> Vec<String> {
+    let Some(mods) = child_by_kind(node, "modifiers") else { return Vec::new(); };
+    named_children(mods).into_iter()
+        .filter(|c| matches!(c.kind(), "annotation" | "marker_annotation"))
+        .map(|c| crate::decompile::ts_helpers::normalize_single_line(node_text(c, src)))
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 fn collect_java_type_list(container: Node<'_>, src: &str) -> Vec<String> {
     let list = child_by_kind(container, "type_list").unwrap_or(container);
     named_children(list)

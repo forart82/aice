@@ -37,6 +37,40 @@ pub(crate) fn ident_or_raw(raw: &str) -> Expr {
     if is_safe_bare_ident(t) { Expr::Ident(t.to_string()) } else { Expr::Raw(t.to_string()) }
 }
 
+pub(crate) fn interp_expr_or_raw(ex_txt: &str) -> Expr {
+    let t = ex_txt.trim();
+    if is_safe_bare_ident(t) { return Expr::Ident(t.to_string()); }
+    if !t.is_empty() && !t.contains('\n') && !t.contains("===") && !t.contains("!==") && !t.contains("=~") && !t.contains("=>")
+        && crate::parser::parse_aice(&format!("module m\nfn _():\n  _ = `${{{t}}}`\n")).is_ok()
+    {
+        Expr::Ident(t.to_string())
+    } else {
+        Expr::Raw(t.to_string())
+    }
+}
+
+pub(crate) fn paren_raw_if_needed(node: Node<'_>, ch: Node<'_>, src: &str, lang: LanguageId) -> Option<Expr> {
+    if ch.kind() == "named_expression" {
+        let norm = crate::decompile::ts_helpers::normalize_single_line(node_text(node, src));
+        let ok = !norm.contains('\n') && crate::parser::parse_aice(&format!("module m\nfn _():\n  _ = {norm}\n")).is_ok();
+        return Some(if ok { Expr::Ident(norm) } else { Expr::Raw(norm) });
+    }
+    if is_known_expr_node_kind(ch.kind(), lang)
+        || matches!(
+            ch.kind(),
+            "if_expression" | "match_expression" | "when_expression" | "case" | "try_expression"
+                | "assignment_expression" | "augmented_assignment_expression" | "compound_assignment_expr"
+                | "augmented_assignment" | "operator_assignment"
+        )
+    { None } else { Some(Expr::Raw(node_text(node, src).trim().to_string())) }
+}
+
+pub(crate) fn cond_clause_or_raw(raw: &str) -> Expr {
+    if !raw.contains('\n') && crate::parser::parse_aice(&format!("module m\nfn _():\n  if {raw}:\n    pass\n")).is_ok() {
+        Expr::Ident(raw.to_string())
+    } else { Expr::Raw(raw.to_string()) }
+}
+
 pub(crate) fn ident_node_or_raw(raw: &str) -> Expr {
     let t = raw.trim();
     if !t.is_empty()
@@ -179,59 +213,37 @@ pub(crate) fn push_expr_fallback<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, ra
 }
 
 pub(crate) fn try_multi_assign_stmt(node: Node<'_>, src: &str, lang: LanguageId) -> Option<Stmt> {
-    if !matches!(lang, LanguageId::Go | LanguageId::Python | LanguageId::Ruby) {
-        return None;
-    }
+    if !matches!(lang, LanguageId::Go | LanguageId::Python | LanguageId::Ruby) { return None; }
     let raw = node_text(node, src).trim();
-    if raw.contains('\n') {
-        return None;
-    }
-    let lhs = node.child_by_field_name("left")?;
-    let rhs = node.child_by_field_name("right")?;
-    let gap = src.get(lhs.end_byte()..rhs.start_byte())?.trim();
-    if gap != "=" {
-        return None;
-    }
-    let lhs_s = node_text(lhs, src).trim();
-    let rhs_s = node_text(rhs, src).trim();
-    if lhs_s.is_empty() || rhs_s.is_empty() || crate::lexer::lex(raw).is_err() {
-        return None;
-    }
-    Some(Stmt::Assign {
-        target: Expr::Ident(lhs_s.to_string()),
-        op: AssignOp::Assign,
-        value: Expr::Ident(rhs_s.to_string()),
-        trivia: Trivia::default(),
-    })
+    if raw.contains('\n') { return None; }
+    let (lhs, rhs) = (node.child_by_field_name("left")?, node.child_by_field_name("right")?);
+    if src.get(lhs.end_byte()..rhs.start_byte())?.trim() != "=" { return None; }
+    let (lhs_s, rhs_s) = (node_text(lhs, src).trim(), node_text(rhs, src).trim());
+    if lhs_s.is_empty() || rhs_s.is_empty() || crate::lexer::lex(raw).is_err() { return None; }
+    Some(Stmt::Assign { target: Expr::Ident(lhs_s.into()), op: AssignOp::Assign, value: Expr::Ident(rhs_s.into()), trivia: Trivia::default() })
 }
 
 pub(crate) fn is_non_trivia_fallback(node: Node<'_>, src: &str) -> bool {
-    if !node.is_named() || is_comment_kind(node.kind()) {
-        return false;
-    }
-    if matches!(
-        node.kind(),
-        "empty_statement" | "empty_declaration" | "semicolon" | ";" | "pass_statement"
-    ) {
-        return false;
-    }
+    if !node.is_named() || is_comment_kind(node.kind())
+        || matches!(node.kind(), "empty_statement" | "empty_declaration" | "semicolon" | ";" | "pass_statement")
+    { return false; }
     let t = node_text(node, src).trim();
     !t.is_empty() && t != ";"
 }
 
-pub(crate) fn push_top_directive_vec(
-    out: &mut Vec<AiceItem>,
-    node: Node<'_>,
-    src: &str,
-    trivia: Trivia,
-) {
-    if !is_non_trivia_fallback(node, src) {
-        return;
-    }
-    let text = dedent_node_text(node, src);
-    if !text.is_empty() {
-        out.push(AiceItem::Directive { text, trivia, span: node_span(node) });
-    }
+fn dedent_with_macro_semi(node: Node<'_>, src: &str) -> String {
+    let mut text = dedent_node_text(node, src);
+    if !text.ends_with(';') && !text.ends_with('}')
+        && (node.kind() == "macro_invocation" || node.kind() == "macro_definition")
+        && src.get(node.end_byte()..).is_some_and(|r| r.trim_start().starts_with(';'))
+    { text.push(';'); }
+    text
+}
+
+pub(crate) fn push_top_directive_vec(out: &mut Vec<AiceItem>, node: Node<'_>, src: &str, trivia: Trivia) {
+    if !is_non_trivia_fallback(node, src) { return; }
+    let text = dedent_with_macro_semi(node, src);
+    if !text.is_empty() { out.push(AiceItem::Directive { text, trivia, span: node_span(node) }); }
 }
 
 pub(crate) fn push_top_directive(m: &mut AiceModule, node: Node<'_>, src: &str, trivia: Trivia) {
@@ -239,43 +251,30 @@ pub(crate) fn push_top_directive(m: &mut AiceModule, node: Node<'_>, src: &str, 
 }
 
 pub(crate) fn push_raw_member_span(
-    methods: &mut Vec<MethodDecl>,
-    start_node: Node<'_>,
-    end_node: Node<'_>,
-    src: &str,
-    vis: Visibility,
-    trivia: Trivia,
+    methods: &mut Vec<MethodDecl>, start_node: Node<'_>, end_node: Node<'_>,
+    src: &str, vis: Visibility, trivia: Trivia,
 ) {
-    let sb = start_node.start_byte().min(src.len());
-    let eb = end_node.end_byte().min(src.len());
+    let (sb, eb) = (start_node.start_byte().min(src.len()), end_node.end_byte().min(src.len()));
     if eb <= sb { return; }
     let text = dedent_raw_slice(&src[sb..eb], src, sb);
     if text.is_empty() || text == ";" { return; }
     let mut sp = node_span(start_node);
     sp.end_byte = eb;
     methods.push(MethodDecl {
-        vis, is_static: false, is_async: false, is_const: false,
-        accessor: AccessorKind::Raw, name: text,
-        type_params: Vec::new(), params: Vec::new(), return_type: None,
-        body: FnBody::SignatureOnly, trivia, span: sp,
+        vis, is_static: false, is_async: false, is_const: false, accessor: AccessorKind::Raw, name: text,
+        type_params: Vec::new(), params: Vec::new(), return_type: None, body: FnBody::SignatureOnly, trivia, span: sp,
     });
 }
 
 pub(crate) fn push_raw_member(
-    methods: &mut Vec<MethodDecl>,
-    node: Node<'_>,
-    src: &str,
-    vis: Visibility,
-    trivia: Trivia,
+    methods: &mut Vec<MethodDecl>, node: Node<'_>, src: &str, vis: Visibility, trivia: Trivia,
 ) {
     if !is_non_trivia_fallback(node, src) { return; }
-    let text = dedent_node_text(node, src);
+    let text = dedent_with_macro_semi(node, src);
     if !text.is_empty() {
         methods.push(MethodDecl {
-            vis, is_static: false, is_async: false, is_const: false,
-            accessor: AccessorKind::Raw, name: text,
-            type_params: Vec::new(), params: Vec::new(), return_type: None,
-            body: FnBody::SignatureOnly, trivia, span: node_span(node),
+            vis, is_static: false, is_async: false, is_const: false, accessor: AccessorKind::Raw, name: text,
+            type_params: Vec::new(), params: Vec::new(), return_type: None, body: FnBody::SignatureOnly, trivia, span: node_span(node),
         });
     }
 }

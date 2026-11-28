@@ -116,6 +116,25 @@ pub(crate) fn parse_heritage_name(p: &mut Parser<'_>) -> Result<String, Transpil
         }
         if end > start { name.push_str(&p.src[start..end]); }
     }
+    if p.peek_kind() == TokenKind::Ident && p.peek().lexeme == "by" {
+        p.advance();
+        let (mut start, mut end, mut depth) = (None, 0usize, 0usize);
+        while !p.at_eof() {
+            let k = p.peek_kind();
+            if depth == 0 && matches!(k, TokenKind::Comma | TokenKind::Colon | TokenKind::Newline | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment) { break; }
+            let tok = p.advance();
+            if tok.span.end_byte > tok.span.start_byte {
+                if start.is_none() { start = Some(tok.span.start_byte); }
+                end = tok.span.end_byte;
+            }
+            match tok.kind {
+                TokenKind::LParen | TokenKind::LBracket | TokenKind::LBrace | TokenKind::Lt => depth += 1,
+                TokenKind::RParen | TokenKind::RBracket | TokenKind::RBrace | TokenKind::Gt => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+        }
+        if let Some(s) = start { name.push_str(&format!(" by {}", p.src[s..end].trim())); }
+    }
     Ok(name)
 }
 

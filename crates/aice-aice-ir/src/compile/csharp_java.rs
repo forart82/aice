@@ -110,9 +110,29 @@ pub(crate) fn java_synth_class_name(mod_name: &str) -> String {
     }
 }
 
+pub(crate) fn emit_java_decs(ec: &mut EmitCtx, decs: &[String]) {
+    for d in decs {
+        let s = d.trim().trim_start_matches('@');
+        if !s.is_empty() && !matches!(s, "static" | "record" | "enum" | "variant_body") && parse_nested_tag(s).is_none() {
+            ec.line(&format!("@{s}"));
+        }
+    }
+}
+
+pub(crate) fn emit_java_attrs(ec: &mut EmitCtx, tr: &Trivia) {
+    for c in &tr.leading {
+        if c.kind != TriviaKind::Attribute { continue; }
+        let s = c.text.trim().trim_start_matches('@');
+        if !s.is_empty() && !matches!(s, "abstract" | "variant") && parse_nested_tag(s).is_none() {
+            ec.line(&format!("@{s}"));
+        }
+    }
+}
+
 pub(crate) fn emit_java_enum(ec: &mut EmitCtx, ed: &EnumDecl) {
     ec.blank();
     ec.emit_trivia(&ed.trivia, CommentStyle::Slash);
+    emit_java_attrs(ec, &ed.trivia);
     ec.line(&format!("{}enum {} {{", j_vis(ed.vis), ed.name));
     ec.push();
     for v in &ed.variants { ec.line(&format!("{},", v.name)); }

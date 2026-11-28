@@ -102,7 +102,11 @@ pub(crate) fn push_pattern<'a>(tasks: &mut Vec<PTask<'a>>, pat: &'a Pattern, out
     match pat {
         Pattern::Wildcard => out.push('_'),
         Pattern::Literal(l) => out.push_str(&print_lit(l)),
-        Pattern::Ident(s) => out.push_str(if s == "nil" { "\\#nil" } else { s }),
+        Pattern::Ident(s) => {
+            if s == "nil" { out.push_str("\\#nil"); }
+            else if is_safe_pattern_ident(s) { out.push_str(s); }
+            else { out.push_str(&crate::printer_expr::format_raw_expr(s)); }
+        }
         Pattern::Constructor { name, args } => {
             out.push_str(name);
             out.push('(');
@@ -139,6 +143,33 @@ pub(crate) fn push_pattern<'a>(tasks: &mut Vec<PTask<'a>>, pat: &'a Pattern, out
             tasks.push(PTask::Ty(ty));
         }
     }
+}
+
+fn is_pat_ident_seg(s: &str) -> bool {
+    let mut cs = s.chars();
+    let Some(f) = cs.next() else { return false; };
+    (f.is_ascii_alphabetic() || f == '_') && cs.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn is_scoped_pat_name(s: &str) -> bool {
+    if s.is_empty() || matches!(s, "_" | "in" | "is" | "raw" | "true" | "false" | "nil") { return false; }
+    if s.contains("::") { s.split("::").all(is_pat_ident_seg) }
+    else if s.contains('.') { s.split('.').all(is_pat_ident_seg) }
+    else { is_pat_ident_seg(s) }
+}
+
+fn is_safe_pattern_ident(s: &str) -> bool {
+    if is_scoped_pat_name(s) { return true; }
+    if let Some((head, rest)) = s.split_once(" {")
+        && let Some(inner) = rest.strip_suffix('}')
+        && is_scoped_pat_name(head.trim())
+    {
+        return inner.split(',').all(|part| {
+            let p = part.trim();
+            p.is_empty() || p == ".." || is_pat_ident_seg(p)
+        });
+    }
+    false
 }
 
 fn format_quoted_str_lit_union(raw: &str) -> Option<(String, bool)> {
