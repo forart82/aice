@@ -80,6 +80,8 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                                 methods.push(rs_fn_to_method(f));
                             } else if mc.kind() == "type_item" {
                                 assoc_props.push(decompile_rs_impl_assoc(mc, src, collect_trivia(mc, src, opts)));
+                            } else if !is_comment_kind(mc.kind()) {
+                                crate::decompile::fallback::push_raw_member(&mut methods, mc, src, Visibility::Default, collect_trivia(mc, src, opts));
                             }
                         }
                     }
@@ -198,7 +200,7 @@ fn decompile_trait(node: Node<'_>, vis: Visibility, src: &str, opts: &TranspileO
                 methods.push(rs_fn_to_method(decompile_rs_fn(ch, Visibility::Default, src, opts, Trivia::default())));
             } else if ch.kind() == "associated_type" {
                 fields.push(decompile_rs_trait_assoc(ch, src, collect_trivia(ch, src, opts)));
-            }
+            } else if !is_comment_kind(ch.kind()) { crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, collect_trivia(ch, src, opts)); }
         }
     }
     TypeDecl {

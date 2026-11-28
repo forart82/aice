@@ -51,7 +51,9 @@ pub(crate) fn parse_class_decl(
                 let is_static = p.peek().lexeme == "static"
                     && (p.peek_n(1).kind == TokenKind::Colon || !prop_delim(p.peek_n(1).kind))
                     && { p.advance(); true };
-                if is_static && p.peek_kind() == TokenKind::Colon {
+                if is_raw_member_ahead(p) && !is_static {
+                    methods.push(parse_raw_member(p, mvis, mtr));
+                } else if is_static && p.peek_kind() == TokenKind::Colon {
                     p.advance();
                     static_blocks.push(parse_block(p)?);
                 } else if (matches!(p.peek_kind(), TokenKind::Fn | TokenKind::Async) && !prop_delim(p.peek_n(1).kind))
@@ -147,6 +149,24 @@ fn parse_prop_decl(p: &mut Parser<'_>, vis: Visibility, is_static: bool, trivia:
     let mut tr = trivia;
     tr.trailing = p.take_trailing_comment();
     Ok(PropDecl { name, aliases: Vec::new(), vis, is_static, is_readonly, is_mut, is_optional, ty, init, trivia: tr })
+}
+
+pub(crate) fn is_raw_member_ahead(p: &Parser<'_>) -> bool {
+    p.peek_kind() == TokenKind::Ident
+        && p.peek().lexeme == "raw"
+        && matches!(p.peek_n(1).kind, TokenKind::String | TokenKind::TripleString)
+}
+
+pub(crate) fn parse_raw_member(p: &mut Parser<'_>, vis: Visibility, mut trivia: Trivia) -> MethodDecl {
+    let sp = p.advance().span;
+    let text = p.advance().lexeme;
+    trivia.trailing = p.take_trailing_comment();
+    MethodDecl {
+        vis, is_static: false, is_async: false, is_const: false,
+        accessor: AccessorKind::Raw, name: text,
+        type_params: Vec::new(), params: Vec::new(), return_type: None,
+        body: crate::ir_code::FnBody::SignatureOnly, trivia, span: sp,
+    }
 }
 
 pub(crate) fn parse_method_decl(p: &mut Parser<'_>, vis: Visibility, is_static: bool, trivia: Trivia) -> Result<MethodDecl, TranspileError> {

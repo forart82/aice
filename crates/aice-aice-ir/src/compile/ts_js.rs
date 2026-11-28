@@ -44,7 +44,7 @@ pub fn compile(module: &AiceModule, target: LanguageId) -> Result<String, Transp
             AiceItem::Component(comp) => emit_component(&mut ec, comp, target, &ectx),
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                for line in text.lines() { ec.line(line); }
+                ec.emit_raw_block(text);
             }
             _ => {}
         }
@@ -100,6 +100,11 @@ fn emit_type_decl(ec: &mut EmitCtx, td: &TypeDecl, target: LanguageId) {
         ec.line(&format!("{ro}{}{opt}: {t};", f.name));
     }
     for m in &td.methods {
+        if m.accessor == AccessorKind::Raw {
+            ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+            ec.emit_raw_block(&m.name);
+            continue;
+        }
         let mtps = emit_ts_type_params(&m.type_params, target);
         let ps = emit_ts_params(&m.params, target, false);
         let rt = m.return_type.as_ref().map(|t| format!(": {}", emit_type(t, target))).unwrap_or_default();
@@ -162,6 +167,12 @@ fn emit_class_decl(ec: &mut EmitCtx, cd: &ClassDecl, target: LanguageId, ectx: &
 }
 
 fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, target: LanguageId, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw {
+        ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+        if target != LanguageId::JavaScript { ec.emit_attrs(&m.trivia); }
+        ec.emit_raw_block(&m.name);
+        return;
+    }
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let is_js = target == LanguageId::JavaScript;
@@ -172,7 +183,7 @@ fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, target: LanguageId, ectx: &Expr
     let (asy, acc) = match m.accessor {
         AccessorKind::Get => ("", "get "),
         AccessorKind::Set => ("", "set "),
-        AccessorKind::Constructor => ("", ""),
+        AccessorKind::Constructor | AccessorKind::Raw => ("", ""),
         AccessorKind::Normal => (if m.is_async { "async " } else { "" }, ""),
     };
     let mtps = if !is_js && m.accessor == AccessorKind::Normal { emit_ts_type_params(&m.type_params, target) } else { String::new() };

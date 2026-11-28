@@ -40,7 +40,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Hash);
-                for line in text.lines() { ec.line(line); }
+                ec.emit_raw_block(text);
             }
             _ => {}
         }
@@ -97,6 +97,11 @@ fn emit_rb_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 }
 
 fn emit_rb_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw {
+        ec.emit_trivia(&m.trivia, CommentStyle::Hash);
+        ec.emit_raw_block(&m.name);
+        return;
+    }
     ec.emit_trivia(&m.trivia, CommentStyle::Hash);
     let ps = emit_rb_params(&m.params);
     let nm = if m.accessor == AccessorKind::Constructor || m.name == "constructor" {

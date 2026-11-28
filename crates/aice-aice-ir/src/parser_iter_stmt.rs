@@ -284,9 +284,8 @@ fn step_stmt_start(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Ve
         }
         TokenKind::LParen if is_paren_destructure_ahead(p) => push_delim_destructure(p, TokenKind::LParen, TokenKind::RParen, "()", stack)?,
         TokenKind::LBrace if is_obj_destructure_ahead(p) => push_delim_destructure(p, TokenKind::LBrace, TokenKind::RBrace, "{}", stack)?,
-        _ if is_var_decl_stmt_ahead(p) => {
-            vals.push(ParseVal::Stmt(Box::new(Stmt::Expr { expr: Expr::Ident(consume_raw_stmt_line(p)), trivia: Trivia::default() })));
-        }
+        _ if let Some(raw_st) = crate::parser_nil::try_parse_raw_stmt(p) => vals.push(ParseVal::Stmt(Box::new(raw_st))),
+        _ if is_var_decl_stmt_ahead(p) => vals.push(ParseVal::Stmt(Box::new(Stmt::Expr { expr: Expr::Ident(consume_raw_stmt_line(p)), trivia: Trivia::default() }))),
         _ if let Some(eq_idx) = find_multi_assign_eq(p) => {
             let lhs = p.src.get(p.tokens[p.pos].span.start_byte..p.tokens[eq_idx - 1].span.end_byte).unwrap_or("").trim().to_string();
             p.pos = eq_idx + 1;

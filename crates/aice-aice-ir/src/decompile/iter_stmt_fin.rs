@@ -136,7 +136,16 @@ pub(crate) fn finish_stmt_task(env: &mut DecompEnv<'_>, f: StmtFin) {
             let expr = env.exprs.pop().expect("throw");
             env.stmts.push(Stmt::Throw { expr, cause, trivia: Trivia::default() });
         }
-        StmtFin::ExprStmt => env.stmts.push(Stmt::Expr { expr: env.exprs.pop().expect("expr stmt"), trivia: Trivia::default() }),
+        StmtFin::ExprStmt(has_semi) => {
+            let mut expr = env.exprs.pop().expect("expr stmt");
+            if let Expr::Raw(ref mut s) = expr {
+                let mut text = std::mem::take(s);
+                if has_semi && !text.ends_with(';') { text.push(';'); }
+                env.stmts.push(Stmt::Raw { text, trivia: Trivia::default() });
+            } else {
+                env.stmts.push(Stmt::Expr { expr, trivia: Trivia::default() });
+            }
+        }
         StmtFin::Unless { has_else } => {
             let else_body = if has_else { Some(env.blocks.pop().unwrap_or_default()) } else { None };
             let then_body = env.blocks.pop().unwrap_or_default();

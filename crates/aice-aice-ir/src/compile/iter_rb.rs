@@ -70,6 +70,10 @@ fn push_rb_stmt<'a>(stmt: &'a Stmt, st: &mut EvalState, tasks: &mut Vec<CTask<'a
     match stmt {
         Stmt::Pass => {}
         Stmt::Comment(tr) => ec.emit_trivia(tr, CommentStyle::Hash),
+        Stmt::Raw { text, trivia } => {
+            ec.emit_trivia(trivia, CommentStyle::Hash);
+            ec.emit_raw_block(text);
+        }
         Stmt::Let { name, init, .. } => {
             tasks.push(CTask::RbLet { name, has_init: init.is_some() });
             if let Some(e) = init { tasks.push(CTask::EvalExpr(e)); }

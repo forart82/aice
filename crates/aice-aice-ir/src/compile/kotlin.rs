@@ -7,7 +7,7 @@ use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::kotlin_dart::{emit_kt_type, emit_kt_type_params};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
-use crate::ir_code::{ClassDecl, Expr, FnBody, FnDecl, MethodDecl, PropDecl};
+use crate::ir_code::{AccessorKind, ClassDecl, Expr, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::{EnumDecl, ParamDecl};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -52,7 +52,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Directive { text, trivia, .. } => {
                 ec.blank();
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                for line in text.lines() { ec.line(line); }
+                ec.emit_raw_block(text);
             }
             _ => {}
         }
@@ -219,6 +219,7 @@ fn kt_receiver_prefix(decs: &[String], tr: &Trivia) -> String {
 }
 
 fn emit_kt_method(ec: &mut EmitCtx, m: &MethodDecl, cls_abs: bool, is_iface: bool, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw { ec.emit_trivia(&m.trivia, CommentStyle::Slash); ec.emit_raw_block(&m.name); return; }
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let (tps, wh) = emit_kt_type_params(&m.type_params);
     let tps_sp = if tps.is_empty() { String::new() } else { format!("{tps} ") };

@@ -49,7 +49,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                     ec.line(&format!("{t};"));
                 } else {
                     ec.emit_trivia(trivia, CommentStyle::Slash);
-                    ec.line(text);
+                    ec.emit_raw_block(text);
                 }
             }
             _ => {}
@@ -162,6 +162,14 @@ fn emit_cpp_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
         }
     };
     for m in &cd.methods {
+        if m.accessor == AccessorKind::Raw {
+            if m.vis != Visibility::Default { switch_vis(ec, &mut cur_vis, m.vis); }
+            ec.push();
+            ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+            ec.emit_raw_block(&m.name);
+            ec.pop();
+            continue;
+        }
         let v = if m.vis == Visibility::Default { Visibility::Public } else { m.vis };
         switch_vis(ec, &mut cur_vis, v);
         ec.push();

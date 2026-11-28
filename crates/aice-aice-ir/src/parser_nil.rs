@@ -239,6 +239,22 @@ pub(crate) fn find_multi_assign_eq(p: &Parser<'_>) -> Option<usize> {
     None
 }
 
+pub(crate) fn try_parse_raw_stmt(p: &mut Parser<'_>) -> Option<Stmt> {
+    if p.peek_kind() == TokenKind::Ident
+        && p.peek().lexeme == "raw"
+        && matches!(p.peek_n(1).kind, TokenKind::String | TokenKind::TripleString)
+        && matches!(
+            p.peek_n(2).kind,
+            TokenKind::Newline | TokenKind::Semicolon | TokenKind::RBrace | TokenKind::Dedent | TokenKind::Eof | TokenKind::Comment
+        )
+    {
+        p.advance();
+        let text = p.advance().lexeme;
+        return Some(Stmt::Raw { text, trivia: crate::ir::Trivia::default() });
+    }
+    None
+}
+
 pub(crate) fn is_var_decl_stmt_ahead(p: &Parser<'_>) -> bool {
     if p.peek_kind() != TokenKind::Ident || p.peek().lexeme != "var" { return false; }
     let t1 = p.peek_n(1);

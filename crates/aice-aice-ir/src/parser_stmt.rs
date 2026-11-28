@@ -65,7 +65,7 @@ fn stmt_trailing(st: &Stmt) -> Option<String> {
         | Stmt::Return { trivia, .. } | Stmt::Expr { trivia, .. } | Stmt::If { trivia, .. }
         | Stmt::Match { trivia, .. } | Stmt::For { trivia, .. } | Stmt::While { trivia, .. }
         | Stmt::Loop { trivia, .. } | Stmt::Try { trivia, .. } | Stmt::Throw { trivia, .. }
-        | Stmt::Break { trivia, .. } | Stmt::Continue { trivia, .. } => trivia.trailing.clone(),
+        | Stmt::Break { trivia, .. } | Stmt::Continue { trivia, .. } | Stmt::Raw { trivia, .. } => trivia.trailing.clone(),
         Stmt::Pass | Stmt::Comment(_) => None,
     }
 }
@@ -77,7 +77,7 @@ pub(crate) fn attach_stmt_trivia(st: &mut Stmt, mut tr: Trivia, trailing: Option
         | Stmt::Return { trivia, .. } | Stmt::Expr { trivia, .. } | Stmt::If { trivia, .. }
         | Stmt::Match { trivia, .. } | Stmt::For { trivia, .. } | Stmt::While { trivia, .. }
         | Stmt::Loop { trivia, .. } | Stmt::Try { trivia, .. } | Stmt::Throw { trivia, .. }
-        | Stmt::Break { trivia, .. } | Stmt::Continue { trivia, .. } => *trivia = tr,
+        | Stmt::Break { trivia, .. } | Stmt::Continue { trivia, .. } | Stmt::Raw { trivia, .. } => *trivia = tr,
         Stmt::Pass | Stmt::Comment(_) => {}
     }
 }

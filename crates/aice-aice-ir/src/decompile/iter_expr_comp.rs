@@ -186,7 +186,7 @@ pub(crate) fn push_dart_type_test_task<'a>(env: &mut DecompEnv<'a>, node: Node<'
         .filter(|c| !is_comment_kind(c.kind()))
         .collect();
     if kids.len() != 2 {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
         return;
     }
     let tt = kids[1];
@@ -196,11 +196,11 @@ pub(crate) fn push_dart_type_test_task<'a>(env: &mut DecompEnv<'a>, node: Node<'
     } else if let Some(rest) = tt_txt.strip_prefix("is") {
         (BinaryOp::Is, rest.trim())
     } else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
         return;
     };
     if ty_txt.is_empty() {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
         return;
     }
     env.tasks.push(DTask::FinishExpr(ExprFin::BinaryIdentRhs(op, ty_txt.to_string())));
@@ -216,7 +216,7 @@ pub(crate) fn push_dart_chained_binary<'a>(
     for pair in kids.windows(2) {
         let gap = env.src.get(pair[0].end_byte()..pair[1].start_byte()).unwrap_or("").trim();
         let Some(op) = map_binary_op(gap, env.lang) else {
-            env.exprs.push(Expr::Ident(raw.to_string()));
+            env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
             return;
         };
         ops.push(op);

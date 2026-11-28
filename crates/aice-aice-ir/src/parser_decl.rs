@@ -73,9 +73,9 @@ pub(crate) fn parse_type_decl(p: &mut Parser<'_>, vis: Visibility, default_kind:
                     if p.peek_kind() == TokenKind::Dedent || p.at_eof() { break; }
                     if p.eat(TokenKind::Pass) { p.eat_stmt_end(); continue; }
                     let mvis = p.parse_visibility();
-                    if p.peek_kind() == TokenKind::Fn || p.peek_kind() == TokenKind::Async {
-                        methods.push(parse_method_decl(p, mvis, false, mtr)?);
-                    } else if kind == TypeKind::Interface && mvis == Visibility::Default && is_interface_constraint(p, false) {
+                    if crate::parser_class::is_raw_member_ahead(p) { methods.push(crate::parser_class::parse_raw_member(p, mvis, mtr)); }
+                    else if matches!(p.peek_kind(), TokenKind::Fn | TokenKind::Async) { methods.push(parse_method_decl(p, mvis, false, mtr)?); }
+                    else if kind == TypeKind::Interface && mvis == Visibility::Default && is_interface_constraint(p, false) {
                         fields.push(parse_interface_constraint(p, false, mtr));
                     } else {
                         let mut fld = parse_field_decl(p, mtr)?;

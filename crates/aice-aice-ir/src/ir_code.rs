@@ -48,6 +48,7 @@ pub enum AccessorKind {
     Get,
     Set,
     Constructor,
+    Raw,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -195,4 +196,8 @@ pub enum Stmt {
     },
     Pass,
     Comment(Trivia),
+    Raw {
+        text: String,
+        trivia: Trivia,
+    },
 }

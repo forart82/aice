@@ -83,9 +83,12 @@ fn decompile_py_item(
                     if is_comment_kind(ch.kind()) { continue; }
                     let mtr = collect_trivia(ch, src, opts);
                     match ch.kind() {
+                        "pass_statement" => {}
                         "expression_statement" => {
                             if let Some(asn) = named_children(ch).into_iter().find(|c| c.kind() == "assignment") {
                                 props.push(py_prop(asn, src, mtr));
+                            } else {
+                                crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr);
                             }
                         }
                         "function_definition" => methods.push(py_method(ch, src, opts, mtr)),
@@ -109,9 +112,11 @@ fn decompile_py_item(
                                 let mut dtr = mtr;
                                 push_attrs_to_trivia(&mut dtr, decs);
                                 methods.push(py_method(cur, src, opts, dtr));
+                            } else {
+                                crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr);
                             }
                         }
-                        _ => {}
+                        _ => crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr),
                     }
                 }
             }

@@ -139,5 +139,6 @@ pub(crate) fn push_inline_stmt<'a>(tasks: &mut Vec<PTask<'a>>, st: &'a Stmt, out
         Stmt::Continue { label, .. } => {
             if let Some(l) = label { out.push_str(&format!("continue {l}")); } else { out.push_str("continue"); }
         }
+        Stmt::Raw { text, .. } => out.push_str(&crate::printer_expr::format_raw_expr(text)),
     }
 }

@@ -21,7 +21,7 @@ pub(crate) enum StmtFin {
     Return(bool),
     ReturnRecord(usize),
     Throw(bool),
-    ExprStmt,
+    ExprStmt(bool),
     Unless { has_else: bool },
     Modifier { is_unless: bool },
     While { has_body: bool, trivia: Trivia },
@@ -122,7 +122,8 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             ) {
                 node = ch;
             } else {
-                env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
+                let has_semi = node_text(node, env.src).trim_end().ends_with(';');
+                env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt(has_semi)));
                 env.tasks.push(DTask::Expr(ch));
                 return;
             }
@@ -132,7 +133,7 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         }
     }
     if let Some(raw) = raw_passthrough_stmt_text(node, env.src, env.lang) {
-        env.stmts.push(Stmt::Expr { expr: Expr::Raw(raw), trivia: Trivia::default() });
+        env.stmts.push(Stmt::Raw { text: raw, trivia: Trivia::default() });
         return;
     }
     match node.kind() {
@@ -154,8 +155,8 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             } else if raw.starts_with("continue") {
                 env.stmts.push(Stmt::Continue { label: None, trivia: Trivia::default() });
             } else {
-                env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
-                env.tasks.push(DTask::Expr(node));
+                let text = crate::decompile::fallback::dedent_node_text(node, env.src);
+                if !text.is_empty() { env.stmts.push(Stmt::Raw { text, trivia: Trivia::default() }); }
             }
         }
         "return_statement" | "return_expression" | "return" => {
@@ -218,7 +219,7 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         | "foreach_statement" | "enhanced_for_statement" | "for" => push_for_stmt(env, node),
         "begin" => push_ruby_begin(env, node),
         "try_expression" if env.lang == LanguageId::Rust => {
-            env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
+            env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt(false)));
             env.tasks.push(DTask::Expr(node));
         }
         "try_statement" | "try_expression" => push_try_task(env, node),
@@ -256,30 +257,40 @@ pub(crate) fn push_stmt_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 env.tasks.push(DTask::FinishStmt(StmtFin::Assign { op }));
                 env.tasks.push(DTask::Expr(val));
                 env.tasks.push(DTask::Expr(tgt));
+            } else if let Some(ma) = crate::decompile::fallback::try_multi_assign_stmt(node, env.src, env.lang) {
+                env.stmts.push(ma);
             } else {
-                env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
-                env.tasks.push(DTask::Expr(node));
+                let text = crate::decompile::fallback::dedent_node_text(node, env.src);
+                if !text.is_empty() { env.stmts.push(Stmt::Raw { text, trivia: Trivia::default() }); }
             }
         }
         "defer_statement" | "go_statement" if env.lang == LanguageId::Go => {
-            env.stmts.push(Stmt::Expr {
-                expr: Expr::Raw(node_text(node, env.src).trim().to_string()),
-                trivia: Trivia::default(),
-            });
+            let text = crate::decompile::fallback::dedent_node_text(node, env.src);
+            if !text.is_empty() { env.stmts.push(Stmt::Raw { text, trivia: Trivia::default() }); }
         }
         "var_declaration" if env.lang == LanguageId::Go => {
-            let raw = node_text(node, env.src).trim().to_string();
-            let expr = if raw.contains('\n') { Expr::Raw(raw) } else { Expr::Ident(raw) };
-            env.stmts.push(Stmt::Expr { expr, trivia: Trivia::default() });
+            let raw = crate::decompile::fallback::dedent_node_text(node, env.src);
+            if raw.contains('\n') {
+                env.stmts.push(Stmt::Raw { text: raw, trivia: Trivia::default() });
+            } else {
+                env.stmts.push(Stmt::Expr { expr: Expr::Ident(raw), trivia: Trivia::default() });
+            }
         }
         "function_declaration" if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::JavaScript) => {
             let name = field_text(node, "name", env.src).unwrap_or("fn_local").to_string();
             env.tasks.push(DTask::FinishStmt(StmtFin::VarDecl { name, is_mut: false, ty: None, has_init: true }));
             env.tasks.push(DTask::Expr(node));
         }
-        _ => {
-            env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt));
+        "pass_statement" | "empty_statement" => env.stmts.push(Stmt::Pass),
+        _ if crate::decompile::fallback::is_known_expr_node_kind(node.kind(), env.lang) => {
+            env.tasks.push(DTask::FinishStmt(StmtFin::ExprStmt(false)));
             env.tasks.push(DTask::Expr(node));
+        }
+        _ => {
+            let text = crate::decompile::fallback::dedent_node_text(node, env.src);
+            if !text.is_empty() && text != ";" {
+                env.stmts.push(Stmt::Raw { text, trivia: Trivia::default() });
+            }
         }
     }
 }

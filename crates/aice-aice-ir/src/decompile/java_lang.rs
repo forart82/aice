@@ -42,7 +42,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                 "interface_declaration" | "class_declaration" | "record_declaration" | "enum_declaration" => {
                     decompile_java_type_item(ch, src, opts, tr, None, &mut m.items);
                 }
-                _ => {}
+                _ => crate::decompile::fallback::push_top_directive(&mut m, ch, src, tr),
             }
         }
         Ok(m)
@@ -80,7 +80,7 @@ fn decompile_java_type_item(
         "enum_declaration" => {
             decompile_java_enum(node, src, opts, tr, parent, out);
         }
-        _ => {}
+        _ => crate::decompile::fallback::push_top_directive_vec(out, node, src, tr),
     }
 }
 
@@ -229,7 +229,7 @@ fn decompile_java_body_members(
             "record_declaration" | "class_declaration" | "interface_declaration" | "enum_declaration" => {
                 decompile_java_type_item(ch, src, opts, mtr, Some(cur_path), nested_out);
             }
-            _ => {}
+            _ => crate::decompile::fallback::push_raw_member(&mut out.methods, ch, src, Visibility::Default, mtr),
         }
     }
 }

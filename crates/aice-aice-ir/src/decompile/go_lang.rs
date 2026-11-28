@@ -36,11 +36,10 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                     }
                 }
                 "type_declaration" => {
-                    for spec in named_children(ch) {
-                        if spec.kind() == "type_spec" {
-                            m.items.push(decompile_type_spec(spec, src, opts, tr.clone()));
-                        }
-                    }
+                    let specs: Vec<_> = named_children(ch).into_iter().filter(|s| !is_comment_kind(s.kind())).collect();
+                    if specs.iter().all(|s| s.kind() == "type_spec") && !specs.is_empty() {
+                        for spec in specs { m.items.push(decompile_type_spec(spec, src, opts, tr.clone())); }
+                    } else { crate::decompile::fallback::push_top_directive(&mut m, ch, src, tr); }
                 }
                 "const_declaration" | "var_declaration" => {
                     let is_const = ch.kind() == "const_declaration";
@@ -82,7 +81,7 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                         params: f.params, return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
                     }));
                 }
-                _ => {}
+                _ => crate::decompile::fallback::push_top_directive(&mut m, ch, src, tr),
             }
         }
         for (recv_ty, md) in methods {

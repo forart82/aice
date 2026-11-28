@@ -47,7 +47,7 @@ pub(crate) fn escape_template(s: &str) -> String {
 }
 
 pub(crate) fn format_raw_expr(s: &str) -> String {
-    if s.contains('\n') && !s.contains("\"\"\"") {
+    if s.contains('\n') && !s.contains('\r') && !s.contains("\"\"\"") {
         format!("raw \"\"\"\n{s}\n\"\"\"")
     } else {
         format!("raw \"{}\"", escape_str(s))

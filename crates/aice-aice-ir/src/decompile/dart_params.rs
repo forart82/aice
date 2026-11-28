@@ -220,60 +220,39 @@ fn extract_dart_param(node: Node<'_>, is_optional: bool, src: &str) -> Option<Pa
     })
 }
 
-pub(crate) fn extract_dart_field_init(id: Node<'_>, src: &str) -> Option<Expr> {
-    let mut cur = id.walk();
-    let mut seen_eq = false;
-    let mut rhs = Vec::new();
-    for c in id.children(&mut cur) {
-        if !seen_eq {
-            if c.kind() == "=" || node_text(c, src).trim() == "=" {
-                seen_eq = true;
-            }
-        } else if c.is_named() && !is_comment_kind(c.kind()) {
-            rhs.push(c);
-        }
-    }
-    let first = *rhs.first()?;
-    let mut expr = decompile_expr(first, src, LanguageId::Dart);
-    for sel in &rhs[1..] {
-        expr = apply_dart_selector(expr, *sel, src);
-    }
+pub(crate) fn decompile_dart_assignable(node: Node<'_>, src: &str) -> Option<Expr> {
+    let kids: Vec<_> = named_children(node).into_iter().filter(|c| !is_comment_kind(c.kind())).collect();
+    let mut expr = decompile_expr(*kids.first()?, src, LanguageId::Dart);
+    for sel in &kids[1..] { expr = try_apply_dart_selector(expr, *sel, src)?; }
     Some(expr)
 }
 
-fn apply_dart_selector(base: Expr, sel: Node<'_>, src: &str) -> Expr {
+pub(crate) fn extract_dart_field_init(id: Node<'_>, src: &str) -> Option<Expr> {
+    let (mut cur, mut seen_eq, mut rhs) = (id.walk(), false, Vec::new());
+    for c in id.children(&mut cur) {
+        if !seen_eq {
+            if c.kind() == "=" || node_text(c, src).trim() == "=" { seen_eq = true; }
+        } else if c.is_named() && !is_comment_kind(c.kind()) { rhs.push(c); }
+    }
+    let mut expr = decompile_expr(*rhs.first()?, src, LanguageId::Dart);
+    for sel in &rhs[1..] { expr = try_apply_dart_selector(expr.clone(), *sel, src).unwrap_or(expr); }
+    Some(expr)
+}
+
+fn try_apply_dart_selector(base: Expr, sel: Node<'_>, src: &str) -> Option<Expr> {
     let txt = node_text(sel, src).trim();
     if let Some(prop) = txt.strip_prefix("?.") {
-        return Expr::Member {
-            object: Box::new(base),
-            property: prop.trim().to_string(),
-            kind: MemberKind::SafeNav,
-        };
+        return Some(Expr::Member { object: Box::new(base), property: prop.trim().to_string(), kind: MemberKind::SafeNav });
     }
     if let Some(prop) = txt.strip_prefix('.') {
-        return Expr::Member {
-            object: Box::new(base),
-            property: prop.trim().to_string(),
-            kind: MemberKind::Dot,
-        };
+        return Some(Expr::Member { object: Box::new(base), property: prop.trim().to_string(), kind: MemberKind::Dot });
     }
     if txt.starts_with('(') {
-        let arg_box = child_by_kind(sel, "argument_part")
-            .and_then(|ap| child_by_kind(ap, "arguments"))
-            .or_else(|| child_by_kind(sel, "arguments"))
-            .unwrap_or(sel);
-        let args = named_children(arg_box)
-            .into_iter()
-            .filter(|a| !is_comment_kind(a.kind()))
-            .map(|a| decompile_expr(a, src, LanguageId::Dart))
-            .collect();
-        return Expr::Call {
-            callee: Box::new(base),
-            args,
-            is_new: false,
-            is_optional: false,
-            is_tagged: false,
-        };
+        let arg_box = child_by_kind(sel, "argument_part").and_then(|ap| child_by_kind(ap, "arguments"))
+            .or_else(|| child_by_kind(sel, "arguments")).unwrap_or(sel);
+        let args = named_children(arg_box).into_iter().filter(|a| !is_comment_kind(a.kind()))
+            .map(|a| decompile_expr(a, src, LanguageId::Dart)).collect();
+        return Some(Expr::Call { callee: Box::new(base), args, is_new: false, is_optional: false, is_tagged: false });
     }
     if txt.starts_with('[') || txt.starts_with("?[") {
         let is_optional = txt.starts_with("?[");
@@ -283,12 +262,8 @@ fn apply_dart_selector(base: Expr, sel: Node<'_>, src: &str) -> Expr {
             .and_then(|s| named_children(s).into_iter().find(|c| !is_comment_kind(c.kind())))
             .or_else(|| named_children(sel).into_iter().find(|c| !is_comment_kind(c.kind())));
         if let Some(idx) = idx_node {
-            return Expr::Index {
-                object: Box::new(base),
-                index: Box::new(decompile_expr(idx, src, LanguageId::Dart)),
-                is_optional,
-            };
+            return Some(Expr::Index { object: Box::new(base), index: Box::new(decompile_expr(idx, src, LanguageId::Dart)), is_optional });
         }
     }
-    base
+    None
 }

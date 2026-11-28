@@ -73,12 +73,9 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
     let mut pending_parent: Option<&str> = None;
     for item in &module.items {
         match item {
-            AiceItem::Directive { text, .. } => {
-                if parse_nested_tag(text).is_some() {
-                    pending_parent = parse_nested_tag(text);
-                } else {
-                    pending_parent = None;
-                }
+            AiceItem::Directive { text, trivia, .. } => {
+                pending_parent = parse_nested_tag(text);
+                if pending_parent.is_none() { ec.blank(); ec.emit_trivia(trivia, CommentStyle::Slash); ec.emit_raw_block(text); }
             }
             AiceItem::Class(cd) => {
                 if let Some(p) = java_nested_parent(cd).or(pending_parent.take())
@@ -147,6 +144,7 @@ fn emit_java_interface(ec: &mut EmitCtx, td: &TypeDecl) {
     ec.line(&format!("{}interface {}{tps}{ext} {{", j_vis(td.vis), td.name));
     ec.push();
     for m in &td.methods {
+        if m.accessor == AccessorKind::Raw { ec.emit_trivia(&m.trivia, CommentStyle::Slash); ec.emit_raw_block(&m.name); continue; }
         let ps = emit_j_params(&m.params);
         let mtps = emit_java_type_params(&m.type_params);
         let mtps_sp = if mtps.is_empty() { String::new() } else { format!("{mtps} ") };
@@ -265,6 +263,7 @@ fn emit_java_nested_kids(
 }
 
 fn emit_java_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, cls_abs: bool, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw { ec.emit_trivia(&m.trivia, CommentStyle::Slash); ec.emit_raw_block(&m.name); return; }
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let ps = emit_j_params(&m.params);

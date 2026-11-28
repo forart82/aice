@@ -134,6 +134,7 @@ pub(crate) fn push_stmt<'a>(env: &mut CloneEnv<'a>, s: &'a Stmt) {
         Stmt::Continue { label, trivia } => env.stmts.push(Stmt::Continue { label: label.clone(), trivia: trivia.clone() }),
         Stmt::Pass => env.stmts.push(Stmt::Pass),
         Stmt::Comment(t) => env.stmts.push(Stmt::Comment(t.clone())),
+        Stmt::Raw { text, trivia } => env.stmts.push(Stmt::Raw { text: text.clone(), trivia: trivia.clone() }),
     }
 }
 

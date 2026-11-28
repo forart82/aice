@@ -165,6 +165,10 @@ pub(crate) fn print_block_stmts(c: &mut PrintCtx<'_>, init_stmts: &[Stmt], init_
                     c.emit_trivia(trivia, d);
                     c.line_tr(d, &label.as_ref().map(|l| format!("continue {l}")).unwrap_or_else(|| "continue".into()), trivia);
                 }
+                Stmt::Raw { text, trivia } => {
+                    c.emit_trivia(trivia, d);
+                    c.line_tr(d, &crate::printer_expr::format_raw_expr(text), trivia);
+                }
             },
         }
     }

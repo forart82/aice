@@ -130,6 +130,10 @@ fn push_brace_stmt<'a>(stmt: &'a Stmt, lang: LanguageId, semi: &str, as_tail: bo
     match stmt {
         Stmt::Pass => {}
         Stmt::Comment(tr) => ec.emit_trivia(tr, CommentStyle::Slash),
+        Stmt::Raw { text, trivia } => {
+            ec.emit_trivia(trivia, CommentStyle::Slash);
+            ec.emit_raw_block(text);
+        }
         Stmt::Let { name, is_mut, ty, init, trivia } => {
             ec.emit_trivia(trivia, CommentStyle::Slash);
             tasks.push(CTask::BraceLet { name, is_mut: *is_mut, ty: ty.as_ref(), has_init: init.is_some() });

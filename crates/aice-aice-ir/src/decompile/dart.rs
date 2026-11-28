@@ -71,9 +71,11 @@ pub fn decompile(tree: &ParsedTree, src: &str, opts: &TranspileOpts) -> Result<A
                         || child_by_kind(ch, "static_final_declaration_list").is_some()
                     {
                         decompile_dart_top_var(ch, src, tr, &mut m);
+                    } else {
+                        crate::decompile::fallback::push_top_directive(&mut m, ch, src, tr);
                     }
                 }
-                _ => {}
+                _ => crate::decompile::fallback::push_top_directive(&mut m, ch, src, tr),
             }
             i += 1;
         }
@@ -114,16 +116,20 @@ pub(crate) fn decompile_dart_body_nodes(
         let mtr = collect_trivia(ch, src, opts);
         match ch.kind() {
             "member_declaration" | "class_member_definition" => {
+                let before = (props.len(), methods.len());
                 if let Some(decl) = child_by_kind(ch, "declaration") {
-                    extract_dart_member(decl, name, src, opts, mtr, (props, methods));
+                    extract_dart_member(decl, name, src, opts, mtr.clone(), (props, methods));
                 } else if let Some(md) = child_by_kind(ch, "method_declaration") {
                     let sig = md.child_by_field_name("signature")
                         .or_else(|| child_by_kind(md, "method_signature"))
                         .or_else(|| child_by_kind(md, "function_signature"));
                     let b = md.child_by_field_name("body").or_else(|| child_by_kind(md, "function_body"));
-                    if let Some(sig) = sig { extract_dart_sig(sig, b, name, src, opts, mtr, methods); }
+                    if let Some(sig) = sig { extract_dart_sig(sig, b, name, src, opts, mtr.clone(), methods); }
                 } else if let Some(sig) = child_by_kind(ch, "method_signature").or_else(|| child_by_kind(ch, "function_signature")) {
-                    extract_dart_sig(sig, child_by_kind(ch, "function_body"), name, src, opts, mtr, methods);
+                    extract_dart_sig(sig, child_by_kind(ch, "function_body"), name, src, opts, mtr.clone(), methods);
+                }
+                if (props.len(), methods.len()) == before {
+                    crate::decompile::fallback::push_raw_member(methods, ch, src, Visibility::Default, mtr);
                 }
             }
             "method_declaration" => {
@@ -132,14 +138,21 @@ pub(crate) fn decompile_dart_body_nodes(
                     .or_else(|| child_by_kind(ch, "function_signature"));
                 let b = ch.child_by_field_name("body").or_else(|| child_by_kind(ch, "function_body"));
                 if let Some(sig) = sig { extract_dart_sig(sig, b, name, src, opts, mtr, methods); }
+                else { crate::decompile::fallback::push_raw_member(methods, ch, src, Visibility::Default, mtr); }
             }
-            "declaration" => extract_dart_member(ch, name, src, opts, mtr, (props, methods)),
+            "declaration" => {
+                let before = (props.len(), methods.len());
+                extract_dart_member(ch, name, src, opts, mtr.clone(), (props, methods));
+                if (props.len(), methods.len()) == before {
+                    crate::decompile::fallback::push_raw_member(methods, ch, src, Visibility::Default, mtr);
+                }
+            }
             "method_signature" => {
                 let b = kids.get(i + 1).filter(|n| n.kind() == "function_body").copied();
                 if b.is_some() { i += 1; }
                 extract_dart_sig(ch, b, name, src, opts, mtr, methods);
             }
-            _ => {}
+            _ => crate::decompile::fallback::push_raw_member(methods, ch, src, Visibility::Default, mtr),
         }
         i += 1;
     }
@@ -200,6 +213,13 @@ fn extract_dart_member(
 }
 
 fn extract_dart_sig(sig: Node<'_>, body: Option<Node<'_>>, cls: &str, src: &str, opts: &TranspileOpts, tr: Trivia, methods: &mut Vec<MethodDecl>) {
+    if child_by_kind(sig, "operator_signature").is_some()
+        || child_by_kind(sig, "factory_constructor_signature").is_some()
+        || child_by_kind(sig, "redirecting_factory_constructor_signature").is_some()
+    {
+        crate::decompile::fallback::push_raw_member_span(methods, sig, body.unwrap_or(sig), src, Visibility::Default, tr);
+        return;
+    }
     if let Some(cs) = child_by_kind(sig, "constant_constructor_signature")
         .or_else(|| child_by_kind(sig, "constructor_signature"))
     {

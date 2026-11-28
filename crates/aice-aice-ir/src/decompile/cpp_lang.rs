@@ -64,26 +64,23 @@ fn collect_cpp_items(root: Node<'_>, hoist_root_ns: bool, src: &str, opts: &Tran
             }
             "function_definition" => m.items.push(AiceItem::Fn(decompile_cpp_fn(node, src, opts, tr))),
             "template_declaration" => {
-                let tps = extract_cpp_type_params(node, src);
+                let (tps, mut handled) = (extract_cpp_type_params(node, src), false);
                 for ch in named_children(node) {
                     match ch.kind() {
                         "class_specifier" | "struct_specifier" => {
                             let mut cd = decompile_cpp_class(ch, src, opts, tr.clone());
-                            cd.type_params = tps.clone();
-                            m.items.push(AiceItem::Class(cd));
-                            break;
+                            cd.type_params = tps.clone(); m.items.push(AiceItem::Class(cd)); handled = true; break;
                         }
                         "function_definition" => {
                             let mut fd = decompile_cpp_fn(ch, src, opts, tr.clone());
-                            fd.type_params = tps.clone();
-                            m.items.push(AiceItem::Fn(fd));
-                            break;
+                            fd.type_params = tps.clone(); m.items.push(AiceItem::Fn(fd)); handled = true; break;
                         }
                         _ => {}
                     }
                 }
+                if !handled { crate::decompile::fallback::push_top_directive(m, node, src, tr); }
             }
-            _ => m.items.push(AiceItem::Directive { text: node_text(node, src).trim().into(), trivia: tr, span: node_span(node) }),
+            _ => crate::decompile::fallback::push_top_directive(m, node, src, tr),
         }
     }
 }
@@ -119,21 +116,24 @@ fn decompile_cpp_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                             name: fnm, aliases: Vec::new(), vis: cur_vis, is_static: false, is_readonly: false,
                             is_mut: true, is_optional: false, ty, init, trivia: collect_trivia(ch, src, opts),
                         });
-                    }
+                    } else { crate::decompile::fallback::push_raw_member(&mut methods, ch, src, cur_vis, collect_trivia(ch, src, opts)); }
                 }
                 "function_definition" => push_cpp_member_fn(ch, &name, cur_vis, Vec::new(), false, src, opts, &mut methods),
-                "friend_declaration" => for sub in named_children(ch) {
-                    push_cpp_member_fn(sub, &name, cur_vis, Vec::new(), true, src, opts, &mut methods);
-                },
+                "friend_declaration" => {
+                    let before = methods.len();
+                    for sub in named_children(ch) { push_cpp_member_fn(sub, &name, cur_vis, Vec::new(), true, src, opts, &mut methods); }
+                    if methods.len() == before { crate::decompile::fallback::push_raw_member(&mut methods, ch, src, cur_vis, collect_trivia(ch, src, opts)); }
+                }
                 "template_declaration" => {
-                    let tps = extract_cpp_type_params(ch, src);
+                    let (tps, before) = (extract_cpp_type_params(ch, src), methods.len());
                     for sub in named_children(ch) {
                         if sub.kind() == "friend_declaration" {
                             for fsub in named_children(sub) { push_cpp_member_fn(fsub, &name, cur_vis, tps.clone(), true, src, opts, &mut methods); }
                         } else { push_cpp_member_fn(sub, &name, cur_vis, tps.clone(), false, src, opts, &mut methods); }
                     }
+                    if methods.len() == before { crate::decompile::fallback::push_raw_member(&mut methods, ch, src, cur_vis, collect_trivia(ch, src, opts)); }
                 }
-                _ => {}
+                _ => crate::decompile::fallback::push_raw_member(&mut methods, ch, src, cur_vis, collect_trivia(ch, src, opts)),
             }
         }
     }

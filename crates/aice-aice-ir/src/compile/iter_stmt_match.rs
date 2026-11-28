@@ -193,6 +193,10 @@ fn arm_ends_with_terminator(body: &FnBody) -> bool {
         };
         match last {
             Stmt::Break { .. } | Stmt::Return { .. } | Stmt::Throw { .. } | Stmt::Continue { .. } => {}
+            Stmt::Raw { text, .. } if {
+                let t = text.trim();
+                t.starts_with("goto ") || matches!(t, "break;" | "continue;" | "return;" | "fallthrough;")
+            } => {}
             Stmt::If { then_body, elifs, else_body: Some(eb), .. } => {
                 stack.push(then_body.as_slice());
                 for (_, b) in elifs { stack.push(b.as_slice()); }

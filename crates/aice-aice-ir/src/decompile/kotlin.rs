@@ -94,14 +94,14 @@ fn decompile_kt_class_into(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: 
             match ch.kind() {
                 "enum_entry" => props.push(decompile_kt_enum_entry(ch, &name, src, mtr)),
                 "function_declaration" => methods.push(kt_fn_to_method(decompile_kt_fn(ch, src, opts, mtr), false)),
-                "property_declaration" => if let Some(p) = decompile_kt_prop(ch, src, mtr, false, None) { props.push(p); },
+                "property_declaration" => if let Some(p) = decompile_kt_prop(ch, src, mtr.clone(), false, None) { props.push(p); } else { crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr); },
                 "class_declaration" | "object_declaration" => {
                     let start = nested_items.len();
                     decompile_kt_class_into(ch, src, opts, mtr, Some(&cur_path), &mut nested_items);
                     if let Some(AiceItem::Class(nc)) = nested_items.get(start) { direct_nested.push((nc.name.clone(), nc.vis)); }
                 }
                 "companion_object" => decompile_kt_companion(ch, src, opts, &cur_path, &mut props, &mut methods, &mut nested_items),
-                _ => {}
+                _ => crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr),
             }
         }
     }
@@ -159,18 +159,19 @@ fn decompile_kt_companion(
         if is_comment_kind(ch.kind()) { continue; }
         let mut mtr = collect_trivia(ch, src, opts);
         match ch.kind() {
-            "property_declaration" => if let Some(p) = decompile_kt_prop(ch, src, mtr, true, Some(&tag)) { props.push(p); },
+            "property_declaration" => if let Some(p) = decompile_kt_prop(ch, src, mtr.clone(), true, Some(&tag)) { props.push(p); } else { push_attrs_to_trivia(&mut mtr, vec![tag.clone()]); crate::decompile::fallback::push_raw_member(methods, ch, src, Visibility::Default, mtr); },
             "function_declaration" => {
                 push_attrs_to_trivia(&mut mtr, vec![tag.clone()]);
                 methods.push(kt_fn_to_method(decompile_kt_fn(ch, src, opts, mtr), true));
             }
             "class_declaration" | "object_declaration" => decompile_kt_class_into(ch, src, opts, mtr, Some(parent_path), nested_out),
-            _ => {}
+            _ => { push_attrs_to_trivia(&mut mtr, vec![tag.clone()]); crate::decompile::fallback::push_raw_member(methods, ch, src, Visibility::Default, mtr); }
         }
     }
 }
 
 fn decompile_kt_prop(node: Node<'_>, src: &str, mut tr: Trivia, is_static: bool, extra_attr: Option<&str>) -> Option<PropDecl> {
+    if child_by_kind(node, "property_delegate").is_some() || child_by_kind(node, "getter").is_some() || child_by_kind(node, "setter").is_some() { return None; }
     let vd = child_by_kind(node, "variable_declaration")?;
     let name = kt_ident(vd, src)?;
     let is_mut = has_anon_kw(node, "var");

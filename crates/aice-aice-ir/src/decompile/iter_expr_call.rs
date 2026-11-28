@@ -18,7 +18,7 @@ pub(crate) fn push_rs_turbofish_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>
         env.tasks.push(DTask::FinishExpr(ExprFin::Member { property, kind: MemberKind::Scope }));
         env.tasks.push(DTask::Expr(bn));
     } else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
     }
 }
 
@@ -114,7 +114,7 @@ pub(crate) fn push_call_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &
         .or_else(|| node.child_by_field_name("name")).or_else(|| named_children(node).into_iter().next());
     let args_node = node.child_by_field_name("arguments")
         .or_else(|| named_children(node).into_iter().find(|c| c.kind().contains("argument")));
-    let Some(cn) = callee_node else { env.exprs.push(Expr::Ident(raw.to_string())); return; };
+    let Some(cn) = callee_node else { env.exprs.push(crate::decompile::fallback::ident_or_raw(raw)); return; };
     if let Some(an) = args_node && an.kind() == "template_string" {
         env.tasks.push(DTask::FinishExpr(ExprFin::TaggedTemplate));
         push_template_task(env, an, true);
@@ -259,7 +259,7 @@ pub(crate) fn push_object_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw:
         }
     }
     if slots.is_empty() && !non_ty.is_empty() {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
     } else {
         env.tasks.push(DTask::FinishExpr(ExprFin::Object(slots)));
         for v in vals.into_iter().rev() { env.tasks.push(DTask::Expr(v)); }

@@ -77,7 +77,7 @@ fn collect_cs(root: Node<'_>, src: &str, opts: &TranspileOpts, m: &mut AiceModul
                 }
                 m.items.push(AiceItem::Enum(EnumDecl { vis: cs_vis(node, src), name, type_params: Vec::new(), variants, trivia: etr, span: node_span(node) }));
             }
-            _ => {}
+            _ => crate::decompile::fallback::push_top_directive(m, node, src, tr),
         }
     }
 }
@@ -150,6 +150,8 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                                 });
                             }
                         }
+                    } else {
+                        crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr);
                     }
                 }
                 "method_declaration" | "constructor_declaration" => {
@@ -185,7 +187,7 @@ fn decompile_cs_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                         params, return_type: ret, body: mbody, trivia: mtr, span: node_span(ch),
                     });
                 }
-                _ => {}
+                _ => crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr),
             }
         }
     }

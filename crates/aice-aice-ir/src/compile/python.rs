@@ -41,7 +41,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Hash);
-                for line in text.lines() { ec.line(line); }
+                ec.emit_raw_block(text);
             }
             _ => {}
         }
@@ -83,6 +83,11 @@ fn py_trivia_kwargs(tr: &Trivia) -> Option<&str> {
 }
 
 fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw {
+        ec.emit_trivia(&m.trivia, CommentStyle::Hash);
+        ec.emit_raw_block(&m.name);
+        return;
+    }
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Hash);
     for c in &m.trivia.leading {

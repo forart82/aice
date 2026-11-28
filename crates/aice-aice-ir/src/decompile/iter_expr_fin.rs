@@ -81,7 +81,7 @@ pub(crate) fn push_binary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw:
                     ))
         })
         .collect();
-    if kids.len() < 2 { env.exprs.push(Expr::Ident(raw.to_string())); return; }
+    if kids.len() < 2 { env.exprs.push(crate::decompile::fallback::ident_or_raw(raw)); return; }
     if env.lang == LanguageId::Dart && kids.len() > 2 {
         crate::decompile::iter_expr_comp::push_dart_chained_binary(env, &kids, raw);
         return;
@@ -92,7 +92,7 @@ pub(crate) fn push_binary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw:
             if l_end <= r_start { env.src[l_end..r_start].trim() } else { "+" }
         });
     let Some(op) = map_binary_op(op_str, env.lang) else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
         return;
     };
     let rhs = kids[kids.len() - 1];
@@ -116,7 +116,7 @@ pub(crate) fn push_unary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
             Some(*c) != op_node && !matches!(c.kind(), "prefix_operator" | "negation_operator" | "increment_operator")
         })
     });
-    let Some(arg) = arg else { env.exprs.push(Expr::Ident(raw.to_string())); return; };
+    let Some(arg) = arg else { env.exprs.push(crate::decompile::fallback::ident_or_raw(raw)); return; };
     if op_node.is_none() && arg.kind() == "await_expression" { env.tasks.push(DTask::Expr(arg)); return; }
     let op_str = op_node.map(|o| node_text(o, env.src).trim()).unwrap_or_else(|| {
         let pre = env.src.get(node.start_byte()..arg.start_byte()).unwrap_or("").trim();
@@ -134,7 +134,7 @@ pub(crate) fn push_unary_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
         return;
     }
     let Some(op) = map_unary_op(op_str, node.kind(), env.lang) else {
-        env.exprs.push(if env.lang == LanguageId::Go && op_str == "<-" { Expr::Raw(raw.to_string()) } else { Expr::Ident(raw.to_string()) });
+        env.exprs.push(crate::decompile::fallback::ident_or_raw(raw));
         return;
     };
     let is_postfix = matches!(op, UnaryOp::Inc | UnaryOp::Dec) && is_after;

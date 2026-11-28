@@ -186,7 +186,7 @@ fn decompile_php_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Triv
                         params: f.params, return_type: f.return_type, body: f.body, trivia: f.trivia, span: f.span,
                     });
                 }
-                _ => {}
+                _ => crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr),
             }
         }
     }

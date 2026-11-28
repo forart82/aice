@@ -5,7 +5,7 @@ use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl};
+use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl};
 use crate::ir_types::ParamDecl;
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -38,7 +38,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Directive { text, .. } if is_php_declare_directive(text) => {}
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                for line in text.lines() { ec.line(line); }
+                ec.emit_raw_block(text);
             }
             AiceItem::Import(imp) => ec.line(&format!("use {};", imp.source)),
             AiceItem::Class(cd) => emit_php_class(&mut ec, cd, &ectx),
@@ -109,6 +109,11 @@ fn emit_php_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 }
 
 fn emit_php_method(ec: &mut EmitCtx, m: &MethodDecl, is_interface: bool, allow_abs: bool, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw {
+        ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+        ec.emit_raw_block(&m.name);
+        return;
+    }
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     ec.emit_attrs(&m.trivia);
     let ps = emit_php_params(&m.params, ectx);

@@ -10,7 +10,7 @@ use crate::compile::rust_helpers::{
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
-use crate::ir_code::{ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
+use crate::ir_code::{AccessorKind, ClassDecl, FnBody, FnDecl, MethodDecl, PropDecl};
 use crate::ir_types::{AiceType, EnumDecl, ParamDecl, TypeDecl, TypeKind, VariantPayload};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -46,7 +46,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
                 if is_rs_raw_directive(text) {
-                    ec.line(text.trim());
+                    ec.emit_raw_block(text.trim());
                 } else {
                     ec.line(&format!("// {text}"));
                 }
@@ -183,6 +183,11 @@ fn emit_struct_impl(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 }
 
 fn emit_method(ec: &mut EmitCtx, m: &MethodDecl, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw {
+        ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+        ec.emit_raw_block(&m.name);
+        return;
+    }
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     emit_rs_all_hash_attrs(ec, &m.trivia, &[]);
     let quals = format_rs_fn_quals(&m.trivia, &[], m.is_async);

@@ -38,7 +38,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                 {
                     ec.line(&format!("{t};"));
                 } else {
-                    ec.line(text);
+                    ec.emit_raw_block(text);
                 }
             }
             _ => {}

@@ -72,12 +72,11 @@ fn decompile_rb_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
             let mtr = collect_trivia(ch, src, opts);
             if ch.kind() == "identifier" {
                 match node_text(ch, src).trim() {
-                    "private" => cur_vis = Visibility::Private,
-                    "protected" => cur_vis = Visibility::Protected,
-                    "public" => cur_vis = Visibility::Public,
+                    "private" => { cur_vis = Visibility::Private; continue; }
+                    "protected" => { cur_vis = Visibility::Protected; continue; }
+                    "public" => { cur_vis = Visibility::Public; continue; }
                     _ => {}
                 }
-                continue;
             }
             if ch.kind() == "call" {
                 let meth = field_text(ch, "method", src).unwrap_or("").trim();
@@ -97,8 +96,8 @@ fn decompile_rb_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                             is_optional: false, ty: None, init: None, trivia: ptr,
                         });
                     }
+                    continue;
                 }
-                continue;
             }
             if ch.kind() == "method" {
                 let f = decompile_rb_fn(ch, cur_vis, src, opts, mtr);
@@ -108,6 +107,8 @@ fn decompile_rb_class(node: Node<'_>, src: &str, opts: &TranspileOpts, tr: Trivi
                     accessor, name: f.name, type_params: Vec::new(), params: f.params,
                     return_type: None, body: f.body, trivia: f.trivia, span: f.span,
                 });
+            } else {
+                crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr);
             }
         }
     }

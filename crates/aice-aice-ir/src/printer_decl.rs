@@ -127,6 +127,12 @@ fn print_prop_decl(c: &mut PrintCtx<'_>, p: &PropDecl, d: usize) {
 }
 
 fn print_method_decl(c: &mut PrintCtx<'_>, m: &MethodDecl, d: usize) {
+    if m.accessor == AccessorKind::Raw {
+        c.emit_trivia(&m.trivia, d);
+        let vis = if m.vis == Visibility::Default { "" } else { m.vis.aice_prefix() };
+        c.line_tr(d, &format!("{vis}{}", crate::printer_expr::format_raw_expr(&m.name)), &m.trivia);
+        return;
+    }
     c.emit_trivia(&m.trivia, d);
     let vis = if m.vis == Visibility::Default { "" } else { m.vis.aice_prefix() };
     let st = if m.is_static { "static " } else { "" };
@@ -136,7 +142,7 @@ fn print_method_decl(c: &mut PrintCtx<'_>, m: &MethodDecl, d: usize) {
         AccessorKind::Normal => if is_gen { "fn* " } else { "fn " },
         AccessorKind::Get => "get ",
         AccessorKind::Set => "set ",
-        AccessorKind::Constructor => "",
+        AccessorKind::Constructor | AccessorKind::Raw => "",
     };
     let cst = if m.is_const { " const" } else { "" };
     let ret = if c.opts.include_types {

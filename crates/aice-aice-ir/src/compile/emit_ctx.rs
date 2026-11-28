@@ -41,6 +41,17 @@ impl EmitCtx {
         self.out.push('\n');
     }
 
+    pub fn emit_raw_block(&mut self, text: &str) {
+        for line in text.split('\n') {
+            let clean = line.strip_suffix('\r').unwrap_or(line);
+            if clean.trim().is_empty() {
+                self.out.push('\n');
+            } else {
+                self.line(clean);
+            }
+        }
+    }
+
     pub fn blank(&mut self) {
         if !self.out.is_empty() && !self.out.ends_with("\n\n") {
             self.out.push('\n');

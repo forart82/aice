@@ -175,6 +175,8 @@ fn decompile_interface(node: Node<'_>, vis: Visibility, src: &str, lang: Languag
                     accessor: AccessorKind::Normal, name: mnm, type_params: mtps, params,
                     return_type: ret, body: FnBody::SignatureOnly, trivia: Trivia::default(), span: node_span(ch),
                 });
+            } else if !is_comment_kind(ch.kind()) {
+                crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, Trivia::default());
             }
         }
     }
@@ -263,7 +265,10 @@ fn decompile_class(node: Node<'_>, vis: Visibility, mut decorators: Vec<String>,
                         body: mbody, trivia: mtr, span: node_span(ch),
                     });
                 }
-                _ => { pending_decs.clear(); }
+                _ => {
+                    push_attrs_to_trivia(&mut mtr, std::mem::take(&mut pending_decs));
+                    crate::decompile::fallback::push_raw_member(&mut methods, ch, src, Visibility::Default, mtr);
+                }
             }
         }
     }

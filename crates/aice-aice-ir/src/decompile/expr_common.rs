@@ -2,6 +2,7 @@ use aice_lang_registry::LanguageId;
 use tree_sitter::Node;
 
 use crate::decompile::cst_util::{child_by_kind, named_children, node_text};
+use crate::decompile::fallback::ident_or_raw;
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr::{ExprFin, ObjSlot};
 use crate::decompile::trivia::is_comment_kind;
@@ -20,26 +21,21 @@ pub(crate) fn push_index_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
     let is_optional = child_by_kind(node, "optional_chain").is_some()
         || matches!(node.kind(), "conditional_access_expression" | "null_aware_index_expression");
     let (obj_n, idx_n) = match (
-        node.child_by_field_name("object")
-            .or_else(|| node.child_by_field_name("argument"))
-            .or_else(|| node.child_by_field_name("expression"))
-            .or_else(|| node.child_by_field_name("condition")),
-        node.child_by_field_name("index")
-            .or_else(|| node.child_by_field_name("indices"))
-            .or_else(|| node.child_by_field_name("subscript"))
-            .or_else(|| child_by_kind(node, "element_binding_expression")),
+        node.child_by_field_name("object").or_else(|| node.child_by_field_name("argument"))
+            .or_else(|| node.child_by_field_name("expression")).or_else(|| node.child_by_field_name("condition")),
+        node.child_by_field_name("index").or_else(|| node.child_by_field_name("indices"))
+            .or_else(|| node.child_by_field_name("subscript")).or_else(|| child_by_kind(node, "element_binding_expression")),
     ) {
-        (Some(o), Some(i)) => (Some(o), Some(i)),
+        (Some(o), Some(i)) if node.kind() != "element_reference" => (Some(o), Some(i)),
         _ => {
-            let kids: Vec<_> = named_children(node)
-                .into_iter()
-                .filter(|c| c.kind() != "optional_chain" && !is_comment_kind(c.kind()))
-                .collect();
-            (kids.first().copied(), kids.get(1).copied())
+            let kids: Vec<_> = named_children(node).into_iter()
+                .filter(|c| c.kind() != "optional_chain" && !is_comment_kind(c.kind())).collect();
+            if node.kind() == "element_reference" && kids.len() != 2 { (None, None) }
+            else { (kids.first().copied(), kids.get(1).copied()) }
         }
     };
     let Some((o, i)) = obj_n.zip(idx_n) else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(ident_or_raw(raw));
         return;
     };
     if matches!(
@@ -51,7 +47,7 @@ pub(crate) fn push_index_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
             .filter(|c| !is_comment_kind(c.kind()))
             .collect();
         if args.is_empty() {
-            env.exprs.push(Expr::Ident(raw.to_string()));
+            env.exprs.push(ident_or_raw(raw));
             return;
         }
         env.tasks.push(DTask::FinishExpr(ExprFin::Index { is_optional, argc: args.len() }));
@@ -115,7 +111,7 @@ pub(crate) fn push_yield_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: 
         env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op, is_postfix: false }));
         env.tasks.push(DTask::Expr(arg));
     } else {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(ident_or_raw(raw));
     }
 }
 
@@ -143,7 +139,7 @@ pub(crate) fn push_c_cast_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw:
         let quote_mode = if matches!(env.lang, LanguageId::CSharp | LanguageId::Php) { 2 } else { 1 };
         env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty: ty_s, quote_mode }));
         env.tasks.push(DTask::Expr(v));
-    } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+    } else { env.exprs.push(ident_or_raw(raw)); }
 }
 
 pub(crate) fn push_new_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, raw: &str) {
@@ -158,7 +154,7 @@ pub(crate) fn push_new_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, r
         String::new()
     } else if env.lang == LanguageId::CSharp {
         let Some(mut ty_n) = node.child_by_field_name("type") else {
-            env.exprs.push(Expr::Ident(raw.to_string()));
+            env.exprs.push(ident_or_raw(raw));
             return;
         };
         let mut rev_ranks = Vec::new();
@@ -183,7 +179,7 @@ pub(crate) fn push_new_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, r
         node_text(ty_n, env.src).trim().to_string()
     } else {
         let Some(ty_n) = node.child_by_field_name("type") else {
-            env.exprs.push(Expr::Ident(raw.to_string()));
+            env.exprs.push(ident_or_raw(raw));
             return;
         };
         for ch in named_children(node) {
@@ -198,7 +194,7 @@ pub(crate) fn push_new_array_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, r
         node_text(ty_n, env.src).trim().to_string()
     };
     if ranks.is_empty() {
-        env.exprs.push(Expr::Ident(raw.to_string()));
+        env.exprs.push(ident_or_raw(raw));
         return;
     }
     let init_node = child_by_kind(node, "initializer_expression")
@@ -294,6 +290,6 @@ pub(crate) fn push_cs_special_expr<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, 
                 } else { env.tasks.push(DTask::Expr(v)); }
             }
         }
-        _ => env.exprs.push(Expr::Ident(raw.to_string())),
+        _ => env.exprs.push(ident_or_raw(raw)),
     }
 }

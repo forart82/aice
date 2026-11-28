@@ -22,7 +22,7 @@ pub(crate) enum DropWork {
 }
 
 pub(crate) const fn is_leaf_stmt(s: &Stmt) -> bool {
-    matches!(s, Stmt::Pass | Stmt::Comment(_) | Stmt::Break { .. } | Stmt::Continue { .. })
+    matches!(s, Stmt::Pass | Stmt::Comment(_) | Stmt::Raw { .. } | Stmt::Break { .. } | Stmt::Continue { .. })
 }
 
 pub(crate) const fn is_leaf_expr(e: &Expr) -> bool {
@@ -125,7 +125,7 @@ pub(crate) fn drain_stmt(s: &mut Stmt, work: &mut Vec<DropWork>) {
                 work.extend(fb.into_iter().map(DropWork::Stmt));
             }
         }
-        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass | Stmt::Comment(_) => {}
+        Stmt::Break { .. } | Stmt::Continue { .. } | Stmt::Pass | Stmt::Comment(_) | Stmt::Raw { .. } => {}
     }
 }
 

@@ -8,6 +8,7 @@ use crate::decompile::expr_common::{
 };
 use crate::decompile::expr_interp::{push_cs_interp_task, push_string_lit_task};
 use crate::decompile::expr_lit_esc::{is_c_arrow_field, is_c_paren_unary, is_c_raw_member, is_cs_mod_arg, is_raw_passthrough_expr};
+use crate::decompile::fallback::{ident_node_or_raw, ident_or_raw, push_expr_fallback};
 use crate::decompile::iter_env::{DTask, DecompEnv};
 use crate::decompile::iter_expr_call::{push_call_task, push_object_task, push_php_array_task, push_rs_turbofish_task};
 use crate::decompile::iter_expr_comp::{
@@ -69,12 +70,12 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                         return;
                     }
                     node = ch;
-                } else { env.exprs.push(Expr::Ident(node_text(node, env.src).trim().into())); return; }
+                } else { env.exprs.push(ident_or_raw(node_text(node, env.src))); return; }
             }
             "value_argument" if named_children(node).len() == 1 && !node_text(node, env.src).trim_start().starts_with('*') => {
                 node = named_children(node)[0];
             }
-            "expression_list" if named_children(node).len() == 1 => { node = named_children(node)[0]; }
+            "expression_list" | "parenthesized_statements" if named_children(node).len() == 1 => { node = named_children(node)[0]; }
             "condition_clause" => {
                 if node.child_by_field_name("initializer").is_none()
                     && let Some(val) = node.child_by_field_name("value")
@@ -94,7 +95,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                     if kids.len() == 1 { node = kids[0]; continue; }
                 }
                 if cur.id() != node.id() { node = cur; continue; }
-                env.exprs.push(Expr::Ident(node_text(node, env.src).trim().into()));
+                env.exprs.push(ident_or_raw(node_text(node, env.src)));
                 return;
             }
             _ => break,
@@ -102,14 +103,16 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
     }
     let raw = node_text(node, env.src).trim();
     match node.kind() {
-        "number" | "integer" | "integer_literal" | "number_literal" | "decimal_integer_literal" => {
+        "number" | "integer" | "integer_literal" | "int_literal" | "number_literal"
+        | "decimal_integer_literal" | "hex_integer_literal" | "binary_integer_literal"
+        | "octal_integer_literal" | "hex_literal" | "bin_literal" | "long_literal" | "unsigned_literal" => {
             env.exprs.push(Expr::Literal(LiteralVal::Int(raw.to_string())));
         }
-        "float" | "float_literal" | "decimal_floating_point_literal" => {
+        "float" | "float_literal" | "decimal_floating_point_literal" | "real_literal" | "hex_floating_point_literal" => {
             env.exprs.push(Expr::Literal(LiteralVal::Float(raw.to_string())));
         }
-        "true" | "boolean_literal" if raw == "true" || raw == "True" => env.exprs.push(Expr::Literal(LiteralVal::Bool(true))),
-        "false" | "boolean_literal" if raw == "false" || raw == "False" => env.exprs.push(Expr::Literal(LiteralVal::Bool(false))),
+        "true" | "boolean_literal" | "boolean" if raw == "true" || raw == "True" => env.exprs.push(Expr::Literal(LiteralVal::Bool(true))),
+        "false" | "boolean_literal" | "boolean" if raw == "false" || raw == "False" => env.exprs.push(Expr::Literal(LiteralVal::Bool(false))),
         "null" | "nil" | "none" | "None" | "null_literal" => env.exprs.push(Expr::Literal(LiteralVal::Nil)),
         k if is_raw_passthrough_expr(k, env.lang) => env.exprs.push(Expr::Raw(raw.to_string())),
         "block" if env.lang == LanguageId::Rust && child_by_kind(node, "label").is_some() => {
@@ -127,14 +130,14 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         | "private_property_identifier" | "simple_identifier" | "this" | "self"
         | "super" | "variable_name" | "constant" | "shorthand_property_identifier"
         | "shorthand_property_identifier_pattern" | "shorthand_field_initializer" => {
-            env.exprs.push(Expr::Ident(raw.to_string()));
+            env.exprs.push(ident_node_or_raw(raw));
         }
         "spread_element" => {
             if let Some(inner) = named_children(node).into_iter().next() {
                 env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op: UnaryOp::Spread, is_postfix: false }));
                 env.tasks.push(DTask::Expr(inner));
             } else {
-                env.exprs.push(Expr::Ident(raw.to_string()));
+                env.exprs.push(ident_or_raw(raw));
             }
         }
         "regex" => env.exprs.push(Expr::Literal(LiteralVal::Regex(raw.to_string()))),
@@ -144,8 +147,8 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
         "instance_variable" => env.exprs.push(Expr::Member {
             object: Box::new(Expr::Ident("this".into())), property: raw.trim_start_matches('@').into(), kind: MemberKind::Dot,
         }),
-        "member_expression" | "field_expression" | "attribute" | "navigation_expression"
-        | "selector_expression" | "scoped_identifier" | "member_access_expression"
+        "member_expression" | "field_expression" | "field_access" | "attribute" | "navigation_expression"
+        | "selector_expression" | "scoped_identifier" | "qualified_identifier" | "member_access_expression"
         | "null_aware_member_expression" => {
             let kids: Vec<_> = named_children(node).into_iter()
                 .filter(|c| c.kind() != "optional_chain").collect();
@@ -168,11 +171,11 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 if is_c_paren_unary(kids[0], env.lang) {
                     env.exprs.push(Expr::Raw(node_text(kids[0], env.src).trim().into()));
                 } else { env.tasks.push(DTask::Expr(kids[0])); }
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            } else { env.exprs.push(ident_or_raw(raw)); }
         }
         "generic_function" | "generic_type_with_turbofish" if env.lang == LanguageId::Rust => push_rs_turbofish_task(env, node, raw),
-        "subscript_expression" | "index_expression" | "element_access_expression" | "array_access"
-        | "null_aware_index_expression" => {
+        "subscript_expression" | "subscript" | "index_expression" | "element_access_expression"
+        | "element_reference" | "array_access" | "null_aware_index_expression" => {
             if matches!(env.lang, LanguageId::TypeScript | LanguageId::Tsx | LanguageId::Kotlin | LanguageId::Dart)
                 && let Some(o) = node.child_by_field_name("object").or_else(|| named_children(node).into_iter().next())
             {
@@ -205,9 +208,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             if let Some(inner) = named_children(node).into_iter().next() {
                 env.tasks.push(DTask::FinishExpr(ExprFin::PostfixTry));
                 env.tasks.push(DTask::Expr(inner));
-            } else {
-                env.exprs.push(Expr::Ident(raw.to_string()));
-            }
+            } else { env.exprs.push(ident_or_raw(raw)); }
         }
         "non_null_expression" | "null_assertion_expression" => {
             if let Some(arg) = node.child_by_field_name("value").or_else(|| named_children(node).into_iter().next()) {
@@ -217,7 +218,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 }
                 env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op: UnaryOp::NonNull, is_postfix: true }));
                 env.tasks.push(DTask::Expr(arg));
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            } else { env.exprs.push(ident_or_raw(raw)); }
         }
         "yield_expression" | "yield" if !raw.starts_with("yield from") => push_yield_task(env, node, raw),
         "unary_expression" | "unary_operator" | "not_operator" | "prefix_unary_expression"
@@ -232,7 +233,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             if let Some(val) = node.child_by_field_name("value").or_else(|| named_children(node).into_iter().last()) {
                 env.tasks.push(DTask::FinishExpr(ExprFin::Unary { op, is_postfix: false }));
                 env.tasks.push(DTask::Expr(val));
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            } else { env.exprs.push(ident_or_raw(raw)); }
         }
         "assignment_expression" | "augmented_assignment_expression" | "compound_assignment_expr"
         | "augmented_assignment" | "operator_assignment" => {
@@ -240,10 +241,10 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 env.tasks.push(DTask::FinishExpr(ExprFin::Assign(op)));
                 env.tasks.push(DTask::Expr(val));
                 env.tasks.push(DTask::Expr(tgt));
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            } else { env.exprs.push(ident_or_raw(raw)); }
         }
         "struct_expression" => push_struct_expr_task(env, node),
-        "tuple" | "tuple_expression" => push_tuple_task(env, node, raw),
+        "tuple" | "tuple_expression" | "unit_expression" => push_tuple_task(env, node, raw),
         "expression_list" if env.lang == LanguageId::Python && named_children(node).len() >= 2 => {
             push_tuple_task(env, node, raw);
         }
@@ -279,7 +280,7 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
                 { 1 } else { 0 };
                 env.tasks.push(DTask::FinishExpr(ExprFin::TypeCast { ty, quote_mode }));
                 env.tasks.push(DTask::Expr(v));
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            } else { env.exprs.push(ident_or_raw(raw)); }
         }
         "match_expression" | "when_expression" | "case" => push_match_task(env, node, true),
         "jsx_element" | "jsx_self_closing_element" | "jsx_fragment" => {
@@ -290,8 +291,8 @@ pub(crate) fn push_expr_task<'a>(env: &mut DecompEnv<'a>, mut node: Node<'a>) {
             if let Some(c) = named_children(node).into_iter().next() {
                 env.tasks.push(DTask::FinishExpr(ExprFin::Await));
                 env.tasks.push(DTask::Expr(c));
-            } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+            } else { env.exprs.push(ident_or_raw(raw)); }
         }
-        _ => env.exprs.push(Expr::Ident(raw.to_string())),
+        _ => push_expr_fallback(env, node, raw),
     }
 }

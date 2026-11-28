@@ -40,7 +40,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             }
             AiceItem::Directive { text, trivia, .. } => {
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                for line in text.lines() { ec.line(line); }
+                ec.emit_raw_block(text);
             }
             _ => {}
         }
@@ -114,6 +114,11 @@ fn emit_dart_props(ec: &mut EmitCtx, props: &[&PropDecl], ectx: &ExprEmitCtx) {
 }
 
 fn emit_dart_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, props: &[PropDecl], cls_abs: bool, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw {
+        ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+        ec.emit_raw_block(&m.name);
+        return;
+    }
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let is_ctor = m.accessor == AccessorKind::Constructor;

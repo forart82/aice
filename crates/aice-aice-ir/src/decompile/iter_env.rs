@@ -145,7 +145,7 @@ pub(crate) fn attach_tr(st: &mut Stmt, mut tr: Trivia) {
         | Stmt::Return { trivia, .. } | Stmt::Expr { trivia, .. } | Stmt::If { trivia, .. }
         | Stmt::Match { trivia, .. } | Stmt::For { trivia, .. } | Stmt::While { trivia, .. }
         | Stmt::Loop { trivia, .. } | Stmt::Try { trivia, .. } | Stmt::Throw { trivia, .. }
-        | Stmt::Break { trivia, .. } | Stmt::Continue { trivia, .. } => {
+        | Stmt::Break { trivia, .. } | Stmt::Continue { trivia, .. } | Stmt::Raw { trivia, .. } => {
             if tr.trailing.is_none() {
                 tr.trailing = trivia.trailing.take();
             }

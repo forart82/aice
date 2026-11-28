@@ -42,6 +42,11 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
                     None => ec.line(&format!("{}{t} {};", cs_vis(vd.vis), vd.name)),
                 }
             }
+            AiceItem::Directive { text, trivia, .. } => {
+                ec.blank();
+                ec.emit_trivia(trivia, CommentStyle::Slash);
+                ec.emit_raw_block(text);
+            }
             _ => {}
         }
     }
@@ -94,6 +99,11 @@ fn emit_cs_type(ec: &mut EmitCtx, td: &TypeDecl, _ectx: &ExprEmitCtx) {
         ec.line(&format!("{t} {} {{ get; set; }}", f.name));
     }
     for m in &td.methods {
+        if m.accessor == AccessorKind::Raw {
+            ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+            ec.emit_raw_block(&m.name);
+            continue;
+        }
         let ps = emit_cs_params(&m.params, _ectx);
         let mtps = emit_cs_type_params(&m.type_params);
         let mwh = emit_cs_where(&m.type_params);
@@ -148,6 +158,11 @@ fn emit_cs_class(ec: &mut EmitCtx, cd: &ClassDecl, ectx: &ExprEmitCtx) {
 }
 
 fn emit_cs_method(ec: &mut EmitCtx, m: &MethodDecl, cls_name: &str, cls_abs: bool, ectx: &ExprEmitCtx) {
+    if m.accessor == AccessorKind::Raw {
+        ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+        ec.emit_raw_block(&m.name);
+        return;
+    }
     ec.blank();
     ec.emit_trivia(&m.trivia, CommentStyle::Slash);
     let ps = emit_cs_params(&m.params, ectx);

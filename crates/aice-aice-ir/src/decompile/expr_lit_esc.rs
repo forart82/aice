@@ -51,7 +51,7 @@ pub(crate) fn is_c_arrow_field(node: Node<'_>, gap: &str, src: &str, lang: Langu
 
 pub(crate) fn is_c_raw_member(node: Node<'_>, last: Node<'_>, src: &str, lang: LanguageId) -> bool {
     matches!(lang, LanguageId::C | LanguageId::Cpp)
-        && (matches!(last.kind(), "template_method" | "destructor_name" | "qualified_identifier" | "dependent_name")
+        && (matches!(last.kind(), "template_method" | "destructor_name" | "operator_name" | "qualified_identifier" | "dependent_name")
             || node.child_by_field_name("operator").is_some_and(|o| node_text(o, src).trim() == ".*"))
 }
 

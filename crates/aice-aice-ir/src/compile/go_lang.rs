@@ -5,7 +5,7 @@ use crate::compile::expr_emit::{ExprEmitCtx, emit_expr};
 use crate::compile::stmt_common::emit_brace_stmts;
 use crate::compile::type_map::emit_type;
 use crate::ir::{AiceItem, AiceModule, TranspileError, Trivia, TriviaKind, Visibility};
-use crate::ir_code::{ClassDecl, Expr, FnBody, FnDecl, RecordEntry};
+use crate::ir_code::{AccessorKind, ClassDecl, Expr, FnBody, FnDecl, RecordEntry};
 use crate::ir_types::{ParamDecl, TypeDecl, TypeKind, TypeParam};
 
 pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
@@ -59,7 +59,7 @@ pub fn compile(module: &AiceModule) -> Result<String, TranspileError> {
             AiceItem::Directive { text, trivia, .. } => {
                 ec.blank();
                 ec.emit_trivia(trivia, CommentStyle::Slash);
-                for line in text.lines() { ec.line(line); }
+                ec.emit_raw_block(text);
             }
             _ => {}
         }
@@ -82,6 +82,11 @@ fn emit_go_type(ec: &mut EmitCtx, td: &TypeDecl) {
             }
         }
         for m in &td.methods {
+            if m.accessor == AccessorKind::Raw {
+                ec.emit_trivia(&m.trivia, CommentStyle::Slash);
+                ec.emit_raw_block(&m.name);
+                continue;
+            }
             let ps = emit_go_params(&m.params);
             let rt = m.return_type.as_ref().map(|t| emit_type(t, LanguageId::Go)).filter(|s| !s.is_empty()).map(|s| format!(" {s}")).unwrap_or_default();
             ec.line(&format!("{}({ps}){rt}", m.name));

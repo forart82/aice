@@ -135,68 +135,49 @@ pub(crate) fn insert_updates_before_continue(stmts: &mut Vec<Stmt>, upds: &[Stmt
     }
 }
 
-fn dedent_node_text(node: Node<'_>, src: &str) -> String {
-    let raw = node_text(node, src).trim_end();
-    let col = node.start_position().column;
-    if col == 0 || !raw.contains('\n') {
-        return raw.trim().to_string();
-    }
-    raw.lines()
-        .enumerate()
-        .map(|(i, line)| {
-            if i == 0 {
-                line.trim_start()
-            } else {
-                let strip = line.bytes().take(col).take_while(|b| *b == b' ' || *b == b'\t').count();
-                &line[strip..]
-            }
-        })
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 pub(crate) fn raw_passthrough_stmt_text(node: Node<'_>, src: &str, lang: LanguageId) -> Option<String> {
     let raw = node_text(node, src).trim();
     if raw.is_empty() { return None; }
+    let dedent = || crate::decompile::fallback::dedent_node_text(node, src);
     match (node.kind(), lang) {
         ("global_statement" | "nonlocal_statement", LanguageId::Python)
-        | ("do_while_statement", LanguageId::Kotlin) => Some(raw.to_string()),
+        | ("do_while_statement", LanguageId::Kotlin) => Some(dedent()),
         (
             "function_definition" | "decorated_definition" | "class_definition"
             | "with_statement" | "delete_statement" | "assert_statement",
             LanguageId::Python,
-        ) => Some(dedent_node_text(node, src)),
+        ) => Some(dedent()),
         ("for_statement", LanguageId::Python)
             if (0..node.child_count()).filter_map(|i| node.child(i)).any(|c| !c.is_named() && c.kind() == "async") =>
         {
-            Some(dedent_node_text(node, src))
+            Some(dedent())
         }
         ("do_statement", _) => {
-            let mut s = raw.to_string();
+            let mut s = dedent();
             if !s.ends_with(';') { s.push(';'); }
             Some(s)
         }
         ("loop_expression" | "for_expression" | "while_expression", LanguageId::Rust)
             if child_by_kind(node, "label").is_some() =>
         {
-            Some(raw.to_string())
+            Some(dedent())
         }
         ("break_expression" | "continue_expression", LanguageId::Rust)
             if named_children(node).iter().any(|c| !is_comment_kind(c.kind())) =>
         {
-            Some(raw.to_string())
+            Some(dedent())
         }
         ("let_declaration", LanguageId::Rust)
             if node.child_by_field_name("alternative").is_some()
                 || (0..node.child_count()).filter_map(|i| node.child(i)).any(|c| !c.is_named() && c.kind() == "else") =>
         {
-            Some(raw.to_string())
+            Some(dedent())
         }
         (
             "function_item" | "const_item" | "static_item" | "struct_item" | "enum_item"
             | "type_item" | "use_declaration" | "impl_item" | "trait_item",
             LanguageId::Rust,
-        ) => Some(raw.to_string()),
+        ) => Some(dedent()),
         _ => None,
     }
 }
@@ -285,5 +266,5 @@ pub(crate) fn push_cond_expr_task<'a>(env: &mut DecompEnv<'a>, node: Node<'a>, r
         env.tasks.push(DTask::Expr(e));
         env.tasks.push(DTask::Expr(t));
         env.tasks.push(DTask::Expr(c));
-    } else { env.exprs.push(Expr::Ident(raw.to_string())); }
+    } else { env.exprs.push(crate::decompile::fallback::ident_or_raw(raw)); }
 }

@@ -194,9 +194,9 @@ fn step_prefix(p: &mut Parser<'_>, stack: &mut Vec<ParseCont>, vals: &mut Vec<Pa
             let name = p.expect_ident_or_kw("Expected identifier after '$'")?.lexeme;
             vals.push(ParseVal::Expr(Expr::Ident(format!("${name}"))));
         }
-        TokenKind::Colon if tok.span.end_byte == p.peek_n(1).span.start_byte && (p.peek_n(1).kind == TokenKind::Ident || p.peek_n(1).is_keyword()) => {
-            p.advance();
-            vals.push(ParseVal::Expr(Expr::Ident(format!(":{}", p.advance().lexeme))));
+        TokenKind::Colon | TokenKind::Hash if tok.span.end_byte == p.peek_n(1).span.start_byte && (p.peek_n(1).kind == TokenKind::Ident || p.peek_n(1).is_keyword()) => {
+            let pfx = p.advance().lexeme;
+            vals.push(ParseVal::Expr(Expr::Ident(format!("{pfx}{}", p.advance().lexeme))));
         }
         _ if is_new_prefix_start(p, &tok) => parse_new_prefix(p, stack, vals)?,
         TokenKind::Ident if tok.lexeme == "raw" && matches!(p.peek_n(1).kind, TokenKind::String | TokenKind::TripleString) => {

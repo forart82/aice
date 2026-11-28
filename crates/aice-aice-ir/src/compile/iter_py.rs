@@ -90,6 +90,10 @@ fn push_py_stmt<'a>(stmt: &'a Stmt, st: &mut EvalState, tasks: &mut Vec<CTask<'a
     match stmt {
         Stmt::Pass => ec.line("pass"),
         Stmt::Comment(tr) => ec.emit_trivia(tr, CommentStyle::Hash),
+        Stmt::Raw { text, trivia } => {
+            ec.emit_trivia(trivia, CommentStyle::Hash);
+            ec.emit_raw_block(text);
+        }
         Stmt::Let { name, ty, init, trivia, .. } => {
             ec.emit_trivia(trivia, CommentStyle::Hash);
             tasks.push(CTask::PyLet { name, ty: ty.as_ref(), has_init: init.is_some() });

@@ -12,6 +12,7 @@ pub mod expr_common;
 pub mod expr_interp;
 pub mod expr_lit;
 mod expr_lit_esc;
+pub(crate) mod fallback;
 pub mod go_lang;
 mod iter_env;
 mod iter_expr;
